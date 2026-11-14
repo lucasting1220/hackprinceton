@@ -50,6 +50,8 @@ def format_date(moment: datetime, tz: tzinfo | None = None) -> str:
 
 def new_alert(kind: AlertKind, detected_at: datetime, title: str, body: str) -> Alert:
     """Build a new urgent template alert with a fresh ID, its time converted to UTC."""
+    if detected_at.utcoffset() is None:
+        raise ValueError(f"detected_at must have a time zone, got {detected_at!r}")
     return Alert(
         alert_id=str(uuid.uuid4()),
         kind=kind,

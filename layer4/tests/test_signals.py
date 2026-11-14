@@ -179,8 +179,9 @@ def test_monitoring_order_is_checked_in_utc_across_a_clock_change(
         lambda moment: HelpSignal(is_call_for_help=True, detected_at=moment),
         lambda moment: HeartRateSignal(bpm=80, measured_at=moment),
         lambda moment: MonitoringSignal(what_stopped="camera", stopped_at=moment, checked_at=AT),
+        lambda moment: MonitoringSignal(what_stopped="camera", stopped_at=AT, checked_at=moment),
     ],
-    ids=["fall", "help", "heart_rate", "monitoring"],
+    ids=["fall", "help", "heart_rate", "monitoring_stopped_at", "monitoring_checked_at"],
 )
 def test_time_outside_the_utc_range_is_rejected(build: Callable[[datetime], object]) -> None:
     year_one_east_of_utc = datetime.min.replace(tzinfo=timezone(timedelta(hours=5)))
