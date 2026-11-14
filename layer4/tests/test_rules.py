@@ -5,11 +5,15 @@ import pytest
 from layer4.alerts import AlertKind
 from layer4.rules import decide
 from layer4.settings import RuleThresholds
-from layer4.signals import FallSignal, HeartRateSignal, HelpSignal, MonitoringSignal
+from layer4.signals import FallSignal, HeartRateSignal, HelpSignal, MonitoringSignal, Signal
 
 EST = timezone(timedelta(hours=-5))
 AT = datetime(2026, 11, 14, 3, 12, tzinfo=UTC)
 DEFAULTS = RuleThresholds()
+FALL = FallSignal(confidence=0.9, detected_at=AT)
+HELP = HelpSignal(is_call_for_help=True, detected_at=AT)
+HEART = HeartRateSignal(bpm=142, measured_at=AT)
+STOPPED = MonitoringSignal("kitchen camera", stopped_at=AT, checked_at=AT + timedelta(minutes=2))
 
 
 @pytest.mark.parametrize(("confidence", "fires"), [(0.79, False), (0.8, True), (1.0, True)])
@@ -58,43 +62,31 @@ def test_rules_read_the_thresholds_not_literals() -> None:
         assert decide(signal, custom, EST) is not None
 
 
-def test_fall_alert_text() -> None:
-    alert = decide(FallSignal(confidence=0.9, detected_at=AT), DEFAULTS, EST)
-    assert alert is not None
-    assert alert.kind is AlertKind.FALL
-    assert alert.title == "Possible fall"
-    assert alert.body == "Possible fall detected at 10:12 PM"
-    assert alert.detected_at == AT
-
-
-def test_help_alert_text() -> None:
-    alert = decide(HelpSignal(is_call_for_help=True, detected_at=AT), DEFAULTS, EST)
-    assert alert is not None
-    assert alert.kind is AlertKind.HELP
-    assert alert.title == "Call for help"
-    assert alert.body == "Call for help heard at 10:12 PM"
-    assert alert.detected_at == AT
-
-
-def test_heart_rate_alert_text_states_the_reading_date() -> None:
-    alert = decide(HeartRateSignal(bpm=142, measured_at=AT), DEFAULTS, EST)
-    assert alert is not None
-    assert alert.kind is AlertKind.HEART_RATE
-    assert alert.title == "Heart rate alert"
-    assert alert.body == "Heart rate of 142 recorded at 10:12 PM on Nov 13"
-    assert alert.detected_at == AT
-
-
-def test_monitoring_alert_text_and_time_is_when_it_stopped() -> None:
-    signal = MonitoringSignal(
-        what_stopped="kitchen camera", stopped_at=AT, checked_at=AT + timedelta(minutes=2)
-    )
+@pytest.mark.parametrize(
+    ("signal", "kind", "title", "body"),
+    [
+        (FALL, AlertKind.FALL, "Possible fall", "Possible fall detected at 10:12 PM"),
+        (HELP, AlertKind.HELP, "Call for help", "Call for help heard at 10:12 PM"),
+        (
+            HEART,
+            AlertKind.HEART_RATE,
+            "Heart rate alert",
+            "Heart rate of 142 recorded at 10:12 PM on Nov 13",
+        ),
+        (
+            STOPPED,
+            AlertKind.MONITORING,
+            "Monitoring degraded",
+            "Monitoring is degraded: kitchen camera",
+        ),
+    ],
+    ids=["fall", "help", "heart_rate_states_the_date", "monitoring_time_is_when_it_stopped"],
+)
+def test_alert_text(signal: Signal, kind: AlertKind, title: str, body: str) -> None:
     alert = decide(signal, DEFAULTS, EST)
     assert alert is not None
-    assert alert.kind is AlertKind.MONITORING
-    assert alert.title == "Monitoring degraded"
-    assert alert.body == "Monitoring is degraded: kitchen camera"
-    assert alert.detected_at == AT
+    assert alert.kind is kind
+    assert (alert.title, alert.body, alert.detected_at) == (title, body, AT)
 
 
 def test_alert_time_is_converted_to_utc() -> None:
