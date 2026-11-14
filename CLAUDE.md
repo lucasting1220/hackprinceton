@@ -44,7 +44,7 @@ this checkout. Do not work around either block.
 
 | Layer | What it is | Language | Directory | Branch prefix | Doc |
 |---|---|---|---|---|---|
-| 1 | Join and connect: setup page, pairing, AWS relay, the whole iPhone app. Makes no decisions | Node/TypeScript, Swift | `layer1/` (the app is in the separate `debbie-ios` project) | `l1/` | `docs/layer1-join-and-connect.md` |
+| 1 | Join and connect: setup page, pairing, the relay on Vultr, the whole iPhone app. Makes no decisions | Node/TypeScript, Swift | `layer1/` (the app is in the separate `debbie-ios` project) | `l1/` | `docs/layer1-join-and-connect.md` |
 | 2 | Cluster: coordinator, worker, planner, dashboard, message carrying, event log storage | Python | `layer2/` | `l2/` | `docs/layer2-device-management.md` |
 | 3 | Raw data: camera and mic capture, receiving watch data. Runs no AI | Python | `layer3/` | `l3/` | `docs/layer3-raw-data.md` |
 | 4 | Care layer: detectors and fixed rules that produce alerts, the report, answers and live status. No agent | Python | `layer4/` | `l4/` | `docs/layer4-care-layer.md` |
@@ -59,7 +59,7 @@ These are decided (the full list is in `docs/coherence-review.md`). Do not build
 - **Alerts are triggered by fixed rules** in Layer 4, one signal at a time. A language model never decides whether to alert and is never waited on before an alert goes out.
 - **Layer 4 runs on workers.** The coordinator laptop runs Layer 2's coordinator, the planner model, the event log and Layer 1's bridge, and nothing from Layers 3 or 4.
 - **Layer 2's coordinator carries messages** between Layer 1's bridge and Layer 4.
-- **The remote link is Layer 1's AWS relay.** No tunnels.
+- **The remote link is Layer 1's relay, a server the team runs on Vultr.** No AWS, no tunnels.
 - **The system never speaks to the resident.**
 - **No video or audio is stored.** Only an event log, on the coordinator.
 
@@ -85,7 +85,7 @@ Use these exact words in code, file names, messages, logs and docs. Do not use t
 | resident | the person being looked after | elder, patient, user |
 | bridge | Layer 1's Node program on each laptop | |
 | hub | the coordinator's bridge, acting for the whole home | |
-| relay | Layer 1's AWS services | |
+| relay | Layer 1's server on Vultr that connects phones to the home | |
 | care layer | Layer 4's programs | care agent, agent |
 | job | something a worker runs continuously | task, service |
 | `node_id` | a laptop's ID | worker-a, laptop_id |
@@ -102,7 +102,7 @@ These are required, not optional. If a skill fails or is unavailable, stop and t
 | Any bug, failing test, error or crash | `/investigate` | Finds the root cause. Then write a failing test, then fix |
 | Before every commit | `/verify` | Runs your layer's checks (section 5) until they pass |
 | Before opening a pull request | `/review` | Reviews your branch's diff. Fix every finding, or say in the pull request why not |
-| Before a pull request that touches tokens, keys, pairing, encryption, credentials or AWS | `/cso` | Security review. Layer 1 needs this on most pull requests |
+| Before a pull request that touches tokens, keys, pairing, encryption, credentials or the relay server | `/cso` | Security review. Layer 1 needs this on most pull requests |
 | Testing a page or local API you built (the setup page, the dashboard, `/api/state`) | `/qa`, or `/qa-only` to report without fixing | Drives the real page and finds bugs |
 | Any web browsing | `/browse` | |
 | Editing your own layer doc | `/unfreeze`, edit only `docs/layerN-*.md`, then `/guard` again | |
@@ -240,7 +240,7 @@ Layer 4 has no port of its own: it talks to the coordinator through the worker p
 - A failure another layer or the caregiver needs to know about is reported, never only logged.
 
 **Secrets**
-- Never commit and never log: join tokens, device credentials, the home key, AWS credentials, the APNs key, or whole `hello` messages.
+- Never commit and never log: join tokens, device credentials, the home key, the hub credential, the Vultr API key, the TURN shared secret, the APNs key, or whole `hello` messages.
 - Secrets never appear on a command line.
 
 **Python (Layers 2, 3, 4)**

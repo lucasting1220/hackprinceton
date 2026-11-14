@@ -10,7 +10,7 @@ Layer 2 turns two or three home laptops into one pool of compute. A coordinator 
 
 | Layer | What it is | Owner's main output |
 |---|---|---|
-| 1. Join and connect | Setup page, pairing, the AWS relay and the whole iPhone app. No decision-making | Paired laptops with Layer 2 started on each, and a phone that receives what Layer 4 sends |
+| 1. Join and connect | Setup page, pairing, the relay on Vultr and the whole iPhone app. No decision-making | Paired laptops with Layer 2 started on each, and a phone that receives what Layer 4 sends |
 | **2. Cluster** | **This document.** Coordinator, worker program, planner, dashboard | Somewhere to run jobs and a way to ask for compute |
 | 3. Raw data | Opens the webcam and mic, receives watch data, and hands all of it to Layer 4. Runs no AI | Three raw feeds |
 | 4. Care layer | Detectors (fall model, speech-to-text with a help check, heart-rate check) and a simple rules layer | Alerts, the daily report, answers and live status |
@@ -38,7 +38,7 @@ Layer 2 turns two or three home laptops into one pool of compute. A coordinator 
 | Language | Python for Layers 2, 3 and 4 |
 | Worker setup | Everything is installed before the demo. Layer 1 connects and installs; Layer 2 checks what is present and reports what is missing |
 | Layer 1 handoff | Layer 1 pairs the laptop, then starts Layer 2's worker program with the coordinator's address and a credential |
-| Remote access | Layer 1's AWS relay. Layer 2 has no tunnel and no public address |
+| Remote access | Layer 1's relay on Vultr. Layer 2 has no tunnel and no public address |
 | Dashboard | A web page on the coordinator laptop showing each laptop with its specs, and what each is running |
 | Network | Venue Wi-Fi, with a phone hotspot as the fallback if the venue blocks laptops from reaching each other |
 | Builders | One or two people prompting Claude |
@@ -48,7 +48,7 @@ Layer 2 turns two or three home laptops into one pool of compute. A coordinator 
 ## Parts
 
 ```
-   Caregiver's iPhone ◀──▶ AWS relay ◀──▶ Layer 1 bridge
+   Caregiver's iPhone ◀──▶ Vultr relay ◀──▶ Layer 1 bridge
                                               │ local calls
 ┌──────────────── COORDINATOR LAPTOP ─────────┴────────────────┐
 │ coordinator program: laptop table, planner (AI + checks),    │

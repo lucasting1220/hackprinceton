@@ -51,7 +51,7 @@ watch data ─────────────────▶ heart-rate che
                                                                     │                             (coordinator)
 Layer 2 status ─────────────▶ monitoring check ── something down? ──┘
 
-upper tier ──▶ Layer 2's coordinator ──▶ Layer 1's bridge ──▶ AWS relay ──▶ caregiver's iPhone
+upper tier ──▶ Layer 2's coordinator ──▶ Layer 1's bridge ──▶ Vultr relay ──▶ caregiver's iPhone
 ```
 
 ## Components

@@ -16,7 +16,7 @@ The earlier "Local AI Home Caregiver: Concept and Build Roadmap" PDF is backgrou
 ## Which document wins
 
 - Lucas's Layer 2 and Layer 4 docs are the reference for how the system works.
-- The Layer 1 doc is the reference for joining, connecting, the AWS relay and the iPhone app. Each layer's own doc is the reference for what that layer does.
+- The Layer 1 doc is the reference for joining, connecting, the relay and the iPhone app. Each layer's own doc is the reference for what that layer does.
 - The concept PDF is background. Where it differs from the layer docs, the layer docs win.
 
 ## The data path
@@ -33,7 +33,7 @@ Every piece of fetched data goes to Layer 3. Layer 3 passes it to Layer 4. Layer
 | 4 | What Layer 3 is | Raw data only: the camera and mic capture job, and receiving watch data |
 | 5 | Where Layer 4 runs | On workers, placed by Layer 2. The coordinator laptop manages hardware and stores data |
 | 6 | Layer 1 to Layer 4 | Layer 2's coordinator carries messages between Layer 1's bridge and Layer 4 |
-| 7 | Remote link | Layer 1's AWS relay. No tunnel |
+| 7 | Remote link | Layer 1's relay. No tunnel. Changed Nov 14: the relay is one server the team runs on Vultr instead of AWS services, with its own TURN server for live video and a SQLite database |
 | 8 | Live video | The resident consents once at setup; after that the caregiver can open it at any time |
 | 9 | Speaking to the resident | Never |
 | 10 | "Check now" | A silent re-check that returns a fresh live status |
