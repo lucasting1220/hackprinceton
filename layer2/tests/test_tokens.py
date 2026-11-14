@@ -3,7 +3,7 @@ from pathlib import Path
 import pytest
 from conftest import contract
 
-from layer2.contracts import AcceptedWorkers
+from layer2.contracts import AcceptedWorker, AcceptedWorkers
 from layer2.tokens import (
     TokenError,
     find_node_id,
@@ -57,3 +57,28 @@ def test_bad_token_file_error_never_shows_the_token(tmp_path: Path) -> None:
 def test_missing_token_file(tmp_path: Path) -> None:
     with pytest.raises(TokenError):
         read_token_file(tmp_path / "absent")
+
+
+def test_token_file_that_will_not_decode(tmp_path: Path) -> None:
+    path = tmp_path / "worker-token"
+    path.write_bytes(b"\xff" * 64)
+    with pytest.raises(TokenError):
+        read_token_file(path)
+
+
+@pytest.mark.parametrize("token", ["é" * 64, EXAMPLE_TOKEN.upper(), EXAMPLE_TOKEN + "\n"])
+def test_malformed_token_finds_no_laptop(token: str) -> None:
+    assert find_node_id(token, ACCEPTED) is None
+
+
+def test_match_in_a_later_entry() -> None:
+    other = AcceptedWorker(
+        node_id="other", display_name="Other", token_sha256=token_sha256("f" * 64)
+    )
+    target = ACCEPTED.workers[0]
+    accepted = AcceptedWorkers(schema_version=1, workers=[other, target])
+    assert find_node_id(EXAMPLE_TOKEN, accepted) == target.node_id
+
+
+def test_no_accepted_workers() -> None:
+    assert find_node_id(EXAMPLE_TOKEN, AcceptedWorkers(schema_version=1, workers=[])) is None

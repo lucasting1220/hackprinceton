@@ -23,6 +23,8 @@ def read_token_file(path: Path) -> str:
         token = path.read_text(encoding="utf-8")
     except OSError as error:
         raise TokenError(f"cannot read token file {path}: {error.strerror}") from error
+    except UnicodeDecodeError as error:
+        raise TokenError(f"token file {path} is not text") from error
     if not is_well_formed(token):
         raise TokenError(
             f"token file {path} must hold exactly 64 lowercase hex characters, no newline"
@@ -36,6 +38,8 @@ def token_sha256(token: str) -> str:
 
 def find_node_id(token: str, accepted: AcceptedWorkers) -> str | None:
     """Compare the token's hash with every entry, without stopping early."""
+    if not is_well_formed(token):
+        return None
     digest = token_sha256(token)
     found: str | None = None
     for worker in accepted.workers:

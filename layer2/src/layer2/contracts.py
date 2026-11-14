@@ -1,8 +1,8 @@
 """Pydantic models for the contract files in contracts/. The files are the truth."""
 
-from typing import Annotated, Literal
+from typing import Annotated, Literal, Self
 
-from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, model_validator
 
 Port = Annotated[int, Field(ge=1, le=65535)]
 TokenHash = Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
@@ -53,6 +53,14 @@ class AcceptedWorkers(Strict):
     schema_version: Literal[1]
     workers: list[AcceptedWorker]
 
+    @model_validator(mode="after")
+    def _no_duplicates(self) -> Self:
+        for key in ("node_id", "token_sha256"):
+            values = [getattr(worker, key) for worker in self.workers]
+            if len(values) != len(set(values)):
+                raise ValueError(f"two workers share the same {key}")
+        return self
+
 
 class MissingItem(Strict):
     id: str
@@ -95,6 +103,10 @@ class Tools(Strict):
 
 
 class Hello(Strict):
+    """Errors never echo their input, so a nearly valid token cannot reach a log."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True, hide_input_in_errors=True)
+
     type: Literal["hello"]
     schema_version: Literal[1]
     token: Annotated[str, Field(pattern=r"^[0-9a-f]{64}$", repr=False)]
