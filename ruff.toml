@@ -4,6 +4,8 @@ required-version = "==0.17.5"
 target-version = "py312"
 line-length = 100
 
+src = ["layer2/src", "layer3/src", "layer4/src"]
+
 [lint]
 # E, W: style errors. F: real bugs. I: import order. B: likely bugs. UP: modern syntax.
 # SIM: simpler code. PTH: pathlib instead of string paths (needed for Mac and Windows).

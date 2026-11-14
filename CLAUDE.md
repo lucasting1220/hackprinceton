@@ -275,3 +275,11 @@ Layer 4 has no port of its own: it talks to the coordinator through the worker p
 ## 12. Repository setup still to do
 
 - Contract files between Layers 2, 3 and 4 (raw feeds, job descriptions, the Layer 4 client calls), as those layers reach the steps that need them. Layer 1 and Layer 2's files are in `contracts/`.
+
+## Health Stack
+
+Read by `/verify`. Each row runs in every Python layer directory that has a `pyproject.toml`; tests are selected per change through `.gstack/pregate.json`. Layer 1's rows are added when `layer1/README.md` lists its commands.
+
+- format: uv run --no-project --python 3.12 .gstack/python-layers.py ruff format --check .
+- lint: uv run --no-project --python 3.12 .gstack/python-layers.py ruff check .
+- types: uv run --no-project --python 3.12 .gstack/python-layers.py mypy .
