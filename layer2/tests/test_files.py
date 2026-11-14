@@ -1,5 +1,7 @@
 import asyncio
 import json
+import os
+import stat
 import threading
 import time
 import traceback
@@ -208,3 +210,13 @@ def test_failed_write_leaves_no_temp_file(tmp_path: Path, monkeypatch: pytest.Mo
     with pytest.raises(RuntimeError):
         write_json_atomic(tmp_path / "worker-status.json", STATUS)
     assert list(tmp_path.iterdir()) == []
+
+
+@pytest.mark.skipif(os.name == "nt", reason="Windows has no Unix permission bits")
+def test_write_keeps_the_target_permissions(tmp_path: Path) -> None:
+    target = tmp_path / "worker-status.json"
+    write_json_atomic(target, STATUS)
+    assert stat.S_IMODE(target.stat().st_mode) == 0o644
+    target.chmod(0o640)
+    write_json_atomic(target, STATUS)
+    assert stat.S_IMODE(target.stat().st_mode) == 0o640

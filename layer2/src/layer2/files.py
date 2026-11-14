@@ -2,6 +2,7 @@
 
 import asyncio
 import os
+import stat
 import tempfile
 import time
 from collections.abc import Callable
@@ -90,10 +91,22 @@ def write_json_atomic(path: Path, data: BaseModel) -> None:
             temp_file.write(data.model_dump_json(indent=2) + "\n")
             temp_file.flush()
             os.fsync(temp_file.fileno())
+        temp_path.chmod(_mode_for(path))
         _retry_while_busy(lambda: temp_path.replace(path))
     except BaseException:
         temp_path.unlink(missing_ok=True)
         raise
+
+
+_NEW_FILE_MODE = 0o644
+
+
+def _mode_for(path: Path) -> int:
+    """Keep the target's permissions; mkstemp would otherwise leave every rewrite owner-only."""
+    try:
+        return stat.S_IMODE(path.stat().st_mode)
+    except FileNotFoundError:
+        return _NEW_FILE_MODE
 
 
 async def wait_for_stop_file(path: Path, poll_s: float = settings.STOP_POLL_S) -> None:
