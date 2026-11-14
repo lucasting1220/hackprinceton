@@ -95,3 +95,34 @@ def test_bad_hello_error_hides_the_token() -> None:
     for text in (str(error), repr(error), error.json(include_input=False)):
         assert token[:16] not in text
         assert token[-16:] not in text
+
+
+@pytest.mark.parametrize(
+    ("field", "same_as"),
+    [
+        ("dashboard_port", "listen_port"),
+        ("client_port", "listen_port"),
+        ("client_port", "dashboard_port"),
+    ],
+)
+def test_coordinator_ports_must_differ(field: str, same_as: str) -> None:
+    data = contract("coordinator.json")
+    with pytest.raises(ValidationError):
+        CoordinatorConfig.model_validate({**data, field: data[same_as]})
+
+
+@pytest.mark.parametrize("value", ["7443", 7443.0, True])
+def test_port_must_be_a_json_integer(value: object) -> None:
+    with pytest.raises(ValidationError):
+        CoordinatorConfig.model_validate({**contract("coordinator.json"), "listen_port": value})
+
+
+def test_ok_must_be_a_json_boolean() -> None:
+    with pytest.raises(ValidationError):
+        CheckOutput.model_validate({**contract("check-output.json"), "ok": "yes"})
+
+
+def test_times_are_written_in_utc() -> None:
+    data = {**contract("worker-status.json"), "updated_at": "2026-11-14T07:00:00-05:00"}
+    dumped = WorkerStatus.model_validate(data).model_dump(mode="json")
+    assert dumped["updated_at"] == "2026-11-14T12:00:00Z"

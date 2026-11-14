@@ -1,10 +1,28 @@
 """Pydantic models for the contract files in contracts/. The files are the truth."""
 
+from datetime import UTC, datetime
 from typing import Annotated, Literal, Self
 
-from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, model_validator
+from pydantic import (
+    AfterValidator,
+    AwareDatetime,
+    BaseModel,
+    ConfigDict,
+    Field,
+    StrictBool,
+    StrictInt,
+    model_validator,
+)
 
-Port = Annotated[int, Field(ge=1, le=65535)]
+Port = Annotated[StrictInt, Field(ge=1, le=65535)]
+
+
+def _to_utc(value: datetime) -> datetime:
+    return value.astimezone(UTC)
+
+
+UtcDatetime = Annotated[AwareDatetime, AfterValidator(_to_utc)]
+"""Any time with an offset is accepted and converted, so files are always written in UTC."""
 TokenHash = Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
 
 
@@ -24,6 +42,12 @@ class CoordinatorConfig(Strict):
     accepted_workers_file: str
     state_dir: str
     stop_file: str
+
+    @model_validator(mode="after")
+    def _ports_differ(self) -> Self:
+        if len({self.listen_port, self.dashboard_port, self.client_port}) != 3:
+            raise ValueError("listen_port, dashboard_port and client_port must all differ")
+        return self
 
 
 class WorkerConfig(Strict):
@@ -65,7 +89,7 @@ class AcceptedWorkers(Strict):
 class MissingItem(Strict):
     id: str
     reason: str
-    required: bool
+    required: StrictBool
 
 
 class WorkerStatus(Strict):
@@ -73,12 +97,12 @@ class WorkerStatus(Strict):
     node_id: str
     state: Literal["connected", "rejected", "disconnected"]
     missing: list[MissingItem]
-    updated_at: AwareDatetime
+    updated_at: UtcDatetime
 
 
 class CheckOutput(Strict):
     schema_version: Literal[1]
-    ok: bool
+    ok: StrictBool
     missing: list[MissingItem]
 
 
@@ -98,8 +122,8 @@ class Sensors(Strict):
 
 class Tools(Strict):
     python: str
-    ollama: bool
-    llama_cpp: bool
+    ollama: StrictBool
+    llama_cpp: StrictBool
 
 
 class Hello(Strict):
@@ -133,7 +157,7 @@ class WelcomeRejected(Strict):
 class Laptop(Strict):
     node_id: str
     display_name: str
-    last_status_at: AwareDatetime
+    last_status_at: UtcDatetime
     sensors: list[Literal["camera", "mic"]]
     missing: list[MissingItem]
 
@@ -151,7 +175,7 @@ class DroppedWork(Strict):
 
 class ApiState(Strict):
     schema_version: Literal[1]
-    updated_at: AwareDatetime
+    updated_at: UtcDatetime
     laptops: list[Laptop]
     jobs: list[JobEntry]
     dropped: list[DroppedWork]
