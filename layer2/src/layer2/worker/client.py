@@ -30,7 +30,9 @@ from layer2.contracts import (
     MissingItem,
     Sensors,
     Specs,
+    StartMessage,
     StatusMessage,
+    StopMessage,
     WelcomeAccepted,
     WelcomeRejected,
     WorkerConfig,
@@ -38,6 +40,7 @@ from layer2.contracts import (
 from layer2.files import ConfigError, load_config
 from layer2.specs import collect_specs, collect_tools, missing_items
 from layer2.tokens import is_well_formed
+from layer2.worker.jobs import JobControl
 
 log = logging.getLogger(__name__)
 
@@ -45,6 +48,7 @@ WorkerState = Literal["connected", "rejected", "disconnected"]
 Report = Callable[[WorkerState, list[MissingItem]], Awaitable[None]]
 Outcome = Literal["stopped", "rejected"]
 
+_Order = TypeAdapter[StartMessage | StopMessage](StartMessage | StopMessage)
 _Welcome = TypeAdapter[WelcomeAccepted | WelcomeRejected](WelcomeAccepted | WelcomeRejected)
 _GB = 2**30
 # ValueError: websockets raises it for a URL with a bad port; Layer 1 may fix the file later.
@@ -62,9 +66,34 @@ class _RejectedError(Exception):
     pass
 
 
-async def run_worker(config_path: Path, token: str, report: Report, stop: asyncio.Event) -> Outcome:
+async def run_worker(
+    config_path: Path,
+    token: str,
+    report: Report,
+    stop: asyncio.Event,
+    jobs: JobControl | None = None,
+) -> Outcome:
     """Connect, report and reconnect until `stop` is set ("stopped") or the coordinator
-    rejects this laptop ("rejected"). Returns within a few seconds of `stop` being set."""
+    rejects this laptop ("rejected"). Returns within a few seconds of `stop` being set, after
+    stopping every job.
+
+    Jobs keep running while the connection is down: the safety work must not stop for a
+    Wi-Fi drop. The coordinator sends what to run again when the worker rejoins.
+    """
+    try:
+        return await _run(config_path, token, report, stop, jobs)
+    finally:
+        if jobs is not None:
+            await jobs.stop_all()
+
+
+async def _run(
+    config_path: Path,
+    token: str,
+    report: Report,
+    stop: asyncio.Event,
+    jobs: JobControl | None,
+) -> Outcome:
 
     async def tell(state: WorkerState, missing: list[MissingItem]) -> None:
         try:
@@ -88,7 +117,7 @@ async def run_worker(config_path: Path, token: str, report: Report, stop: asynci
             except ConfigError as error:
                 log.warning("L2 worker: cannot read the config, will retry: %s", error)
             else:
-                session = _session(config_path, config, token, specs, missing, tell)
+                session = _session(config_path, config, token, specs, missing, tell, jobs)
                 await _until_stopped(session, stop)
             if stop.is_set():
                 break
@@ -125,6 +154,7 @@ async def _session(
     specs: Specs,
     missing: list[MissingItem],
     tell: Report,
+    jobs: JobControl | None,
 ) -> None:
     """One connection. Returns when it drops; raises _RejectedError on rejection."""
     try:
@@ -140,7 +170,10 @@ async def _session(
             await _join(connection, config, token, specs)
             log.info("L2 worker: connected to %s", config.coordinator_url)
             await tell("connected", missing)
-            await _send_status(connection, config_path, missing, tell)
+            await _first_to_end(
+                _send_status(connection, config_path, missing, tell, jobs),
+                _receive_orders(connection, jobs),
+            )
     except _NETWORK_ERRORS as error:
         log.info(
             "L2 worker: not connected to %s (%s)", config.coordinator_url, type(error).__name__
@@ -179,8 +212,49 @@ async def _join(
         raise _RejectedError
 
 
+async def _first_to_end(*parts: Awaitable[None]) -> None:
+    """Run the parts of a session together; when one ends (or fails), cancel the rest and
+    re-raise its error."""
+    tasks = [asyncio.ensure_future(part) for part in parts]
+    try:
+        done, _ = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+    finally:
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+    for task in done:
+        task.result()
+
+
+async def _receive_orders(connection: ClientConnection, jobs: JobControl | None) -> None:
+    """Act on `start` and `stop` until the connection closes. A bad message is logged once
+    per connection and ignored."""
+    logged_bad = False
+    async for text in connection:
+        try:
+            order = _Order.validate_json(text)
+        except ValidationError:
+            if not logged_bad:
+                logged_bad = True
+                log.warning(
+                    "L2 worker: ignored a message from the coordinator that is not "
+                    "start or stop; further ones are not logged"
+                )
+            continue
+        if jobs is None:
+            log.warning("L2 worker: this worker runs no jobs; ignored %s %s", order.type, order.job)
+        elif isinstance(order, StartMessage):
+            await jobs.start(order.job)
+        else:
+            await jobs.stop(order.job)
+
+
 async def _send_status(
-    connection: ClientConnection, config_path: Path, missing: list[MissingItem], tell: Report
+    connection: ClientConnection,
+    config_path: Path,
+    missing: list[MissingItem],
+    tell: Report,
+    jobs: JobControl | None,
 ) -> None:
     """Send a status every STATUS_INTERVAL_S; re-check what is missing every
     MISSING_REFRESH_S, and tell the status file when it changes."""
@@ -200,6 +274,7 @@ async def _send_status(
             missing=missing,
             memory_free_gb=round(memory.available / _GB, 2),
             cpu_percent=min(100.0, float(psutil.cpu_percent(interval=None))),
+            jobs=[] if jobs is None else jobs.statuses(),
         )
         await connection.send(message.model_dump_json())
         await asyncio.sleep(settings.STATUS_INTERVAL_S)

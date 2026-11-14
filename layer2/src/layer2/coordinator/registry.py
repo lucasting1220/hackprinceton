@@ -12,7 +12,15 @@ from datetime import UTC, datetime
 from typing import Literal
 
 from layer2 import settings
-from layer2.contracts import ApiState, Hello, Laptop, MissingItem, StatusMessage
+from layer2.contracts import (
+    ApiState,
+    Hello,
+    JobEntry,
+    JobStatus,
+    Laptop,
+    MissingItem,
+    StatusMessage,
+)
 
 log = logging.getLogger(__name__)
 
@@ -29,6 +37,7 @@ class _Entry[C]:
     sensors: list[Sensor]
     last_status_at: datetime
     missing: list[MissingItem] = field(default_factory=list)
+    jobs: list[JobStatus] = field(default_factory=list)
     connection: C | None = None
     replacements: deque[float] = field(default_factory=deque)
     warned_at: float | None = None
@@ -59,8 +68,8 @@ class Registry[C]:
         """Register an accepted hello. Returns the laptop's previous connection, to be closed.
 
         Only status messages advance last_status_at of a known laptop, so one that keeps
-        rejoining without ever reporting still goes quiet. Its missing list is cleared until
-        the new connection reports.
+        rejoining without ever reporting still goes quiet. Its missing and jobs lists are
+        cleared until the new connection reports.
         """
         entry = self._laptops.get(node_id)
         if entry is None:
@@ -75,6 +84,7 @@ class Registry[C]:
         entry.display_name = hello.display_name
         entry.sensors = _sensor_kinds(hello)
         entry.missing = []
+        entry.jobs = []
         entry.connection = connection
         if previous is not None:
             self._count_replacement(node_id, entry)
@@ -111,6 +121,7 @@ class Registry[C]:
         entry = self._laptops[node_id]
         entry.last_status_at = self._now()
         entry.missing = list(message.missing)
+        entry.jobs = list(message.jobs)
 
     def leave(self, node_id: str, connection: C) -> None:
         """The connection closed. The laptop stays listed with its last status time."""
@@ -131,6 +142,10 @@ class Registry[C]:
                 )
                 for node_id, entry in self._laptops.items()
             ],
-            jobs=[],
+            jobs=[
+                JobEntry(job=job.job, node_id=node_id, state=job.state)
+                for node_id, entry in self._laptops.items()
+                for job in entry.jobs
+            ],
             dropped=[],
         )
