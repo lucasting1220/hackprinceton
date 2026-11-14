@@ -17,6 +17,7 @@ from fastapi import FastAPI, WebSocket
 
 from layer2 import settings
 from layer2.contracts import CoordinatorConfig
+from layer2.coordinator.event_log import EventLog
 from layer2.coordinator.plan import JobNeed, Placement
 from layer2.coordinator.registry import Registry
 from layer2.coordinator.server import create_control_app, create_dashboard_app
@@ -88,8 +89,10 @@ def _job_needs() -> list[JobNeed]:
 async def _serve(config: CoordinatorConfig) -> int:
     registry: Registry[WebSocket] = Registry()
     placement = Placement(_job_needs)
+    events = EventLog(Path(config.state_dir) / "events")
+    control = create_control_app(config, registry, placement, events)
     servers = [
-        _server(create_control_app(config, registry, placement), "0.0.0.0", config.listen_port),
+        _server(control, "0.0.0.0", config.listen_port),
         _server(create_dashboard_app(registry, placement), "127.0.0.1", config.dashboard_port),
     ]
     stop_file = Path(config.stop_file)
