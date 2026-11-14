@@ -1,5 +1,6 @@
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
+from typing import cast
 
 import pytest
 
@@ -87,3 +88,69 @@ def test_thresholds_fall_minimum_outside_zero_to_one_is_rejected(minimum: float)
 def test_thresholds_wait_not_positive_is_rejected(wait: timedelta) -> None:
     with pytest.raises(ValueError, match="monitoring_stopped_after"):
         RuleThresholds(monitoring_stopped_after=wait)
+
+
+@pytest.mark.parametrize("bpm", [72.5, float("nan"), float("inf"), "72", None])
+def test_heart_rate_not_a_whole_number_is_rejected(bpm: object) -> None:
+    with pytest.raises(ValueError, match="bpm"):
+        HeartRateSignal(bpm=cast(int, bpm), measured_at=AT)
+
+
+def test_heart_rate_of_one_is_accepted() -> None:
+    assert HeartRateSignal(bpm=1, measured_at=AT).bpm == 1
+
+
+@pytest.mark.parametrize("confidence", ["0.9", None])
+def test_fall_confidence_not_a_number_is_rejected(confidence: object) -> None:
+    with pytest.raises(ValueError, match="confidence"):
+        FallSignal(confidence=cast(float, confidence), detected_at=AT)
+
+
+@pytest.mark.parametrize("verdict", ["false", 1, None])
+def test_help_verdict_not_a_bool_is_rejected(verdict: object) -> None:
+    with pytest.raises(ValueError, match="is_call_for_help"):
+        HelpSignal(is_call_for_help=cast(bool, verdict), detected_at=AT)
+
+
+def test_monitoring_what_stopped_not_a_string_is_rejected() -> None:
+    with pytest.raises(ValueError, match="what_stopped"):
+        MonitoringSignal(what_stopped=cast(str, None), stopped_at=AT, checked_at=AT)
+
+
+def test_monitoring_checked_at_equal_to_stopped_at_is_accepted() -> None:
+    signal = MonitoringSignal(what_stopped="camera", stopped_at=AT, checked_at=AT)
+    assert signal.checked_at == signal.stopped_at
+
+
+@pytest.mark.parametrize("moment", ["2026-11-14T03:12:00Z", None])
+def test_time_not_a_datetime_is_rejected(moment: object) -> None:
+    with pytest.raises(ValueError, match="detected_at"):
+        FallSignal(confidence=0.9, detected_at=cast(datetime, moment))
+
+
+@pytest.mark.parametrize("value", [130.5, float("nan"), True])
+def test_thresholds_bpm_not_a_whole_number_is_rejected(value: object) -> None:
+    with pytest.raises(ValueError, match="heart_rate_high_bpm must be a whole number"):
+        RuleThresholds(heart_rate_high_bpm=cast(int, value))
+    with pytest.raises(ValueError, match="heart_rate_low_bpm must be a whole number"):
+        RuleThresholds(heart_rate_low_bpm=cast(int, value))
+
+
+def test_thresholds_fall_minimum_bool_is_rejected() -> None:
+    with pytest.raises(ValueError, match="fall_confidence_min"):
+        RuleThresholds(fall_confidence_min=True)
+
+
+def test_thresholds_wait_not_a_timedelta_is_rejected() -> None:
+    with pytest.raises(ValueError, match="monitoring_stopped_after"):
+        RuleThresholds(monitoring_stopped_after=cast(timedelta, 30))
+
+
+@pytest.mark.parametrize("minimum", [0.0, 1.0])
+def test_thresholds_fall_minimum_at_the_ends_is_accepted(minimum: float) -> None:
+    assert RuleThresholds(fall_confidence_min=minimum).fall_confidence_min == minimum
+
+
+def test_thresholds_low_just_below_high_is_accepted() -> None:
+    thresholds = RuleThresholds(heart_rate_low_bpm=129, heart_rate_high_bpm=130)
+    assert thresholds.heart_rate_low_bpm == 129
