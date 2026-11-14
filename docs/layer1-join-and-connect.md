@@ -2,13 +2,15 @@
 
 **Status: draft for team review. Nothing is built.** This replaces our first Layer 1 draft. It is written against Lucas's Layer 2 draft (`docs/layer2-device-management.md` on branch `layer-2`, commit `6d74cc4`), the team's concept and roadmap, and the team's layer notes. "Decided" lists the Layer 1 team's decisions; a row tagged with an ask also needs that owner's agreement. The asks and the handoff sections are proposals: names, fields and ports can change once, together, at hour 0. "Open questions" are not settled.
 
+**Edited by Lucas, Nov 14:** watch data now covers sleep and steps as well as heart rate (the "Watch data" row, `POST /v1/watch-data`, build step 8 and its acceptance test). Nothing else in this copy has been changed; the other changes it needs are listed in `coherence-review.md`.
+
 ## Summary
 
 Layer 1 turns a few spare laptops and the family's iPhones into one paired home that a caregiver can reach from anywhere.
 
 - Each laptop gets a setup page. The first laptop creates the home and becomes the coordinator laptop (Layer 2's "central agent"). Each extra laptop joins as a worker once a caregiver approves it by scanning a QR code.
 - Layer 1 starts Lucas's coordinator and worker programs. It hands each worker the coordinator's address and a join token: the "address and a credential" in Layer 2's handoff.
-- Layer 1 builds the iPhone app, in its own `debbie-ios` project, and Layer 4 adds the care screens. The app pairs with the home by QR code. Its resident mode sends Apple Watch heart rate from HealthKit to Layer 4.
+- Layer 1 builds the iPhone app, in its own `debbie-ios` project, and Layer 4 adds the care screens. The app pairs with the home by QR code. Its resident mode sends Apple Watch heart rate, sleep and steps from HealthKit to Layer 4.
 - Remote access goes through a small AWS relay. The home only makes outgoing connections (to the relay, and to AWS's video service during a live view), so there is no VPN app and no router setup. Messages between the home and phones are end-to-end encrypted, so the relay can't read them.
 - When the resident has allowed it, a caregiver can open a live view of the home camera. Video goes straight from the laptop to the phone, or through AWS's TURN server when it must, encrypted either way.
 
@@ -47,7 +49,7 @@ Layer 1 builds no scheduler, cluster heartbeat, care engine or second dashboard.
 | Live video | In the demo. Layer 1 builds the sender: a browser window on the camera laptop that uses AWS's Kinesis Video Streams (KVS) WebRTC JavaScript library and gets its frames from Lucas's capture job (ask L6). Video only, no audio. Sessions last up to 5 minutes |
 | Live-view consent | Off until the resident turns it on during setup. The resident can turn it off at any time: on the coordinator's setup page, on the camera laptop's live notice, or in resident mode. The camera laptop shows a full-screen notice while someone is watching |
 | iPhone app | Layer 1 owns the Xcode project, `debbie-ios`, kept outside this repository. Layer 4 adds the care screens there (ask F4). One app, with a caregiver role and a resident mode |
-| Heart rate | In the demo. Resident mode reads heart rate from HealthKit (synced from the Watch) and sends it to Layer 4 over home Wi-Fi. HealthKit can't be read while the phone is locked, so readings arrive in bursts after an unlock. The app sends everything since its last check, and the resident screen has a "Sync now" button |
+| Watch data | In the demo. Resident mode reads heart rate, last night's sleep (total, bedtime, wake time and interruptions) and steps so far today from HealthKit (synced from the Watch) and sends them to Layer 4 over home Wi-Fi. HealthKit can't be read while the phone is locked, so readings arrive in bursts after an unlock. The app sends everything since its last check, and the resident screen has a "Sync now" button |
 | Sound detection | Proposed: runs on a laptop mic, as in Layer 2. Phones are not sensors (ask T2) |
 | Component list | Layer 1 keeps one list of what each laptop role needs, including Python, Ollama and its models, and llama.cpp. For the demo, laptops are set up by hand from it |
 | Languages | Node/TypeScript for the laptop bridge and the AWS stack, Swift for the app |
@@ -188,7 +190,7 @@ Nothing on the network side can confirm a pairing or post an alert. Those happen
 
 ### Screens
 - **Laptop:** Welcome (Create or Join) · Check this laptop · Keep awake · Pairing QR and code, with Confirm · Resident consent · Find the home · Add-this-laptop QR · Check sensors · Starting · Joined or Home created, with a link to Lucas's dashboard · Paired phones (remove) · Live view on/off · the live notice on the camera laptop. Troubleshooting names what's missing, a wrong network, a denied permission or a rejected token, and never shows secrets.
-- **Phone:** Scan to pair · Show code (confirm on the laptop) · Home: Layer 1's status header with three states (Connection: relay reachable and the hub's last contact; Monitoring: from the heartbeat; Language model: from Layer 4's health), the Live view button, and Layer 4's alerts, status and history screens · Add a laptop · Resident mode (heart-rate permission, last reading, Sync now, live view on/off) · Settings (unpair).
+- **Phone:** Scan to pair · Show code (confirm on the laptop) · Home: Layer 1's status header with three states (Connection: relay reachable and the hub's last contact; Monitoring: from the heartbeat; Language model: from Layer 4's health), the Live view button, and Layer 4's alerts, status and history screens · Add a laptop · Resident mode (permission for heart rate, sleep and steps; last reading; Sync now; live view on/off) · Settings (unpair).
 
 ## Handoff to Layer 2
 
@@ -258,7 +260,7 @@ These are proposals for the Layer 4 owner. Layer 4 runs on the coordinator lapto
 | Layer 4 → Layer 1 | `POST /v1/status` | the care status the app shows: latest heart rate and trend, `no_heart_data`, and anything else the care screens need |
 | Layer 1 → Layer 4 | `POST /v1/acks` | `alert_id, device_id, acked_at, false_alarm` |
 | Layer 1 → Layer 4 | `POST /v1/requests` | `request_id, device_id, kind, text` |
-| Layer 1 → Layer 4 | `POST /v1/heart-rate` | `device_id, samples: [{t, bpm}]` |
+| Layer 1 → Layer 4 | `POST /v1/watch-data` | `device_id, heart_rate: [{measured_at, bpm}], sleep: [{night_of, asleep_minutes, bedtime_at, wake_at, interruptions}], steps: [{measured_at, steps_today}]` |
 | Layer 1 → Layer 4 | `GET /v1/health` | returns `ok, rules_running, language_model_available` |
 
 - Request `kind` is `ask` (a question in plain words, which Layer 4 answers) or `check_now` (the caregiver asks the home to check on the resident now; Layer 4 decides what that means, for example asking "Are you okay?" aloud).
@@ -311,7 +313,7 @@ Every command carries its send time, and the hub ignores commands older than 30 
 | Whether the hub is online (its last contact time) | Yes |
 | Live video | Not by watching traffic: video is encrypted between the laptop and the phone, even through TURN. The relay does set up each session, so the laptop's on-screen notice, not encryption, is what shows someone is watching |
 | When a live view started and which phone asked | Yes |
-| Raw heart-rate readings | Not sent; they stay on the home network. An alert or status that mentions heart rate is encrypted like any other message |
+| Raw watch readings (heart rate, sleep, steps) | Not sent; they stay on the home network. An alert or status that mentions them is encrypted like any other message |
 | Push text | No. The push carries ciphertext that the phone decrypts |
 
 ### Health and offline alerts
@@ -387,7 +389,7 @@ Two tracks run side by side: laptop and cloud (bridge, hub connector, relay, sen
 | 5 | Relay: CDK stack, provisioning the hub, an alert pushed to a locked phone on cellular and decrypted by the notification extension, heartbeat, offline watchdog | 0b, 4 |
 | 6 | A real alert end to end: Layer 3 detects a staged fall, Layer 4's rule fires, the push arrives, with Ollama stopped | 5, Layer 2 step 2 with the capture job and `subscribe()`, Layers 3 and 4 |
 | 7 | Live view on cellular: Lucas's frame feed to the sender window, through KVS, to the app's viewer, with consent, the on-screen notice, the 5-minute limit, Stop and Turn off live view | 0b, 5, ask L6 |
-| 8 | Resident heart rate: HealthKit to the LAN gateway to Layer 4 | 2, Layer 4 |
+| 8 | Resident watch data (heart rate, sleep, steps): HealthKit to the LAN gateway to Layer 4 | 2, Layer 4 |
 | 9 | Hardware check, keep-awake, sensor check and resident consent screens | 3 |
 | 10 | Three full rehearsals and a backup recording | all |
 
@@ -409,7 +411,7 @@ If time runs short, cut in this order: mDNS discovery (type the address), the ap
 - [demo] Cut the coordinator laptop's internet: "hub offline" arrives; on reconnect, "back online" and the queued alerts arrive.
 - Close the camera laptop: "monitoring degraded" arrives.
 - [demo] Live view over cellular with TURN forced starts within 10 seconds, shows the notice on the camera laptop, ends on Stop, on Turn off live view and at 5 minutes, and is refused when the resident has it off.
-- [demo] A heart-rate reading from resident mode reaches Layer 4.
+- [demo] A heart-rate reading, a sleep record and a step count from resident mode each reach Layer 4.
 - [demo] Camera and mic permissions work through the launch path used on stage.
 - [demo] The network test passes on the demo network.
 - Anything unavailable (video, Layer 4, a sensor) is shown as unavailable, never as ready.
