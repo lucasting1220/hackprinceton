@@ -98,8 +98,8 @@ These are required, not optional. If a skill fails or is unavailable, stop and t
 |---|---|---|
 | Start of every session | `/guard`, giving it your layer's directory (for example `layer2/`) | Blocks edits outside your directory and warns before destructive commands |
 | Resuming earlier work | `/context-restore` | Brings back what the last session saved |
-| Before a build step that adds a new module, a new program, or a use of a contract | `/plan-eng-review` on your plan for that step | Reviews the design before code exists |
-| Any bug, failing test, error or crash | `/investigate` | Finds the root cause. Then write a failing test, then fix |
+| Before a build step that adds a new module, a new program, or a use of a contract | `/autoplan` on your written plan for that step | Runs gstack's architecture and engineering review on the design before code exists |
+| Any bug, failing test, error or crash | Describe the failure to Claude; gstack's router handles it | Finds the root cause first, then writes a failing test, then fixes. Never patch the symptom |
 | Before every commit | `/verify` | Runs your layer's checks (section 5) until they pass |
 | Before opening a pull request | `/review` | Reviews your branch's diff. Fix every finding, or say in the pull request why not |
 | Before a pull request that touches tokens, keys, pairing, encryption, credentials or the relay server | `/cso` | Security review. Layer 1 needs this on most pull requests |
@@ -268,7 +268,7 @@ Layer 4 has no port of its own: it talks to the coordinator through the worker p
 
 1. Read this file, then your layer's doc. Build only your layer, in the build order your doc gives, and nothing your doc lists as out of scope.
 2. Run `/guard` on your layer's directory, then start a new branch from `main` (section 6).
-3. Before writing code, say in a few lines what you are about to build and which contract files it touches. Run `/plan-eng-review` first if section 4 requires it.
+3. Before writing code, say in a few lines what you are about to build and which contract files it touches. Run `/autoplan` on your plan first if section 4 requires it.
 4. If the doc is unclear or two docs disagree, ask your human. Do not guess and do not pick a side.
 5. Build one step. Meet every item in the definition of done (section 5). Open the pull request.
 6. At the end of a session, tell your human: what was built, what was tested and the result, what is stubbed, what is waiting for review, and anything another layer's owner needs to know. Run `/context-save` if work is unfinished.
