@@ -20,5 +20,5 @@
     "noPropertyAccessFromIndexSignature": true,
     "forceConsistentCasingInFileNames": true
   },
-  "include": ["bridge/**/*.ts", "stubs/**/*.ts", "tests/**/*.ts"]
+  "include": ["**/*.ts"]
 }

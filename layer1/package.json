@@ -9,7 +9,10 @@
     "format:check": "biome format .",
     "lint": "biome lint --error-on-warnings .",
     "typecheck": "tsc --noEmit",
-    "test": "node --test \"tests/**/*.test.ts\""
+    "test": "node --test --test-timeout=30000 \"tests/**/*.test.ts\""
+  },
+  "engines": {
+    "node": "24.x"
   },
   "devDependencies": {
     "@biomejs/biome": "2.6.7",

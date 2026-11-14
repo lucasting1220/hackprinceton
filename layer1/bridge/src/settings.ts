@@ -12,8 +12,5 @@ export const DASHBOARD_PORT = 7450;
 /** Layer 2 coordinator: local calls from Layer 1's bridge, 127.0.0.1 only. */
 export const COORDINATOR_CLIENT_PORT = 7451;
 
-/** Layer 1 bridge, local side: the setup page, 127.0.0.1 only. */
-export const BRIDGE_LOCAL_PORT = 7470;
-
 /** The Ollama server that Ollama's own app runs on each laptop. */
 export const OLLAMA_URL = "http://127.0.0.1:11434";

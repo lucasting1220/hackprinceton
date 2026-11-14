@@ -27,7 +27,7 @@ describe("contracts/coordinator.json", () => {
       ollama_url: settings.OLLAMA_URL,
     };
     for (const [field, value] of Object.entries(fromSettings)) {
-      assert.equal(example[field], value, `${field} differs from contracts/coordinator.json`);
+      assert.equal(value, example[field], `${field} differs from contracts/coordinator.json`);
     }
   });
 });
