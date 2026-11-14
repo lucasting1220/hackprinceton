@@ -11,11 +11,13 @@ import asyncio
 import contextlib
 import logging
 import os
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
 from layer2 import settings
+from layer2.contracts import JobStatus
 
 log = logging.getLogger(__name__)
 
@@ -119,3 +121,41 @@ async def _end(process: asyncio.subprocess.Process) -> None:
         with contextlib.suppress(ProcessLookupError):
             process.kill()
         await process.wait()
+
+
+Catalog = Callable[[str], JobSpec | None]
+"""Finds a job by name in this laptop's job folders; None if there is no such job. May block."""
+
+
+def no_jobs(name: str) -> JobSpec | None:
+    """The catalog until the job description contract exists: every job is unknown."""
+    return None
+
+
+class JobControl:
+    """What the coordinator's `start` and `stop` messages act on: the runner plus the catalog
+    that turns a job's name into the program to run."""
+
+    def __init__(self, runner: JobRunner, catalog: Catalog) -> None:
+        self._runner = runner
+        self._catalog = catalog
+
+    async def start(self, name: str) -> None:
+        try:
+            spec = await asyncio.to_thread(self._catalog, name)
+        except OSError as error:
+            log.warning("L2 worker: cannot read job %s: %s", name, error)
+            return
+        if spec is None:
+            log.warning("L2 worker: asked to start job %s, which this laptop does not have", name)
+            return
+        await self._runner.start(spec)
+
+    async def stop(self, name: str) -> None:
+        await self._runner.stop(name)
+
+    async def stop_all(self) -> None:
+        await self._runner.stop_all()
+
+    def statuses(self) -> list[JobStatus]:
+        return [JobStatus(job=name, state=state) for name, state in self._runner.states().items()]
