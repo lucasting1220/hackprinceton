@@ -1,0 +1,13 @@
+# Owner: Lucas. Shared by Layers 2, 3 and 4. Never add [tool.ruff] to a layer's pyproject.toml.
+# Every layer pins this same ruff version in its development dependencies.
+required-version = "==0.17.5"
+target-version = "py312"
+line-length = 100
+
+[lint]
+# E, W: style errors. F: real bugs. I: import order. B: likely bugs. UP: modern syntax.
+# SIM: simpler code. PTH: pathlib instead of string paths (needed for Mac and Windows).
+select = ["E", "W", "F", "I", "B", "UP", "SIM", "PTH"]
+
+[format]
+line-ending = "lf"
