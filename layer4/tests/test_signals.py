@@ -1,10 +1,11 @@
+import time
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta, timezone, tzinfo
 from typing import cast
 
 import pytest
 
-from layer4.settings import RuleThresholds
+from layer4.settings import EARLIEST_SIGNAL_TIME, LATEST_SIGNAL_TIME, RuleThresholds
 from layer4.signals import FallSignal, HeartRateSignal, HelpSignal, MonitoringSignal
 
 AT = datetime(2026, 11, 14, 3, 12, tzinfo=UTC)
@@ -202,3 +203,12 @@ def test_time_outside_the_utc_range_is_rejected(build: Callable[[datetime], obje
 def test_time_outside_the_signal_range_is_rejected(moment: datetime) -> None:
     with pytest.raises(ValueError, match="out of range"):
         FallSignal(confidence=0.9, detected_at=moment)
+
+
+@pytest.mark.parametrize(
+    "moment",
+    [EARLIEST_SIGNAL_TIME - timedelta(hours=12), LATEST_SIGNAL_TIME + timedelta(hours=14)],
+    ids=["earliest_seen_from_utc_minus_12", "latest_seen_from_utc_plus_14"],
+)
+def test_the_os_clock_reaches_the_signal_range_from_any_zone(moment: datetime) -> None:
+    assert time.localtime(moment.timestamp()).tm_year in (1970, 2999, 3000)

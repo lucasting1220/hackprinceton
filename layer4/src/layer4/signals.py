@@ -13,7 +13,7 @@ from layer4._checks import is_number, is_whole_number
 from layer4.settings import EARLIEST_SIGNAL_TIME, LATEST_SIGNAL_TIME
 
 
-def _require_time_zone(name: str, value: datetime) -> None:
+def _require_signal_time(name: str, value: datetime) -> None:
     if not isinstance(value, datetime) or value.utcoffset() is None:
         raise ValueError(f"{name} must be a datetime with a time zone, got {value!r}")
     try:
@@ -37,7 +37,7 @@ class FallSignal:
     def __post_init__(self) -> None:
         if not is_number(self.confidence) or not 0.0 <= self.confidence <= 1.0:
             raise ValueError(f"confidence must be a number from 0 to 1, got {self.confidence!r}")
-        _require_time_zone("detected_at", self.detected_at)
+        _require_signal_time("detected_at", self.detected_at)
 
 
 @dataclass(frozen=True)
@@ -52,7 +52,7 @@ class HelpSignal:
             raise ValueError(
                 f"is_call_for_help must be True or False, got {self.is_call_for_help!r}"
             )
-        _require_time_zone("detected_at", self.detected_at)
+        _require_signal_time("detected_at", self.detected_at)
 
 
 @dataclass(frozen=True)
@@ -65,7 +65,7 @@ class HeartRateSignal:
     def __post_init__(self) -> None:
         if not is_whole_number(self.bpm) or self.bpm <= 0:
             raise ValueError(f"bpm must be a whole number above 0, got {self.bpm!r}")
-        _require_time_zone("measured_at", self.measured_at)
+        _require_signal_time("measured_at", self.measured_at)
 
 
 @dataclass(frozen=True)
@@ -79,8 +79,8 @@ class MonitoringSignal:
     def __post_init__(self) -> None:
         if not isinstance(self.what_stopped, str) or not self.what_stopped.strip():
             raise ValueError(f"what_stopped must name what stopped, got {self.what_stopped!r}")
-        _require_time_zone("stopped_at", self.stopped_at)
-        _require_time_zone("checked_at", self.checked_at)
+        _require_signal_time("stopped_at", self.stopped_at)
+        _require_signal_time("checked_at", self.checked_at)
         # Compare in UTC: two times sharing one tzinfo compare by wall clock, ignoring offsets.
         if self.checked_at.astimezone(UTC) < self.stopped_at.astimezone(UTC):
             raise ValueError(

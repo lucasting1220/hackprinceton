@@ -1,7 +1,8 @@
-"""Layer 4 settings: the rule thresholds.
+"""Layer 4 settings: the rule thresholds and the signal time range.
 
-The values are the Layer 4 doc's proposed defaults, not medical guidance, and still need
-the team's review. Rules read them through RuleThresholds, never as literals.
+The thresholds are the Layer 4 doc's proposed defaults, not medical guidance, and still need
+the team's review. Rules read them through RuleThresholds, never as literals. The signal time
+range is a platform limit, not a tuning value.
 """
 
 from dataclasses import dataclass
