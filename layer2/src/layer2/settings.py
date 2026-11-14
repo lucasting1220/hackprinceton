@@ -1,0 +1,18 @@
+"""Layer 2 named constants: every time limit and threshold the programs use."""
+
+from typing import Final
+
+STATUS_INTERVAL_S: Final = 2.0
+RETRY_DELAY_S: Final = 3.0
+STALE_AFTER_S: Final = 6.0
+HELLO_TIMEOUT_S: Final = 10.0
+CONNECT_TIMEOUT_S: Final = 5.0
+OLLAMA_CHECK_TIMEOUT_S: Final = 2.0
+STOP_POLL_S: Final = 1.0
+STOP_DEADLINE_S: Final = 10.0
+REPLACEMENT_WARN_COUNT: Final = 3
+REPLACEMENT_WARN_WINDOW_S: Final = 60.0
+FILE_BUSY_RETRY_S: Final = 1.0
+FILE_BUSY_STEP_S: Final = 0.05
+SUBPROCESS_TIMEOUT_S: Final = 2.0
+REQUIRED_PYTHON: Final = (3, 12)
