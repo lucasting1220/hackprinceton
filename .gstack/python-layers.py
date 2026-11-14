@@ -3,8 +3,9 @@
 Usage:
   python-layers.py <command...>     run `uv run <command...>` inside each Python layer
   python-layers.py --tests <files>  run the whole pytest suite of each layer the files belong to;
-                                    for files in Layer 1 (Node, layer1/package.json), run every
-                                    check layer1/README.md lists: format, lint, type check, tests
+                                    for files in layer1/ (Node), run every check layer1/README.md
+                                    lists: format, lint, type check, tests. It installs nothing:
+                                    a missing package.json, node_modules or npm fails the run
 """
 
 import shutil
@@ -28,7 +29,7 @@ def python_layer(name: str) -> Path | None:
 
 def in_node_layer(name: str) -> bool:
     parts = Path(name).parts
-    return bool(parts) and ROOT / parts[0] == NODE_LAYER and (NODE_LAYER / "package.json").is_file()
+    return bool(parts) and ROOT / parts[0] == NODE_LAYER
 
 
 def run(layer: Path, args: list[str]) -> int:
@@ -38,12 +39,17 @@ def run(layer: Path, args: list[str]) -> int:
 
 
 def run_node_checks() -> int:
+    if not (NODE_LAYER / "package.json").is_file():
+        print(f"== {NODE_LAYER.name}: package.json is missing, so no check can run", flush=True)
+        return 1
+    if not (NODE_LAYER / "node_modules").is_dir():
+        print(f"== {NODE_LAYER.name}: node_modules is missing; run `npm ci` in it first", flush=True)
+        return 1
     npm = shutil.which("npm")
     if npm is None:
         print(f"== {NODE_LAYER.name}: npm is not on PATH", flush=True)
         return 1
-    install = [] if (NODE_LAYER / "node_modules").is_dir() else [["ci"]]
-    for args in [*install, *NODE_CHECKS]:
+    for args in NODE_CHECKS:
         print(f"== {NODE_LAYER.name}: npm {' '.join(args)}", flush=True)
         done = subprocess.run([npm, *args], cwd=NODE_LAYER, timeout=TIMEOUT_S)
         if done.returncode != 0:
