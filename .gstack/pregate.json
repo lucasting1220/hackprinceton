@@ -1,0 +1,10 @@
+{
+  "$schema": "https://github.com/garrytan/gstack/docs/pregate.md#pregate-v1",
+  "runner": "uv run --no-project --python 3.12 .gstack/python-layers.py --tests {files}",
+  "dependencies": {
+    "ruff.toml": [],
+    ".gstack/**": [],
+    "contracts/**": ["layer2/tests/test_contracts.py"],
+    "layer2/**": ["layer2/tests/test_contracts.py"]
+  }
+}
