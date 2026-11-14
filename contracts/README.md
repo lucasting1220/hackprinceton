@@ -13,7 +13,7 @@ Agreed Nov 14 from Layer 1's asks L1 to L5, L7 and L8. Layer 1 writes the config
 | `accepted-workers.json` | Layer 1 | Layer 2 coordinator | Hashes of the join tokens the coordinator accepts |
 | `worker-status.json` | Layer 2 worker | Layer 1 bridge | Whether the worker is connected, rejected or disconnected |
 | `check-output.json` | Layer 2 `check` command | Layer 1 bridge | What a laptop is missing, printed by `check --config <file> --json` |
-| `api-state.json` | Layer 2 coordinator, at `GET /api/state` on `dashboard_port` | Layer 1 hub connector | Connected laptops, running jobs, dropped work |
+| `api-state.json` | Layer 2 coordinator, at `GET /api/state` on `dashboard_port` | Layer 1 hub connector | Every laptop seen since the coordinator started (with `last_status_at`, so readers can tell which went quiet), running jobs, dropped work |
 | `hello.json` | Layer 2 worker | Layer 2 coordinator | First message on a worker's connection. Layer 1 depends only on the token being its credential |
 | `welcome-accepted.json`, `welcome-rejected.json` | Layer 2 coordinator | Layer 2 worker | The reply to `hello`. Its outcome reaches Layer 1 through the worker status file |
 
@@ -25,7 +25,11 @@ Agreed Nov 14 from Layer 1's asks L1 to L5, L7 and L8. Layer 1 writes the config
 - **Reconnecting:** a `hello` from a laptop the coordinator already knows replaces that laptop's old connection. A disconnected worker keeps running, writes `disconnected` to its status file, and retries every few seconds, re-reading `coordinator_url` from `worker.json` before each try.
 - **Status file `state`:** `connected` (only after an accepting `welcome`), `rejected` or `disconnected`.
 - **Sensors:** `camera` and `mic` in `worker.json` name the only devices that may be used, or are `null` when there is none or the resident declined it. Built-in cameras and mics are not used unless named.
-- **`check`:** installs nothing. `ok` is false only when a required item is missing, and then `check` exits with code 4. Ollama and llama.cpp are never required.
+- **`check`:** installs nothing. It covers the config file, the token file, the Python version and whether Ollama answers. It does not open the camera or mic: Layer 3, which owns them, provides its own device check for the setup page's "Camera OK" and "Mic OK" (decided Nov 14; replaces that part of Layer 1's ask L1). `ok` is false only when a required item is missing, and then `check` exits with code 4. Ollama and llama.cpp are never required.
+- **Start commands** (Layer 1's launcher runs exactly these; `<repo>` is the absolute path of this repository, and `uv` runs them in the Python 3.12 environment from `layer2/uv.lock`):
+  - `uv run --project <repo>/layer2 layer2-coordinator --config <coordinator.json>`
+  - `uv run --project <repo>/layer2 layer2-worker --config <worker.json>`
+  - `uv run --project <repo>/layer2 layer2-worker check --config <worker.json> --json`
 - **Exit codes** for the coordinator and worker: 0 stopped normally, 2 bad config, 3 token rejected, 1 anything else. A missing item never makes a program exit.
 - **Stop file:** when the file named by `stop_file` appears, the program stops its jobs and exits within 10 seconds.
 - **Ollama:** programs use the Ollama server already running at `ollama_url`; they never start their own.
