@@ -25,15 +25,14 @@ These are decided (the full list is in `docs/coherence-review.md`). Do not build
 - **The system never speaks to the resident.**
 - **No video or audio is stored.** Only an event log, on the coordinator.
 
-**Which document wins.** The Layer 2 and Layer 4 docs are the reference for how the system works. The Layer 1 doc is the reference for joining, connecting, the relay and the iPhone app; where it describes what other layers do, do not follow it. The Layer 1 doc has not yet been updated to these decisions.
+**Which document wins.** Each layer's own doc is the reference for what that layer does. For anything that crosses layers, `docs/coherence-review.md` and this file win.
 
 **Still undecided: do not build these.** If your next step needs one, stop and tell your human.
 
 1. The items under "Proposed, not yet confirmed" in the Layer 3 doc (timestamps, audio chunk length, retry interval, recognising a repeated reading).
 2. The rule threshold values in the Layer 4 doc (use the proposed values only as named settings, never hardcoded).
-3. How the daily report is delivered to the app.
-4. Layer 2's answers to Layer 1's ten asks, until Lucas confirms them.
-5. Sound detection: a stretch goal. Build it last and let nothing depend on it.
+3. Layer 2's answers to Layer 1's ten asks, until Lucas confirms them.
+4. Sound detection: a stretch goal. Build it last and let nothing depend on it.
 
 ## 3. Words to use
 

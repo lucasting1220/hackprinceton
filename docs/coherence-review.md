@@ -1,20 +1,22 @@
 # Cross-layer decisions and coherence review
 
-**Status: decisions made by Lucas on Nov 14, for the team. The Layer 2 and Layer 4 docs have been updated to match. The Layer 1 doc has not, and there is no Layer 3 spec yet.**
+**Status: decisions made by Lucas on Nov 14, for the team. All four layer docs have been updated to match.**
 
-## What was reviewed
+## The documents
 
-| Layer | Document | Version |
-|---|---|---|
-| 1 | `docs/layer1-join-and-connect.md` | branch `layer-1`, commit `fa56475` |
-| 2 | `docs/layer2-device-management.md` | updated Nov 14 |
-| 3 | "Local AI Home Caregiver: Concept and Build Roadmap" (PDF) | dated Nov 13. This is the whole-product concept, not a Layer 3 spec |
-| 4 | `docs/layer4-care-layer.md` | updated Nov 14; replaces the "care agent" draft |
+| Layer | Document |
+|---|---|
+| 1 | `docs/layer1-join-and-connect.md`, corrected Nov 14 |
+| 2 | `docs/layer2-device-management.md` |
+| 3 | `docs/layer3-raw-data.md` |
+| 4 | `docs/layer4-care-layer.md` |
+
+The earlier "Local AI Home Caregiver: Concept and Build Roadmap" PDF is background only. It still describes one hub laptop, spoken check-ins and "video never leaves the house".
 
 ## Which document wins
 
 - Lucas's Layer 2 and Layer 4 docs are the reference for how the system works.
-- The Layer 1 doc is the reference for joining, connecting, the AWS relay and the iPhone app. Where it describes what other layers do, it is not to be followed.
+- The Layer 1 doc is the reference for joining, connecting, the AWS relay and the iPhone app. Each layer's own doc is the reference for what that layer does.
 - The concept PDF is background. Where it differs from the layer docs, the layer docs win.
 
 ## The data path
@@ -44,36 +46,26 @@ Every piece of fetched data goes to Layer 3. Layer 3 passes it to Layer 4. Layer
 | 17 | Alert buttons | None: no acknowledge, no false-alarm |
 | 18 | Language model uses | The help check, alert rewrites, the daily report, caregiver questions, and Layer 2's planner |
 
-## Changes the Layer 1 doc needs
+## Changes made to the Layer 1 doc
 
-For the Layer 1 owner. Section names are from the Layer 1 doc.
+The Layer 1 doc was written before these decisions. It was corrected on Nov 14:
 
-| Where | Change |
-|---|---|
-| "Who builds what" | Detection models move from Layer 3 to Layer 4. The capture job moves from Layer 2 to Layer 3. Care screens move from Layer 4 to Layer 1. Layer 4 has rules, not "care logic, acknowledgments, escalation" |
-| Asks F1 to F4 | F1 is met (alerts are rule-based). F2 is declined: Layer 4 runs on workers, not the coordinator laptop, and Layer 1's launcher does not start it. F4 is reversed: Layer 1 builds the care screens |
-| Ask L6 | The frame feed for live view comes from Layer 3's capture job, not Layer 2 |
-| Ask L10 | Layer 4 is not on the coordinator laptop, so its endpoint is not a local one |
-| "Handoff to Layer 4" | Calls go through Layer 2's coordinator, not directly to `127.0.0.1:7490`. Remove `POST /v1/acks`. `POST /v1/heart-rate` becomes watch data (heart rate, sleep, activity and steps) and goes to Layer 3. Add a way to deliver the daily report |
-| "Health and offline alerts" | The bridge stops deciding "monitoring degraded"; Layer 4 raises it as an alert. The one-minute heartbeat and the cloud's "hub offline" stay |
-| "Live view" and "Decided" | Consent once at setup, then always available |
-| Request `kind` | `check_now` is a silent re-check; nothing is spoken |
-| Heart rate rows | Done in the copy in this folder: resident mode sends heart rate, sleep and steps as `POST /v1/watch-data`. Still to change: the readings go to Layer 3, not Layer 4 |
-| Sound detection rows | Sound detection is a stretch goal; do not depend on it |
-| Phone screens | Remove acknowledge and false-alarm actions |
-| Questions for Lucas 1 to 5 | Answered in the Layer 2 doc: use the hotspot; the report uses the event log; declined sensors appear as `dropped` with reason `declined`; the worker restarts jobs; an unreachable Ollama goes straight to the rule-based plan |
-| Glossary | "Coordinator laptop" no longer runs Layer 4 |
+- Detectors and rule-based alerts are Layer 4's, running on workers. Layer 1 no longer starts Layer 4 or calls it directly; Layer 2's coordinator carries the messages.
+- The capture job, its video feed for live view, and receiving watch data are Layer 3's.
+- Layer 1 builds every app screen, including the care screens.
+- The bridge no longer decides "monitoring degraded".
+- Alert acknowledgments, false-alarm marks and the spoken "Are you okay?" option are removed.
+- Watch data covers heart rate, sleep and steps, and goes to Layer 3. A call for the daily report is added.
+- Live view needs the resident's consent once, then is always available.
+- Its five questions for Layer 2 are answered in place.
 
 ## Still open
 
 | Item | Owner |
 |---|---|
-| A Layer 3 spec: the capture job, the video feed for live view, receiving watch data, and the three feeds handed to Layer 4 | Layer 3 owner |
-| The Layer 1 owner's agreement to the changes above | Lucas and the Layer 1 owner |
 | Lucas's confirmation of the proposed answers to Layer 1's ten asks (in the Layer 2 doc) | Lucas |
 | The rule threshold values (in the Layer 4 doc) | Lucas, with the team |
 | Whether the camera laptop still shows an on-screen notice during live view | Layer 1 owner |
-| How the daily report is delivered to the app | Layer 1 and Layer 4 owners |
 | Updating or retiring the concept PDF, which still describes one hub laptop, spoken check-ins and "video never leaves the house" | Whole team |
 
 ## Privacy claim, as the decisions now stand
