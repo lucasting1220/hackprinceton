@@ -5,7 +5,8 @@ Usage:
   python-layers.py --tests <files>  run the whole pytest suite of each layer the files belong to;
                                     for files in layer1/ (Node), run every check layer1/README.md
                                     lists: format, lint, type check, tests. It installs nothing:
-                                    a missing package.json, node_modules or npm fails the run
+                                    a missing package.json or npm, or a missing or out-of-date
+                                    node_modules, fails the run
 """
 
 import shutil
@@ -48,6 +49,18 @@ def run_node_checks() -> int:
     npm = shutil.which("npm")
     if npm is None:
         print(f"== {NODE_LAYER.name}: npm is not on PATH", flush=True)
+        return 1
+    installed = subprocess.run(
+        [npm, "ls", "--all"],
+        cwd=NODE_LAYER,
+        capture_output=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=TIMEOUT_S,
+    )
+    if installed.returncode != 0:
+        print(installed.stdout + installed.stderr, end="", flush=True)
+        print(f"== {NODE_LAYER.name}: node_modules is out of date; run `npm ci` in it", flush=True)
         return 1
     for args in NODE_CHECKS:
         print(f"== {NODE_LAYER.name}: npm {' '.join(args)}", flush=True)
