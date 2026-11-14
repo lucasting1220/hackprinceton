@@ -181,6 +181,15 @@ class ApiState(Strict):
     dropped: list[DroppedWork]
 
 
+JobName = Annotated[str, Field(pattern=r"^[a-z][a-z0-9_]{0,63}$")]
+"""A job's name, which is also its folder's name."""
+
+
+class JobStatus(Strict):
+    job: JobName
+    state: Literal["starting", "running", "restarting"]
+
+
 class StatusMessage(Strict):
     """Worker to coordinator, every STATUS_INTERVAL_S. Internal to Layer 2: no contract file."""
 
@@ -189,3 +198,22 @@ class StatusMessage(Strict):
     missing: Annotated[list[MissingItem], Field(max_length=100)]
     memory_free_gb: Annotated[float, Field(ge=0, strict=True, allow_inf_nan=False)]
     cpu_percent: Annotated[float, Field(ge=0, le=100, strict=True, allow_inf_nan=False)]
+    jobs: list[JobStatus] = Field(default_factory=list, max_length=100)
+
+
+class StartMessage(Strict):
+    """Coordinator to worker: run this job. Internal to Layer 2: no contract file. It names the
+    job only; the worker finds the command in its own job folder, so a message can never make
+    a worker run an arbitrary program."""
+
+    type: Literal["start"]
+    schema_version: Literal[1]
+    job: JobName
+
+
+class StopMessage(Strict):
+    """Coordinator to worker: stop this job if it is running. Internal to Layer 2."""
+
+    type: Literal["stop"]
+    schema_version: Literal[1]
+    job: JobName
