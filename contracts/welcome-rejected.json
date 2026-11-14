@@ -1,0 +1,6 @@
+{
+  "type": "welcome",
+  "schema_version": 1,
+  "accepted": false,
+  "reason": "unknown_token"
+}

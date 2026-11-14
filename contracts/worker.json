@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "home_id": "home-uuid",
+  "node_id": "node-uuid",
+  "display_name": "Kitchen laptop",
+  "coordinator_url": "ws://192.168.1.20:7443",
+  "token_file": "/abs/path/worker-token",
+  "camera": "j5create USB HD Webcam",
+  "mic": "j5create USB HD Webcam",
+  "frame_feed_port": 7460,
+  "ollama_url": "http://127.0.0.1:11434",
+  "python": "/abs/path/python",
+  "status_file": "/abs/path/worker-status.json",
+  "stop_file": "/abs/path/worker.stop",
+  "state_dir": "/abs/path/worker"
+}

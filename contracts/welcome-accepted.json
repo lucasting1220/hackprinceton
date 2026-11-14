@@ -1,0 +1,6 @@
+{
+  "type": "welcome",
+  "schema_version": 1,
+  "accepted": true,
+  "node_id": "node-uuid"
+}

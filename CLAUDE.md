@@ -69,8 +69,7 @@ These are decided (the full list is in `docs/coherence-review.md`). Do not build
 
 1. The items under "Proposed, not yet confirmed" in the Layer 3 doc (timestamps, audio chunk length, retry interval, recognising a repeated reading).
 2. The rule threshold values in the Layer 4 doc (use the proposed values only as named settings, never hardcoded).
-3. Layer 2's answers to Layer 1's ten asks, until Lucas confirms them.
-4. Sound detection: a stretch goal. Build it last and let nothing depend on it.
+3. Sound detection: a stretch goal. Build it last and let nothing depend on it.
 
 ## 3. Words to use
 
@@ -275,4 +274,4 @@ Layer 4 has no port of its own: it talks to the coordinator through the worker p
 
 ## 12. Repository setup still to do
 
-- `contracts/`, seeded with the example files from the Layer 1 doc once Layer 2 has accepted them.
+- Contract files between Layers 2, 3 and 4 (raw feeds, job descriptions, the Layer 4 client calls), as those layers reach the steps that need them. Layer 1 and Layer 2's files are in `contracts/`.
