@@ -5,7 +5,7 @@ the team's review. Rules read them through RuleThresholds, never as literals.
 """
 
 from dataclasses import dataclass
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 
 from layer4._checks import is_number, is_whole_number
 
@@ -13,6 +13,11 @@ FALL_CONFIDENCE_MIN = 0.8
 HEART_RATE_HIGH_BPM = 130
 HEART_RATE_LOW_BPM = 40
 MONITORING_STOPPED_AFTER = timedelta(seconds=30)
+
+# Signal times must fall in this range. Alert text turns each time into the laptop's local
+# zone through the operating system's clock functions, which fail outside it on Windows.
+EARLIEST_SIGNAL_TIME = datetime(1970, 1, 2, tzinfo=UTC)
+LATEST_SIGNAL_TIME = datetime(2999, 12, 31, tzinfo=UTC)
 
 
 @dataclass(frozen=True)

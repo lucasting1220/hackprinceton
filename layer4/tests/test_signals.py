@@ -186,3 +186,18 @@ def test_time_outside_the_utc_range_is_rejected(build: Callable[[datetime], obje
     year_one_east_of_utc = datetime.min.replace(tzinfo=timezone(timedelta(hours=5)))
     with pytest.raises(ValueError, match="out of range"):
         build(year_one_east_of_utc)
+
+
+@pytest.mark.parametrize(
+    "moment",
+    [
+        datetime(1960, 1, 1, tzinfo=UTC),
+        datetime(1970, 1, 1, 12, 0, tzinfo=UTC),
+        datetime(3500, 1, 1, tzinfo=UTC),
+        datetime(9999, 12, 31, 23, 30, tzinfo=UTC),
+    ],
+    ids=["1960", "first_day_of_1970", "3500", "end_of_9999"],
+)
+def test_time_outside_the_signal_range_is_rejected(moment: datetime) -> None:
+    with pytest.raises(ValueError, match="out of range"):
+        FallSignal(confidence=0.9, detected_at=moment)
