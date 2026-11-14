@@ -148,6 +148,8 @@ Each process has one supervisor: Layer 1 restarts what it starts, and Lucas rest
 
 Nothing on the network side can confirm a pairing or post an alert. Those happen only on 127.0.0.1, so someone else on the venue Wi-Fi can't pair a phone or fake an alert.
 
+**Discovery.** The coordinator's bridge advertises its network side by mDNS (Bonjour) as `_debbie._tcp` on port 7480, with the first 8 characters of the hub's public key (base64url) in its TXT record, so phones and laptops can tell homes apart.
+
 ## Setting up a home
 
 ### Create a home (first laptop)
