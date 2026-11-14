@@ -1,0 +1,25 @@
+name: python-layers
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  checks:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - name: format
+        run: uv run --no-project --python 3.12 .gstack/python-layers.py ruff format --check .
+      - name: lint
+        run: uv run --no-project --python 3.12 .gstack/python-layers.py ruff check .
+      - name: types
+        run: uv run --no-project --python 3.12 .gstack/python-layers.py mypy .
+      - name: tests
+        run: uv run --no-project --python 3.12 .gstack/python-layers.py pytest
