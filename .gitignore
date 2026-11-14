@@ -1,0 +1,41 @@
+# Owner: Lucas. Shared ignore rules only; layer-specific rules go in layerN/.gitignore.
+
+# Operating systems and editors
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Node
+node_modules/
+dist/
+
+# Models, media and screenshots
+*.gguf
+*.mp4
+*.mov
+*.wav
+Screenshot*.png
+
+# Secrets
+.env
+.env.*
+*.pem
+*.key
+*.p8
+*.p12
+*.token
+worker-token
+
+# Local, per-person Claude Code and gstack files
+CLAUDE.local.md
+.claude/settings.local.json
+.gstack/

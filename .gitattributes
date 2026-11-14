@@ -1,0 +1,16 @@
+# Owner: Lucas. Every text file uses LF line endings on every machine.
+* text=auto eol=lf
+
+# Windows-only scripts keep CRLF.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Binary files: never merged or converted.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.pdf binary
+*.gguf binary
+*.zip binary
