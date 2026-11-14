@@ -161,21 +161,10 @@ def test_help_verdict_bool_is_accepted(verdict: bool) -> None:
     assert HelpSignal(is_call_for_help=verdict, detected_at=AT).is_call_for_help is verdict
 
 
-class _ClocksGoBackZone(tzinfo):
-    """UTC-4 before the clocks go back (fold 0), UTC-5 after (fold 1), like a DST change."""
-
-    def utcoffset(self, dt: datetime | None) -> timedelta:
-        return timedelta(hours=-5 if dt is not None and dt.fold else -4)
-
-    def dst(self, dt: datetime | None) -> timedelta:
-        return timedelta(0)
-
-    def tzname(self, dt: datetime | None) -> str:
-        return "clocks-go-back"
-
-
-def test_monitoring_order_is_checked_in_utc_across_a_clock_change() -> None:
-    zone = _ClocksGoBackZone()
+def test_monitoring_order_is_checked_in_utc_across_a_clock_change(
+    clocks_go_back_zone: tzinfo,
+) -> None:
+    zone = clocks_go_back_zone
     stopped = datetime(2026, 11, 1, 1, 30, fold=1, tzinfo=zone)
     checked = datetime(2026, 11, 1, 1, 45, fold=0, tzinfo=zone)
     assert checked.astimezone(UTC) < stopped.astimezone(UTC)

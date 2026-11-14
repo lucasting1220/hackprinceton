@@ -77,3 +77,6 @@ class MonitoringSignal:
                 f"checked_at ({self.checked_at.isoformat()}) is before "
                 f"stopped_at ({self.stopped_at.isoformat()})"
             )
+
+
+Signal = FallSignal | HelpSignal | HeartRateSignal | MonitoringSignal
