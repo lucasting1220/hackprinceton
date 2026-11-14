@@ -2,7 +2,9 @@
 
 **Status: draft for team review. Nothing is built.** This replaces our first Layer 1 draft. It is written against the other layer docs on `main` and the decisions in `docs/coherence-review.md`. "Decided" lists the Layer 1 team's decisions; a row tagged with an ask also needs that owner's agreement. The asks and the handoff sections are proposals: names, fields and ports can change once, together, at hour 0. "Open questions" are not settled.
 
-**Corrected by Lucas, Nov 14,** to match the cross-layer decisions in `docs/coherence-review.md`. This doc is the reference for joining, connecting, the AWS relay and the iPhone app. Layer 1 makes no decisions about care or monitoring: it connects devices and delivers what Layer 4 sends. How the other layers work is defined in their own docs, not here.
+**Corrected by Lucas, Nov 14,** to match the cross-layer decisions in `docs/coherence-review.md`. This doc is the reference for joining, connecting, the relay and the iPhone app. Layer 1 makes no decisions about care or monitoring: it connects devices and delivers what Layer 4 sends. How the other layers work is defined in their own docs, not here.
+
+**Changed Nov 14: Vultr replaces AWS.** The relay is now one server the team runs on Vultr, with no AWS services. Everything else in this doc is unchanged by that switch.
 
 ## Summary
 
@@ -11,8 +13,8 @@ Layer 1 turns a few spare laptops and the family's iPhones into one paired home 
 - Each laptop gets a setup page. The first laptop creates the home and becomes the coordinator laptop (Layer 2's "central agent"). Each extra laptop joins as a worker once a caregiver approves it by scanning a QR code.
 - Layer 1 starts Lucas's coordinator and worker programs. It hands each worker the coordinator's address and a join token: the "address and a credential" in Layer 2's handoff.
 - Layer 1 builds the whole iPhone app, in its own `debbie-ios` project, including the care screens, which show data that Layer 4 supplies. The app pairs with the home by QR code. Its resident mode sends Apple Watch heart rate, sleep and steps from HealthKit to Layer 3.
-- Remote access goes through a small AWS relay. The home only makes outgoing connections (to the relay, and to AWS's video service during a live view), so there is no VPN app and no router setup. Messages between the home and phones are end-to-end encrypted, so the relay can't read them.
-- Once the resident has consented at setup, a caregiver can open a live view of the home camera at any time. Video goes straight from the laptop to the phone, or through AWS's TURN server when it must, encrypted either way.
+- Remote access goes through a small relay that the team runs on one Vultr server. The home only makes outgoing connections (to the relay, and to the relay's TURN server during a live view), so there is no VPN app and no router setup. Messages between the home and phones are end-to-end encrypted, so the relay can't read them.
+- Once the resident has consented at setup, a caregiver can open a live view of the home camera at any time. Video goes straight from the laptop to the phone, or through the relay's TURN server when it must, encrypted either way.
 
 Output: paired laptops running Layer 2; a caregiver phone that gets alerts anywhere and survives network changes without re-pairing; and a live view on request.
 
@@ -28,8 +30,8 @@ Output: paired laptops running Layer 2; a caregiver phone that gets alerts anywh
 | Detectors: fall model, speech-to-text, help check, heart-rate check | Layer 4 |
 | Rule-based alerts, "monitoring degraded", the daily report, answers to questions, live status | Layer 4 |
 | iPhone app (`debbie-ios`): pairing, connection, push, live viewer, resident mode, and every screen, including the care screens (alerts, live status, the daily report, the question box) | Layer 1, with the care screens' data from Layer 4 |
-| AWS relay: CDK stack, Lambdas, IoT, DynamoDB, push, offline watchdog, provisioning script | Layer 1 |
-| Hub connector on the coordinator laptop: AWS connection, encryption, outbox, health reports | Layer 1 |
+| Relay on Vultr: the relay service, its database, push to Apple, offline watchdog, TURN server, server setup and provisioning | Layer 1 |
+| Hub connector on the coordinator laptop: relay connection, encryption, outbox, health reports | Layer 1 |
 | Live-view sender on the camera laptop | Layer 1, fed by a local frame feed from Layer 3's capture job (ask T5) |
 
 Layer 1 builds no scheduler, cluster heartbeat, care engine or second dashboard, and it decides nothing about care or monitoring. Its setup page links to Lucas's dashboard.
@@ -42,17 +44,17 @@ Layer 1 builds no scheduler, cluster heartbeat, care engine or second dashboard,
 | Laptop pairing | Layer 1 gives each worker a join token and writes the accepted tokens to a file the coordinator reads. The worker sends its token in `hello`; Lucas's coordinator only checks it and replies accept or reject (ask L2) |
 | Approving a laptop | The new laptop shows a QR code. A paired caregiver scans it in the app and approves |
 | Phone pairing | The coordinator laptop shows a single-use QR code that expires after 10 minutes. The person at that laptop confirms a 4-digit code that also shows on the phone. A phone pairs as a caregiver (it gets the home key) or as a resident (heart rate only). A caregiver phone can also turn on resident mode, so one iPhone can play both roles in the demo |
-| Caregiver identity | For the demo, the device credential a phone receives when it pairs. The hub vouches for each phone to the relay. Caregiver accounts (Cognito sign-in) come after the hackathon |
+| Caregiver identity | For the demo, the device credential a phone receives when it pairs. The hub vouches for each phone to the relay. Caregiver accounts with a sign-in come after the hackathon |
 | Encryption | Messages between the hub and phones are end-to-end encrypted with keys exchanged during pairing (see "Phone ↔ hub messages"). The relay sees only routing data: IDs, roles, times, sizes, which phones belong to a home, and when a live view starts |
-| Push | Amazon SNS to Apple's push service. The push carries the encrypted alert, and the app's notification extension decrypts it on the phone, so the notification says what happened |
-| Live video | In the demo. Layer 1 builds the sender: a browser window on the camera laptop that uses AWS's Kinesis Video Streams (KVS) WebRTC JavaScript library and gets its frames from Layer 3's capture job (ask T5). Video only, no audio. Each session lasts up to 5 minutes, a limit of the video service, and the caregiver can start another at once |
+| Push | The relay sends pushes straight to Apple's push service (APNs) with the team's APNs key. The push carries the encrypted alert, and the app's notification extension decrypts it on the phone, so the notification says what happened |
+| Live video | In the demo. Layer 1 builds the sender: a browser window on the camera laptop that uses the browser's own WebRTC and gets its frames from Layer 3's capture job (ask T5). Video only, no audio. Each session lasts up to 5 minutes, and the caregiver can start another at once |
 | Live-view consent | The resident consents once during setup; after that a caregiver can open a live view at any time. The resident can still turn it off: on the coordinator's setup page, on the camera laptop's live notice, or in resident mode. The camera laptop shows a full-screen notice while someone is watching |
 | iPhone app | Layer 1 owns the Xcode project, `debbie-ios`, kept outside this repository. Layer 1 builds every screen; Layer 4 supplies the data for the care screens (ask F4). One app, with a caregiver role and a resident mode |
 | Watch data | In the demo. Resident mode reads heart rate, last night's sleep (total, bedtime, wake time and interruptions) and steps so far today from HealthKit (synced from the Watch) and sends them to Layer 3 over home Wi-Fi. HealthKit can't be read while the phone is locked, so readings arrive in bursts after an unlock. The app sends everything since its last check, and the resident screen has a "Sync now" button |
 | Sound detection | A stretch goal owned by Layer 4. Nothing in Layer 1 depends on it. Phones are not sensors |
 | Component list | Layer 1 keeps one list of what each laptop role needs, including Python, Ollama and its models, and llama.cpp. For the demo, laptops are set up by hand from it |
-| Languages | Node/TypeScript for the laptop bridge and the AWS stack, Swift for the app |
-| Accounts | The team has a paid Apple Developer account, an AWS account with credits, one iPhone and an Apple Watch |
+| Languages | Node/TypeScript for the laptop bridge and the relay, Swift for the app |
+| Accounts | The team has a paid Apple Developer account, a Vultr account, one iPhone and an Apple Watch |
 
 ## Asks
 
@@ -100,9 +102,9 @@ We no longer ask Lucas for an enrollment API, phone credentials, an artifact man
 Caregiver iPhone ◀──── push ─────┐
      │ HTTPS                      │
      ▼                            │
-┌──────────── AWS relay (Layer 1) ─────────┐
-│ API · IoT Core · DynamoDB · SNS push     │
-│ offline watchdog · KVS signaling, TURN   │
+┌──────────── Relay on Vultr (Layer 1) ────┐
+│ relay service · SQLite · push to Apple   │
+│ offline watchdog · TURN server           │
 └──────────────────▲───────────────────────┘
                    │ one outgoing connection
 ┌──────────── COORDINATOR LAPTOP ──────────┐
@@ -156,7 +158,7 @@ Nothing on the network side can confirm a pairing or post an alert. Those happen
 1. Run the setup command from Terminal (see "Network permissions"). The setup page opens in the browser. Choose **Create a home**.
 2. **Check this laptop**: CPU, memory, disk, OS, camera and mic. This laptop coordinates, so a camera or mic on it won't be used.
 3. **Keep this laptop awake**: the person approves, and the bridge keeps the laptop and its screen awake while it runs (`caffeinate -dis -w <bridge pid>` on macOS; on Windows, screen and sleep set to Never when plugged in). Lids stay open during the demo.
-4. The bridge creates the home ID, the home key and its own key pair, and shows the home ID. Remote access shows as "not set up" until the team runs the provisioning script with that home ID (build step 5); the bridge loads the certificate the next time it starts.
+4. The bridge creates the home ID, the home key and its own key pair, and shows the home ID. Remote access shows as "not set up" until the team runs the provisioning command on the relay server with that home ID (build step 5); the bridge loads the certificate the next time it starts.
 5. It writes `coordinator.json` and an empty `accepted-workers.json`, and starts Lucas's coordinator.
 6. **Pair the caregiver's phone** (below). Pair the resident's iPhone the same way, choosing Resident, or, if the team has one iPhone, turn on resident mode on the caregiver's phone.
 7. **Resident consent**: the resident agrees to each sensor (camera, mic, watch data) and, once, gives or withholds consent to live view. A "no" to the camera or mic leaves that device unconfigured (its `worker.json` field is `null`), and the setup page says what won't run; Layer 2's plan lists its jobs as dropped with the reason `declined`. A "no" to watch data leaves resident mode off.
@@ -167,7 +169,7 @@ Nothing on the network side can confirm a pairing or post an alert. Those happen
 2. The app asks for Local Network access first. It then scans the code, makes its own key pair, and sends its public key, a name (for example "Caregiver's iPhone") and its role, with a proof that it saw the QR code.
 3. The laptop and the phone show the same 4-digit code, and the person at the laptop clicks **Confirm**. Only someone at the coordinator laptop can confirm.
 4. The bridge sends back, encrypted with the phone's own key: the home ID, a device ID and device credential, the relay's address and, for caregivers, the home key.
-5. The hub tells the relay about the new phone (device ID, role and a hash of its credential) over its own AWS connection. From then on, the relay accepts that phone.
+5. The hub tells the relay about the new phone (device ID, role and a hash of its credential) over its own relay connection. From then on, the relay accepts that phone.
 6. The phone keeps its keys and credential in a Keychain access group shared with its notification extension, readable after the first unlock, so the extension can decrypt alerts while the phone is locked.
 
 ### Add a laptop
@@ -264,8 +266,8 @@ These are proposals for Lucas, as owner of Layers 3 and 4. Layer 4 runs on worke
 - Layer 4 sends a template alert the moment a rule fires. When the language model's rewrite is ready, Layer 4 sends it with the same `alert_id` and `update: true`, and the phone replaces the first notification.
 - "Monitoring degraded" is an ordinary alert that Layer 4 decides to send. The bridge delivers it and adds nothing.
 - Nothing about an alert comes back from the phone: there are no acknowledgments and no false-alarm marks.
-- The hub connector encrypts each message once with the home key and keeps it in an outbox on disk until the relay confirms it (the MQTT acknowledgment), resending after an outage. The LAN gateway serves the same encrypted message to phones on home Wi-Fi.
-- Requests are asynchronous: the phone gets an ID at once and fetches the reply later, because AWS's HTTP API ends any request after 30 seconds.
+- The hub connector encrypts each message once with the home key and keeps it in an outbox on disk until the relay confirms it (the relay's acknowledgment message), resending after an outage. The LAN gateway serves the same encrypted message to phones on home Wi-Fi.
+- Requests are asynchronous: the phone gets an ID at once and fetches the reply later, because a reply (for example an answer from the deep model) can take longer than a phone request should wait.
 
 ## Phone ↔ hub messages (proposed)
 
@@ -279,28 +281,30 @@ Both tracks build to this, and any change is agreed by both. The iPhone track dr
 - **Credentials**: a phone shows its device credential only to the relay, over HTTPS. On the LAN gateway it proves who it is by encrypting each request with its own key, so the credential never crosses the local network.
 - **Library notes**: CryptoKit's combined sealed box is nonce, ciphertext, tag; split it to fill `n` and `c`. Node imports a raw X25519 public key most reliably as a JWK, `{kty: "OKP", crv: "X25519", x}`.
 
-## Remote connection (AWS)
+## Remote connection (Vultr)
 
-The hub keeps one outgoing connection to AWS IoT Core. Nothing in the home accepts connections from the internet, and laptop-to-laptop traffic stays on the local network.
+The relay is one Vultr Cloud Compute server that the team runs. The hub keeps one outgoing connection to it. Nothing in the home accepts connections from the internet, and laptop-to-laptop traffic stays on the local network.
 
 | Part | Job |
 |---|---|
-| IoT Core | The hub's connection: MQTT over TLS on port 443 (which needs the ALPN setting AWS's IoT Device SDK adds), with a clean session so commands queued while the hub was offline aren't replayed. One policy for every home, keyed on the IoT thing name: connect only as itself, publish to `homes/{home_id}/hub/events`, and subscribe and receive on `homes/{home_id}/hub/commands`. An IoT rule sends hub events to the relay's Lambda, which takes `home_id` from the topic, never from the message |
-| API Gateway HTTP API + Lambda | The phone's API: send a request, fetch messages, start or stop a live view, register for push. Each call carries the phone's device credential |
-| DynamoDB | One table: phones per home, encrypted messages (kept 7 days), the hub's last contact time, live-view sessions. The relay drops duplicate message IDs |
-| SNS → APNs | Push to caregiver phones with the team's APNs key, through two platform applications: APNS for TestFlight builds and APNS_SANDBOX for builds run from Xcode. Phones register their push token together with its environment |
-| EventBridge + Lambda | The offline watchdog, once a minute |
-| Kinesis Video Streams WebRTC | Signaling and TURN for live view: one signaling channel per home, with recording and storage off. The Lambda's role may get endpoints, get ICE servers, and connect as sender or viewer on Debbie's channels only |
-| CDK (TypeScript) | Defines everything in one region, with a budget alert |
+| Relay service (Node/TypeScript) | The hub's connection: one WebSocket over TLS on port 443, opened by the hub and signed in with the hub's credential. The relay takes the `home_id` from that credential, never from a message. Commands are not queued for an offline hub. Also the phone's API (send a request, fetch messages, start or stop a live view, register for push), where each call carries the phone's device credential, and live-view signaling |
+| SQLite, on the server | Phones per home, encrypted messages (kept 7 days), the hub's last contact time, live-view sessions. The relay drops duplicate message IDs |
+| Push to Apple | The relay sends to Apple's push service directly over HTTP/2 with the team's APNs key: the sandbox endpoint for builds run from Xcode, the production endpoint for TestFlight builds. Phones register their push token together with which of the two it belongs to |
+| Offline watchdog | A timer inside the relay service, once a minute |
+| TURN server (coturn) | Relays live video when the laptop and the phone can't connect directly. It runs on the same server and hands out credentials that last 5 minutes, signed with a secret it shares with the relay service |
+| HTTPS certificate | A free Let's Encrypt certificate for the relay's domain name (to buy; see "Prerequisites"), renewed automatically by a reverse proxy such as Caddy in front of the relay service |
+| Vultr firewall | Opens only 443 (HTTPS and the hub's WebSocket), the TURN ports, and SSH from the team's own addresses |
 
-For the demo, the team runs a provisioning script once the CDK stack exists (build step 5). Given the home ID that Create a home shows, it creates an IoT thing named after it, with a certificate attached to the shared policy, and the home's video channel. It saves the files on the coordinator laptop, where the bridge picks them up on its next start. No AWS access keys go on a home laptop or a phone, or into the repo. After the hackathon, the hub enrolls itself with a certificate request approved from a paired caregiver's phone.
+For the demo, the team runs a provisioning command on the relay server once it is set up (build step 5). Given the home ID that Create a home shows, it creates the home's record and a hub credential, and saves the credential file on the coordinator laptop, where the bridge picks it up on its next start. The Vultr API key never goes on a home laptop or a phone, or into the repo. After the hackathon, the hub enrolls itself with a request approved from a paired caregiver's phone.
 
 Every command carries its send time, and the hub ignores commands older than 30 seconds.
+
+**One server is a single point of failure.** If the Vultr server is down, alerts wait in the hub's outbox and the "hub offline" warning cannot be sent. That is accepted for the demo.
 
 ### Push
 - Every alert push carries `aps.alert` with placeholder text ("New alert from Debbie"), `mutable-content: 1`, the time-sensitive interruption level (with the Time Sensitive Notifications capability), and the encrypted alert as a custom key. The app's notification extension decrypts it and replaces the text.
 - APNs payloads are capped at 4 KB, so the encrypted alert stays under about 2 KB; the app fetches anything longer when it's opened.
-- An update (`update: true`) is sent with the alert's ID as its collapse ID, so it replaces the first notification instead of adding a second.
+- An update (`update: true`) is sent with the alert's ID as its collapse ID (the `apns-collapse-id` header), so it replaces the first notification instead of adding a second.
 - The relay writes the "hub offline" push itself, with the last contact as a Unix time that the extension shows in the phone's time zone ("Debbie hasn't heard from home since 3:12 PM"). It contains nothing private.
 
 ### What the relay can see
@@ -323,20 +327,20 @@ Every command carries its send time, and the hub ignores commands older than 30 
 ## Live view
 
 1. The caregiver taps **Live view**. The app sends a live-view request encrypted with its own key (a request ID, the time and a fresh viewer client ID) and gets a session ID back at once.
-2. A Lambda checks that this phone is a caregiver for the home. For the home's channel, it gets the signaling endpoints and the ICE servers (KVS's STUN address, plus TURN addresses with a username and password that last 5 minutes), and pre-signs a 5-minute sender URL. It sends "start live view" to the hub with the sender URL, the ICE servers and the phone's encrypted request, unopened.
+2. The relay checks that this phone is a caregiver for the home. It creates the session, makes TURN credentials that last 5 minutes, and sends "start live view" to the hub with the session ID, the TURN and STUN addresses with those credentials, and the phone's encrypted request, unopened.
 3. The hub connector opens the request, which must decrypt with a paired caregiver's key, be under 30 seconds old and not have been seen before. Then it checks the resident's consent. If the resident has not consented, or has turned live view off, it replies "denied" and the app says so. If it's on, it tells the camera laptop's bridge, over the bridge link, to open the sender and which viewer client ID it may answer.
-4. The sender is one Chrome or Edge window that the bridge starts with its own profile, in kiosk mode (Edge on Windows, where every laptop has it). The window is the full-screen **Live: your caregiver is watching** notice, with a **Turn off live view** button, and it holds the canvas being streamed, shown as a preview. It reads frames from Layer 3's frame feed (ask T5), draws them on the canvas, and streams the canvas through the KVS JavaScript library, which takes the pre-signed URL through a custom request signer. Nothing may cover this window, because Chrome stops streaming a hidden canvas.
-5. When the sender is connected, the hub replies "ready". Only then does the Lambda pre-sign the viewer URL, which the phone fetches with its session ID along with the ICE servers. Video goes straight from laptop to phone when the networks allow, and otherwise through TURN, encrypted either way.
+4. The sender is one Chrome or Edge window that the bridge starts with its own profile, in kiosk mode (Edge on Windows, where every laptop has it). The window is the full-screen **Live: your caregiver is watching** notice, with a **Turn off live view** button, and it holds the canvas being streamed, shown as a preview. It reads frames from Layer 3's frame feed (ask T5), draws them on the canvas, and streams the canvas with the browser's own WebRTC, exchanging connection details with the phone through the relay's signaling WebSocket for that session. Nothing may cover this window, because Chrome stops streaming a hidden canvas.
+5. When the sender is connected to signaling, the hub replies "ready", and the phone joins the same session's signaling with its session ID and receives the TURN and STUN addresses. Video goes straight from laptop to phone when the networks allow, and otherwise through the TURN server, encrypted either way.
 6. The session ends after 5 minutes, when the caregiver taps **Stop**, or when the resident turns live view off. The bridge closes the sender window's process at once. **Keep watching** starts a new session.
 
 Notes:
 - Video only: no room audio and no talk-back.
 - The coordinator laptop never encodes video.
-- AWS offers KVS WebRTC libraries for C, JavaScript, Android and iOS, but not Python, which is why the sender is a browser window. The frame feed is a WebSocket rather than an image URL so the browser can stream the canvas without cross-origin errors.
-- The app's viewer uses Google's WebRTC library built for iOS. Google no longer publishes iOS builds, so the app uses a maintained community build. It opens the pre-signed URL as a WebSocket and exchanges KVS's JSON signaling messages, so phones never hold AWS keys.
-- KVS limits that shape this design: one sender per channel, up to 10 viewers, sender connections of at most an hour, and TURN credentials that last 5 minutes. Hence 5-minute sessions.
-- The riskiest part, KVS through TURN to an iPhone on cellular, is tested first, in build step 0b.
-- Cost: AWS lists $0.03 per active channel per month, $2.25 per million signaling messages and $0.12 per 1,000 TURN minutes (US East), plus data transfer. Measure the real cost per home during the hackathon before quoting a number in the pitch.
+- The sender is a browser window because browsers have WebRTC built in on both Mac and Windows, with nothing to install. The frame feed is a WebSocket rather than an image URL so the browser can stream the canvas without cross-origin errors.
+- The app's viewer uses Google's WebRTC library built for iOS. Google no longer publishes iOS builds, so the app uses a maintained community build. It talks to the relay's signaling WebSocket, so phones hold no server keys.
+- The 5-minute session is kept so a forgotten live view doesn't stream all day. It is a setting, not a limit of the server.
+- The riskiest part, video through the TURN server to an iPhone on cellular, is tested first, in build step 0b.
+- Cost: Vultr bills the server by the hour, and TURN traffic counts toward its bandwidth allowance. Measure the real traffic per live view during the hackathon before quoting a cost in the pitch.
 
 ## Privacy claim
 
@@ -364,7 +368,8 @@ Target: reconnect within 30 seconds once both ends have a working connection. Re
 | Item | State |
 |---|---|
 | Apple Developer account | Exists. App ID, push capability and APNs key (.p8, with its key ID and team ID) still to create |
-| AWS account | Exists, with credits. Region, `cdk bootstrap`, balance and expiry still to check |
+| Vultr account | Exists. Check the balance or credits, choose a region near the demo, create the server and its firewall |
+| Domain name | To buy. Point a name such as `relay.<domain>` at the Vultr server before build step 5 |
 | iPhones | One, paired with the Apple Watch. A second (a teammate's, added as an internal TestFlight tester) would let the caregiver and the resident be separate phones |
 | Demo phone settings | Focus and Do Not Disturb off; notifications allowed |
 | Chrome or Edge on the camera laptop | To check |
@@ -380,14 +385,14 @@ Two tracks run side by side: laptop and cloud (bridge, hub connector, relay, sen
 | Step | What | Depends on |
 |---|---|---|
 | 0 | Hour 0–1: agree with Lucas the handoff files and ports, the messages in "Handoff to Layer 4", and the frame feed (asks T1–T5); check prerequisites; run the network test | none |
-| 0b | Hours 1–6, the riskiest outside services first: (a) as soon as the app has a build with push enabled, one push to it through SNS, then one decrypted by the notification extension on a locked phone; (b) AWS's KVS WebRTC JavaScript sample page as sender on the camera laptop and as viewer in Safari on the iPhone over cellular, with TURN forced (using a developer's temporary AWS credentials, for this test only). If (a) fails by hour 6, the app fetches alerts while it's open and the push tests are marked BLOCKED. If (b) fails by hour 8, tell the whole team before doing more video work | 0 |
+| 0b | Hours 1–6, the riskiest outside services first: (a) as soon as the app has a build with push enabled, one push to it sent straight to Apple with the team's APNs key, then one decrypted by the notification extension on a locked phone; (b) a minimal WebRTC test page as sender on the camera laptop and as viewer in Safari on the iPhone over cellular, through coturn on the Vultr server with TURN forced. If (a) fails by hour 6, the app fetches alerts while it's open and the push tests are marked BLOCKED. If (b) fails by hour 8, tell the whole team before doing more video work | 0 |
 | 1 | Create a home: bridge, setup page, start Lucas's coordinator (a labelled stub until his step 1 lands), dashboard link | 0 |
 | 2 | Pair a phone: QR code, matching code, encrypted handover; the app keeps its keys in the shared Keychain | 1 |
 | 3 | Add a laptop: join request, approval from the phone, token, Lucas's worker accepted and shown on his dashboard | 2, Layer 2 step 1, asks L1–L4 |
 | 4 | Alert on the phone over home Wi-Fi: a stub coordinator hands over an alert as if from Layer 4, the hub connector encrypts it, the LAN gateway serves it, and the app decrypts and shows it | 2 |
-| 5 | Relay: CDK stack, provisioning the hub, an alert pushed to a locked phone on cellular and decrypted by the notification extension, heartbeat, offline watchdog | 0b, 4 |
+| 5 | Relay: the Vultr server, its domain and certificate, the relay service, provisioning the hub, an alert pushed to a locked phone on cellular and decrypted by the notification extension, heartbeat, offline watchdog | 0b, 4 |
 | 6 | A real alert end to end: Layer 3 captures a staged fall, Layer 4's fall model and rule fire, the push arrives, with Ollama stopped | 5, Layer 2 steps 2 and 7, Layers 3 and 4 |
-| 7 | Live view on cellular: Layer 3's frame feed to the sender window, through KVS, to the app's viewer, with consent, the on-screen notice, the 5-minute limit, Stop and Turn off live view | 0b, 5, ask T5 |
+| 7 | Live view on cellular: Layer 3's frame feed to the sender window, through the relay's signaling and TURN server, to the app's viewer, with consent, the on-screen notice, the 5-minute limit, Stop and Turn off live view | 0b, 5, ask T5 |
 | 8 | Resident watch data (heart rate, sleep, steps): HealthKit to the LAN gateway, then through Lucas's coordinator to Layer 3 | 2, Layer 2 step 7, Layer 3 |
 | 9 | Hardware check, keep-awake, sensor check and resident consent screens | 3 |
 | 10 | Three full rehearsals and a backup recording | all |
@@ -405,7 +410,7 @@ If time runs short, cut in this order: mDNS discovery (type the address), the ap
 - [demo] Add a second laptop with phone approval: it appears on Lucas's dashboard with 2-second updates.
 - A wrong join token is rejected, and the setup page says so. A pairing QR code can't be confirmed twice.
 - Nothing on the bridge's network side can confirm a pairing or post an alert.
-- [demo] An alert reaches a locked phone on cellular within 10 seconds and the notification names what happened, while the DynamoDB table and the logs hold only ciphertext.
+- [demo] An alert reaches a locked phone on cellular within 10 seconds and the notification names what happened, while the relay's database and logs hold only ciphertext.
 - [demo] With Ollama stopped, a staged fall still produces an alert.
 - [demo] Cut the coordinator laptop's internet: "hub offline" arrives; on reconnect, "back online" and the queued alerts arrive.
 - Close the camera laptop: Layer 4's "monitoring degraded" alert is delivered to the phone.
@@ -423,7 +428,7 @@ Kept from the first draft, but not built tonight:
 - Installer: one command with a bundled Node runtime (Node's single-executable builds don't support Intel Macs), packaged Python per platform, download URLs and checksums in the component list, resumable downloads, disk checks and atomic activation.
 - Enrollment in Layer 1's bridge: invitations bound to one laptop's key, safe retries, revocation that closes live sessions, and recovery.
 - TLS with a pinned certificate between workers and the coordinator.
-- Caregiver accounts (Cognito) and several caregivers.
+- Caregiver accounts with a sign-in, and several caregivers.
 - The hub enrolling itself from a certificate request, certificate rotation, and a new home key when a phone is removed.
 - Signed commands from phone to hub, and checking the viewer's DTLS fingerprint (sent encrypted by the phone) before the sender answers.
 - Per-sensor opt-out that Layer 2's plan understands, and pausing monitoring.
@@ -455,8 +460,8 @@ Kept from the first draft, but not built tonight:
 - **Camera laptop:** the worker the external webcam is plugged into. Its built-in mic is the only mic. Built-in laptop cameras and mics aren't used unless named in `worker.json`.
 - **Home** (`home_id`): one coordinator, its workers and the paired phones. The same thing as Layer 2's cluster.
 - **Hub:** the coordinator laptop's bridge, acting for the whole home. It holds the home key and its own key pair, pairs phones, and reaches the relay through the hub connector.
-- **Bridge:** Layer 1's Node program on every laptop. On the coordinator laptop it also pairs phones and laptops, serves phones on home Wi-Fi (the **LAN gateway**), and encrypts messages for phones and holds the AWS connection (the **hub connector**).
-- **Relay:** Layer 1's AWS services that connect phones to the hub. Live video may instead pass through KVS's TURN server, which is separate.
+- **Bridge:** Layer 1's Node program on every laptop. On the coordinator laptop it also pairs phones and laptops, serves phones on home Wi-Fi (the **LAN gateway**), and encrypts messages for phones and holds the relay connection (the **hub connector**).
+- **Relay:** Layer 1's server on Vultr that connects phones to the hub. It also runs the TURN server that live video may pass through.
 - **Live-view sender:** the kiosk browser window on the camera laptop that streams to a phone and shows the live notice.
 - **Home key:** the key the hub uses to encrypt messages for caregiver phones.
 - **A phone's own key:** the key each phone shares only with the hub, from pairing.
@@ -467,11 +472,11 @@ Kept from the first draft, but not built tonight:
 
 This doc covers two tracks. The iPhone track works in the `debbie-ios` folder from its own kickoff brief, which points back here. For the laptop and cloud track:
 
-Read `CLAUDE.md` first, then this doc and `docs/layer2-device-management.md`. Build only Layer 1, in the order of "Build order (hackathon)", and nothing listed under "After the hackathon". Use clearly labelled stubs for Lucas's programs until their code exists, then switch to the real thing. Match "Phone ↔ hub messages" exactly, and pass the iPhone track's test vectors. Never write to another layer's directories or branches. Keep secrets out of the repo and the logs: AWS credentials, the APNs key, join tokens, device credentials and the home key. Run the [demo] acceptance tests and record the results.
+Read `CLAUDE.md` first, then this doc and `docs/layer2-device-management.md`. Build only Layer 1, in the order of "Build order (hackathon)", and nothing listed under "After the hackathon". Use clearly labelled stubs for Lucas's programs until their code exists, then switch to the real thing. Match "Phone ↔ hub messages" exactly, and pass the iPhone track's test vectors. Never write to another layer's directories or branches. Keep secrets out of the repo and the logs: the Vultr API key, the TURN shared secret, the hub credential, the APNs key, join tokens, device credentials and the home key. Run the [demo] acceptance tests and record the results.
 
 Code layout (can change once, together, before coding):
 - `layer1/bridge`: Node/TypeScript setup page, launcher, pairing, hub connector, LAN gateway and the live-view sender page
-- `layer1/cloud`: the CDK app, the Lambdas and the provisioning script
+- `layer1/relay`: the relay service, the TURN server and reverse proxy configuration, the server setup steps and the provisioning command
 - `layer1/contracts`: the phone-to-hub test vectors from "Phone ↔ hub messages". Example files shared with other layers ("Handoff to Layer 2", "Handoff to Layer 4") go in the top-level `contracts/` folder
 - `layer1/tests`
 - The iPhone app lives in its own `debbie-ios` project, with its notification extension, live viewer and every screen.
@@ -482,17 +487,10 @@ Code layout (can change once, together, before coding):
 - The team's concept and roadmap ("Local AI Home Caregiver") and layer notes, shared outside the repo
 - Node single-executable applications: https://nodejs.org/api/single-executable-applications.html
 - llama.cpp RPC: https://github.com/ggml-org/llama.cpp/blob/master/tools/rpc/README.md
-- AWS IoT protocols and ports: https://docs.aws.amazon.com/iot/latest/developerguide/protocols.html
-- AWS IoT publish and subscribe policies: https://docs.aws.amazon.com/iot/latest/developerguide/pub-sub-policy.html
-- KVS WebRTC, how it works: https://docs.aws.amazon.com/kinesisvideostreams-webrtc-dg/latest/devguide/kvswebrtc-how-it-works.html
-- KVS WebRTC SDKs: https://docs.aws.amazon.com/kinesisvideostreams-webrtc-dg/latest/devguide/webrtc-sdks.html
-- KVS WebRTC limits: https://docs.aws.amazon.com/kinesisvideostreams-webrtc-dg/latest/devguide/kvswebrtc-limits.html
-- KVS GetIceServerConfig: https://docs.aws.amazon.com/kinesisvideostreams/latest/dg/API_signaling_GetIceServerConfig.html
-- KVS WebRTC JavaScript SDK: https://github.com/awslabs/amazon-kinesis-video-streams-webrtc-sdk-js
-- KVS pricing: https://aws.amazon.com/kinesis/video-streams/pricing/
-- SNS and APNs: https://docs.aws.amazon.com/sns/latest/dg/sns-apple-authentication-methods.html
-- SNS message attributes (APNs collapse ID): https://docs.aws.amazon.com/sns/latest/dg/sns-message-attributes.html
+- Vultr documentation: https://docs.vultr.com/
+- coturn: https://github.com/coturn/coturn
+- Caddy automatic HTTPS: https://caddyserver.com/docs/automatic-https
+- Sending notification requests to APNs: https://developer.apple.com/documentation/usernotifications/sending-notification-requests-to-apns
 - Modifying notifications in an extension: https://developer.apple.com/documentation/usernotifications/modifying-content-in-newly-delivered-notifications
 - APNs payloads: https://developer.apple.com/documentation/usernotifications/generating-a-remote-notification
 - Local network privacy (TN3179): https://developer.apple.com/documentation/technotes/tn3179-understanding-local-network-privacy
-- API Gateway HTTP API quotas (30-second limit): https://docs.aws.amazon.com/apigateway/latest/developerguide/http-api-quotas.html
