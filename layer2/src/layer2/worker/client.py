@@ -2,13 +2,18 @@
 and reconnecting.
 
 The loop re-reads `coordinator_url` from worker.json before every try, so Layer 1 can point a
-running worker at a new coordinator (a hotspot switch). Only a `welcome` with accepted=false
-ends it ("rejected"); any other failure or close is "disconnected" and it retries after
-RETRY_DELAY_S. Each state change is passed to `report`, which writes the status file.
+running worker at a new coordinator (a hotspot switch). Only a `welcome` with accepted=false,
+or one naming another laptop, ends it ("rejected"); any other failure or close is
+"disconnected" and it retries after RETRY_DELAY_S.
+
+Each state change is passed to `report`, which writes the status file: "disconnected" at the
+start and whenever a connection ends or the worker stops, "connected" after an accepting
+welcome, "rejected" at the end. A report that fails is logged and never ends a connection.
 The token is never logged.
 """
 
 import asyncio
+import contextlib
 import logging
 from collections.abc import Awaitable, Callable
 from pathlib import Path
@@ -32,6 +37,7 @@ from layer2.contracts import (
 )
 from layer2.files import ConfigError, load_config
 from layer2.specs import collect_specs, collect_tools, missing_items
+from layer2.tokens import is_well_formed
 
 log = logging.getLogger(__name__)
 
@@ -41,61 +47,101 @@ Outcome = Literal["stopped", "rejected"]
 
 _Welcome = TypeAdapter[WelcomeAccepted | WelcomeRejected](WelcomeAccepted | WelcomeRejected)
 _GB = 2**30
+# ValueError: websockets raises it for a URL with a bad port; Layer 1 may fix the file later.
+_NETWORK_ERRORS = (
+    OSError,
+    TimeoutError,
+    ValueError,
+    ConnectionClosed,
+    InvalidHandshake,
+    InvalidURI,
+)
 
 
-class _Rejected(Exception):
+class _RejectedError(Exception):
     pass
 
 
 async def run_worker(config_path: Path, token: str, report: Report, stop: asyncio.Event) -> Outcome:
     """Connect, report and reconnect until `stop` is set ("stopped") or the coordinator
-    rejects the token ("rejected")."""
+    rejects this laptop ("rejected"). Returns within a few seconds of `stop` being set."""
+
+    async def tell(state: WorkerState, missing: list[MissingItem]) -> None:
+        try:
+            await report(state, missing)
+        except OSError as error:  # Windows can keep the status file busy; never fatal
+            log.warning("L2 worker: could not write the status %r: %s", state, error)
+
+    if not is_well_formed(token):
+        raise ValueError(
+            "the token must be 64 lowercase hex characters; read it with read_token_file"
+        )
+    missing = await asyncio.to_thread(missing_items, config_path)
+    await tell("disconnected", missing)
     specs = await asyncio.to_thread(collect_specs)
     psutil.cpu_percent(interval=None)  # the first reading is meaningless; start the clock
-    missing: list[MissingItem] = []
-    while not stop.is_set():
-        try:
-            config = await asyncio.to_thread(load_config, config_path, WorkerConfig)
-        except ConfigError as error:
-            log.warning("L2 worker: cannot read the config, will retry: %s", error)
-        else:
+    try:
+        while not stop.is_set():
             missing = await asyncio.to_thread(missing_items, config_path)
             try:
-                await _session(config, token, specs, missing, report, stop)
-            except _Rejected:
-                log.error("L2 worker: the coordinator rejected this laptop's token")
-                await report("rejected", missing)
-                return "rejected"
-        if stop.is_set():
-            break
-        await report("disconnected", missing)
-        await _sleep_unless(stop, settings.RETRY_DELAY_S)
+                config = await asyncio.to_thread(load_config, config_path, WorkerConfig)
+            except ConfigError as error:
+                log.warning("L2 worker: cannot read the config, will retry: %s", error)
+            else:
+                session = _session(config_path, config, token, specs, missing, tell)
+                await _until_stopped(session, stop)
+            if stop.is_set():
+                break
+            await tell("disconnected", missing)
+            await _sleep_unless(stop, settings.RETRY_DELAY_S)
+    except _RejectedError:
+        await tell("rejected", missing)
+        return "rejected"
+    await tell("disconnected", missing)
     return "stopped"
 
 
+async def _until_stopped(session: Awaitable[None], stop: asyncio.Event) -> None:
+    """Run one session, cancelling it as soon as `stop` is set (even mid-connect or while
+    waiting for the welcome)."""
+    task = asyncio.ensure_future(session)
+    stopped = asyncio.ensure_future(stop.wait())
+    try:
+        await asyncio.wait([task, stopped], return_when=asyncio.FIRST_COMPLETED)
+    finally:
+        stopped.cancel()
+        if not task.done():
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+    if task.done() and not task.cancelled():
+        task.result()  # re-raises _RejectedError
+
+
 async def _session(
+    config_path: Path,
     config: WorkerConfig,
     token: str,
     specs: Specs,
     missing: list[MissingItem],
-    report: Report,
-    stop: asyncio.Event,
+    tell: Report,
 ) -> None:
-    """One connection. Returns when it drops or `stop` is set; raises _Rejected on rejection."""
+    """One connection. Returns when it drops; raises _RejectedError on rejection."""
     try:
         async with connect(
             config.coordinator_url,
             open_timeout=settings.CONNECT_TIMEOUT_S,
+            close_timeout=settings.WORKER_CLOSE_TIMEOUT_S,
+            ping_interval=settings.WS_PING_INTERVAL_S,
+            ping_timeout=settings.WORKER_PING_TIMEOUT_S,
             max_size=settings.WS_MAX_MESSAGE_BYTES,
             proxy=None,  # the coordinator is on the local network; never go through a proxy
         ) as connection:
             await _join(connection, config, token, specs)
             log.info("L2 worker: connected to %s", config.coordinator_url)
-            await report("connected", missing)
-            await _send_status(connection, missing, stop)
-    except _Rejected:
-        raise
-    except (OSError, TimeoutError, ConnectionClosed, InvalidHandshake, InvalidURI) as error:
+            await tell("connected", missing)
+            await _send_status(connection, config_path, missing, tell)
+    except _NETWORK_ERRORS as error:
         log.info(
             "L2 worker: not connected to %s (%s)", config.coordinator_url, type(error).__name__
         )
@@ -122,13 +168,31 @@ async def _join(
         log.warning("L2 worker: the coordinator's reply was not a welcome")
         raise ConnectionClosed(None, None) from None
     if isinstance(welcome, WelcomeRejected):
-        raise _Rejected
+        log.error("L2 worker: the coordinator rejected this laptop's token")
+        raise _RejectedError
+    if welcome.node_id != config.node_id:
+        log.error(
+            "L2 worker: this token belongs to laptop %s, not %s; ask Layer 1 to re-pair",
+            welcome.node_id,
+            config.node_id,
+        )
+        raise _RejectedError
 
 
 async def _send_status(
-    connection: ClientConnection, missing: list[MissingItem], stop: asyncio.Event
+    connection: ClientConnection, config_path: Path, missing: list[MissingItem], tell: Report
 ) -> None:
-    while not stop.is_set():
+    """Send a status every STATUS_INTERVAL_S; re-check what is missing every
+    MISSING_REFRESH_S, and tell the status file when it changes."""
+    loop = asyncio.get_running_loop()
+    checked_at = loop.time()
+    while True:
+        if loop.time() - checked_at >= settings.MISSING_REFRESH_S:
+            checked_at = loop.time()
+            latest = await asyncio.to_thread(missing_items, config_path)
+            if latest != missing:
+                missing = latest
+                await tell("connected", missing)
         memory = psutil.virtual_memory()
         message = StatusMessage(
             type="status",
@@ -138,11 +202,9 @@ async def _send_status(
             cpu_percent=min(100.0, float(psutil.cpu_percent(interval=None))),
         )
         await connection.send(message.model_dump_json())
-        await _sleep_unless(stop, settings.STATUS_INTERVAL_S)
+        await asyncio.sleep(settings.STATUS_INTERVAL_S)
 
 
 async def _sleep_unless(stop: asyncio.Event, seconds: float) -> None:
-    try:
+    with contextlib.suppress(TimeoutError):
         await asyncio.wait_for(stop.wait(), seconds)
-    except TimeoutError:
-        return

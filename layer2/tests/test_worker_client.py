@@ -8,6 +8,7 @@ from typing import Any
 
 import pytest
 from conftest import Running, closed_port, contract, wait_until_serving, write_coordinator_config
+from websockets.asyncio.server import ServerConnection, serve
 
 from layer2 import settings
 from layer2.contracts import MissingItem
@@ -122,18 +123,19 @@ def test_joins_and_reports_load(tmp_path: Path, coordinator: Coordinator) -> Non
     reports = Reports()
     config = write_worker_config(tmp_path, coordinator.url)
 
-    def reported_twice() -> bool:
+    def status_arrived() -> bool:
         laptops = coordinator.laptops()
-        return bool(laptops) and len(reports.seen) >= 1
+        return bool(laptops) and [item["id"] for item in laptops[0]["missing"]] == ["ollama"]
 
     async def scenario() -> None:
-        outcome, stop_took = await run_until(config, reports, reported_twice)
+        outcome, stop_took = await run_until(config, reports, status_arrived)
         assert outcome == "stopped"
         assert stop_took < 2.0
 
     asyncio.run(scenario())
-    state, missing = reports.seen[0]
-    assert state == "connected"
+    assert reports.states()[0] == "disconnected"  # before the first try
+    assert reports.states()[-1] == "disconnected"  # after stopping
+    [(_, missing)] = [seen for seen in reports.seen if seen[0] == "connected"]
     assert [item.id for item in missing] == ["ollama"]
     [laptop] = coordinator.laptops()
     assert laptop["node_id"] == contract("accepted-workers.json")["workers"][0]["node_id"]
@@ -149,7 +151,7 @@ def test_unknown_token_is_rejected(tmp_path: Path, coordinator: Coordinator) -> 
         assert outcome == "rejected"
 
     asyncio.run(scenario())
-    assert reports.states() == ["rejected"]
+    assert reports.states() == ["disconnected", "rejected"]
 
 
 def test_waits_for_a_late_coordinator(tmp_path: Path, coordinator: Coordinator) -> None:
@@ -179,11 +181,11 @@ def test_reconnects_after_the_coordinator_restarts(
     async def scenario() -> None:
         stop = asyncio.Event()
         task = asyncio.create_task(run_worker(config, TOKEN, reports, stop))
-        await wait_for(lambda: reports.states() == ["connected"])
+        await wait_for(lambda: "connected" in reports.states())
         await asyncio.to_thread(coordinator.stop)
         await wait_for(lambda: "disconnected" in reports.states())
         await asyncio.to_thread(coordinator.start)
-        await wait_for(lambda: reports.states().count("connected") == 2)
+        await wait_for(lambda: reports.states().count("connected") == 2, timeout=20)
         stop.set()
         assert await asyncio.wait_for(task, settings.STOP_DEADLINE_S) == "stopped"
 
@@ -240,3 +242,145 @@ def test_token_never_reaches_the_log(
 
     asyncio.run(scenario())
     assert TOKEN[:16] not in caplog.text
+
+
+def test_a_laptop_given_another_laptops_token_is_rejected(
+    tmp_path: Path, coordinator: Coordinator
+) -> None:
+    coordinator.start()
+    reports = Reports()
+    config = write_worker_config(tmp_path, coordinator.url)
+    data = json.loads(config.read_text(encoding="utf-8"))
+    config.write_text(json.dumps({**data, "node_id": "some-other-laptop"}), "utf-8")
+
+    async def scenario() -> None:
+        outcome = await asyncio.wait_for(run_worker(config, TOKEN, reports, asyncio.Event()), 10)
+        assert outcome == "rejected"
+
+    asyncio.run(scenario())
+
+
+class FakeCoordinator:
+    """A WebSocket server that answers hello with `reply`, or never answers when None."""
+
+    def __init__(self, reply: str | None) -> None:
+        self.reply = reply
+        self.port = closed_port()
+
+    async def handle(self, connection: ServerConnection) -> None:
+        await connection.recv()
+        if self.reply is None:
+            await connection.wait_closed()  # never answer; wait for the worker to give up
+        else:
+            await connection.send(self.reply)
+
+
+def test_a_reply_that_is_not_a_welcome_is_not_a_rejection(tmp_path: Path) -> None:
+    fake = FakeCoordinator(reply=json.dumps({"type": "status"}))
+    reports = Reports()
+    config = write_worker_config(tmp_path, f"ws://127.0.0.1:{fake.port}/ws")
+
+    async def scenario() -> None:
+        async with serve(fake.handle, "127.0.0.1", fake.port):
+            outcome, _ = await run_until(
+                config, reports, lambda: reports.states().count("disconnected") >= 3
+            )
+        assert outcome == "stopped"
+
+    asyncio.run(scenario())
+    assert "rejected" not in reports.states()
+
+
+def test_stop_is_prompt_while_waiting_for_a_welcome(tmp_path: Path) -> None:
+    fake = FakeCoordinator(reply=None)
+    reports = Reports()
+    config = write_worker_config(tmp_path, f"ws://127.0.0.1:{fake.port}/ws")
+
+    async def scenario() -> None:
+        async with serve(fake.handle, "127.0.0.1", fake.port):
+            stop = asyncio.Event()
+            task = asyncio.create_task(run_worker(config, TOKEN, reports, stop))
+            await asyncio.sleep(1.0)  # connected, hello sent, welcome never comes
+            stop.set()
+            started = asyncio.get_running_loop().time()
+            assert await asyncio.wait_for(task, settings.STOP_DEADLINE_S) == "stopped"
+            assert asyncio.get_running_loop().time() - started < 3.0
+
+    asyncio.run(scenario())
+    assert reports.states()[-1] == "disconnected"
+
+
+def test_a_failing_status_file_never_drops_the_connection(
+    tmp_path: Path, coordinator: Coordinator
+) -> None:
+    coordinator.start()
+    config = write_worker_config(tmp_path, coordinator.url)
+    calls: list[WorkerState] = []
+
+    async def locked_file(state: WorkerState, missing: list[MissingItem]) -> None:
+        calls.append(state)
+        raise PermissionError("the status file is busy")
+
+    def status_arrived() -> bool:
+        laptops = coordinator.laptops()
+        return bool(laptops) and bool(laptops[0]["missing"])
+
+    async def scenario() -> None:
+        stop = asyncio.Event()
+        task = asyncio.create_task(run_worker(config, TOKEN, locked_file, stop))
+        await wait_for(lambda: status_arrived() or task.done())
+        assert not task.done()
+        await asyncio.sleep(0.5)
+        assert calls.count("connected") == 1, "the connection was dropped and redone"
+        stop.set()
+        assert await asyncio.wait_for(task, settings.STOP_DEADLINE_S) == "stopped"
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize(
+    "url", ["ws://127.0.0.1:99999/ws", "ws://127.0.0.1:abc/ws", "ws://[::1/ws"]
+)
+def test_a_malformed_coordinator_url_is_retried_not_fatal(tmp_path: Path, url: str) -> None:
+    reports = Reports()
+    config = write_worker_config(tmp_path, url)
+
+    async def scenario() -> None:
+        outcome, _ = await run_until(
+            config, reports, lambda: reports.states().count("disconnected") >= 3
+        )
+        assert outcome == "stopped"
+
+    asyncio.run(scenario())
+
+
+def test_missing_items_refresh_while_connected(
+    tmp_path: Path, coordinator: Coordinator, ollama_url: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(settings, "MISSING_REFRESH_S", 0.3)
+    coordinator.start()
+    reports = Reports()
+    config = write_worker_config(tmp_path, coordinator.url)
+
+    def missing_ids() -> list[str]:
+        laptops = coordinator.laptops()
+        return [item["id"] for item in laptops[0]["missing"]] if laptops else ["none yet"]
+
+    async def scenario() -> None:
+        stop = asyncio.Event()
+        task = asyncio.create_task(run_worker(config, TOKEN, reports, stop))
+        await wait_for(lambda: missing_ids() == ["ollama"])
+        data = json.loads(config.read_text(encoding="utf-8"))
+        config.write_text(json.dumps({**data, "ollama_url": ollama_url}), "utf-8")
+        await wait_for(lambda: missing_ids() == [])
+        stop.set()
+        assert await asyncio.wait_for(task, settings.STOP_DEADLINE_S) == "stopped"
+
+    asyncio.run(scenario())
+    assert reports.states().count("connected") == 2  # the status file got the new list too
+
+
+def test_a_malformed_token_is_refused_up_front(tmp_path: Path) -> None:
+    config = write_worker_config(tmp_path, f"ws://127.0.0.1:{closed_port()}/ws")
+    with pytest.raises(ValueError, match="token"):
+        asyncio.run(run_worker(config, TOKEN + "\n", Reports(), asyncio.Event()))
