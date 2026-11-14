@@ -12,6 +12,7 @@ from pathlib import Path
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import ValidationError
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 from starlette.websockets import WebSocketDisconnected
 
 from layer2 import settings
@@ -36,7 +37,7 @@ REPLACED = 4001  # the same laptop joined again on a newer connection
 BAD_HELLO = 4002  # the first message was not a valid hello
 HELLO_TIMEOUT = 4003  # no hello within HELLO_TIMEOUT_S
 REJECTED = 4004  # sent after welcome-rejected
-SERVER_ERROR = 1011  # accepted-workers.json could not be read
+SERVER_ERROR = 4005  # accepted-workers.json could not be read
 
 _MAX_LOGGED_PARTS = 3
 _MAX_LOGGED_PART = 40
@@ -173,6 +174,8 @@ async def _receive_status(socket: WebSocket, node_id: str, registry: Registry[We
 
 def create_dashboard_app(registry: Registry[WebSocket]) -> FastAPI:
     app = FastAPI(openapi_url=None, docs_url=None, redoc_url=None)
+    # Only this machine may read it, by address: a web page using DNS rebinding cannot.
+    app.add_middleware(TrustedHostMiddleware, allowed_hosts=["127.0.0.1", "localhost"])
 
     @app.get("/api/state")
     async def api_state() -> JSONResponse:
