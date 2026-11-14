@@ -1,5 +1,5 @@
 from collections.abc import Callable
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime, timedelta, tzinfo
 from typing import cast
 
 import pytest
@@ -154,3 +154,30 @@ def test_thresholds_fall_minimum_at_the_ends_is_accepted(minimum: float) -> None
 def test_thresholds_low_just_below_high_is_accepted() -> None:
     thresholds = RuleThresholds(heart_rate_low_bpm=129, heart_rate_high_bpm=130)
     assert thresholds.heart_rate_low_bpm == 129
+
+
+@pytest.mark.parametrize("verdict", [True, False])
+def test_help_verdict_bool_is_accepted(verdict: bool) -> None:
+    assert HelpSignal(is_call_for_help=verdict, detected_at=AT).is_call_for_help is verdict
+
+
+class _ClocksGoBackZone(tzinfo):
+    """UTC-4 before the clocks go back (fold 0), UTC-5 after (fold 1), like a DST change."""
+
+    def utcoffset(self, dt: datetime | None) -> timedelta:
+        return timedelta(hours=-5 if dt is not None and dt.fold else -4)
+
+    def dst(self, dt: datetime | None) -> timedelta:
+        return timedelta(0)
+
+    def tzname(self, dt: datetime | None) -> str:
+        return "clocks-go-back"
+
+
+def test_monitoring_order_is_checked_in_utc_across_a_clock_change() -> None:
+    zone = _ClocksGoBackZone()
+    stopped = datetime(2026, 11, 1, 1, 30, fold=1, tzinfo=zone)
+    checked = datetime(2026, 11, 1, 1, 45, fold=0, tzinfo=zone)
+    assert checked.astimezone(UTC) < stopped.astimezone(UTC)
+    with pytest.raises(ValueError, match="checked_at"):
+        MonitoringSignal(what_stopped="camera", stopped_at=stopped, checked_at=checked)

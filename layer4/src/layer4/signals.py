@@ -2,10 +2,12 @@
 
 Each signal checks its own values when created and raises ValueError on a bad one, wrong
 types included, so the rules never see a malformed signal. Every time must carry a time zone.
+Producers pass plain Python values: convert model output such as numpy numbers with float(),
+int() or bool() first.
 """
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 
 from layer4._checks import is_number, is_whole_number
 
@@ -69,11 +71,9 @@ class MonitoringSignal:
             raise ValueError(f"what_stopped must name what stopped, got {self.what_stopped!r}")
         _require_time_zone("stopped_at", self.stopped_at)
         _require_time_zone("checked_at", self.checked_at)
-        if self.checked_at < self.stopped_at:
+        # Compare in UTC: two times sharing one tzinfo compare by wall clock, ignoring offsets.
+        if self.checked_at.astimezone(UTC) < self.stopped_at.astimezone(UTC):
             raise ValueError(
                 f"checked_at ({self.checked_at.isoformat()}) is before "
                 f"stopped_at ({self.stopped_at.isoformat()})"
             )
-
-
-Signal = FallSignal | HelpSignal | HeartRateSignal | MonitoringSignal
