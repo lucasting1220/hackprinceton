@@ -1,7 +1,9 @@
 """The coordinator's two web apps.
 
 Control app (WebSocket /ws on 0.0.0.0:listen_port): workers join with `hello` and report with
-`status`. Dashboard app (127.0.0.1:dashboard_port): the dashboard page and GET /api/state.
+`status`; a connection's first status re-plans, and each status is answered with the `start`
+and `stop` orders that worker needs (coordinator/plan.py). Dashboard app
+(127.0.0.1:dashboard_port): the dashboard page and GET /api/state.
 Neither ever logs a token, a whole `hello` or raw text a client chose.
 """
 
@@ -25,6 +27,7 @@ from layer2.contracts import (
     WelcomeRejected,
 )
 from layer2.coordinator.dashboard import PAGE
+from layer2.coordinator.plan import Placement
 from layer2.coordinator.registry import Registry
 from layer2.files import ConfigError, load_json_model
 from layer2.tokens import find_node_id
@@ -80,7 +83,12 @@ async def _close_quietly(socket: WebSocket, code: int, reason: str = "") -> None
         return
 
 
-def create_control_app(config: CoordinatorConfig, registry: Registry[WebSocket]) -> FastAPI:
+def create_control_app(
+    config: CoordinatorConfig,
+    registry: Registry[WebSocket],
+    placement: Placement | None = None,
+) -> FastAPI:
+    plan = placement if placement is not None else Placement(lambda: [])
     app = FastAPI(openapi_url=None, docs_url=None, redoc_url=None)
     accepted_file = Path(config.accepted_workers_file)
 
@@ -136,7 +144,7 @@ def create_control_app(config: CoordinatorConfig, registry: Registry[WebSocket])
             )
             await socket.send_text(welcome.model_dump_json())
             log.info("L2 coordinator: laptop %s joined", node_id)
-            await _receive_status(socket, node_id, registry)
+            await _receive_status(socket, node_id, registry, plan)
         finally:
             if registry.is_current(node_id, socket):
                 registry.leave(node_id, socket)
@@ -145,10 +153,13 @@ def create_control_app(config: CoordinatorConfig, registry: Registry[WebSocket])
     return app
 
 
-async def _receive_status(socket: WebSocket, node_id: str, registry: Registry[WebSocket]) -> None:
-    """Record status messages until the connection closes. Bad messages are ignored, and
-    logged once per connection."""
+async def _receive_status(
+    socket: WebSocket, node_id: str, registry: Registry[WebSocket], placement: Placement
+) -> None:
+    """Record status messages until the connection closes, answering each with the orders
+    this worker needs. Bad messages are ignored, and logged once per connection."""
     logged_bad = False
+    planned = False
     try:
         while True:
             text = await _receive_text(socket)
@@ -168,18 +179,29 @@ async def _receive_status(socket: WebSocket, node_id: str, registry: Registry[We
                     )
                 continue
             registry.status(node_id, socket, message)
+            if not registry.is_current(node_id, socket):
+                continue
+            if not planned:
+                planned = True  # its memory is known now, so the plan can use this laptop
+                placement.replan(registry.connected(), registry.known())
+            for order in placement.orders(node_id, registry.job_reports()):
+                log.info("L2 coordinator: %s job %s on %s", order.type, order.job, node_id)
+                await socket.send_text(order.model_dump_json())
     except (WebSocketDisconnect, WebSocketDisconnected):
         return
 
 
-def create_dashboard_app(registry: Registry[WebSocket]) -> FastAPI:
+def create_dashboard_app(
+    registry: Registry[WebSocket], placement: Placement | None = None
+) -> FastAPI:
     app = FastAPI(openapi_url=None, docs_url=None, redoc_url=None)
     # Only this machine may read it, by address: a web page using DNS rebinding cannot.
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=["127.0.0.1", "localhost"])
 
     @app.get("/api/state")
     async def api_state() -> JSONResponse:
-        return JSONResponse(registry.api_state().model_dump(mode="json"))
+        dropped = placement.plan.dropped if placement is not None else ()
+        return JSONResponse(registry.api_state(dropped).model_dump(mode="json"))
 
     @app.get("/")
     async def page() -> HTMLResponse:
