@@ -179,3 +179,13 @@ class ApiState(Strict):
     laptops: list[Laptop]
     jobs: list[JobEntry]
     dropped: list[DroppedWork]
+
+
+class StatusMessage(Strict):
+    """Worker to coordinator, every STATUS_INTERVAL_S. Internal to Layer 2: no contract file."""
+
+    type: Literal["status"]
+    schema_version: Literal[1]
+    missing: list[MissingItem]
+    memory_free_gb: Annotated[float, Field(ge=0)]
+    cpu_percent: Annotated[float, Field(ge=0, le=100)]
