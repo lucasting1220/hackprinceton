@@ -17,7 +17,7 @@ from pathlib import Path
 from pydantic import JsonValue, ValidationError
 
 from layer2 import settings
-from layer2.contracts import Strict, UtcDatetime
+from layer2.contracts import LoggedEvent
 from layer2.files import retry_while_busy
 
 log = logging.getLogger(__name__)
@@ -25,11 +25,6 @@ log = logging.getLogger(__name__)
 
 class EventTooLargeError(ValueError):
     pass
-
-
-class LoggedEvent(Strict):
-    logged_at: UtcDatetime
-    event: dict[str, JsonValue]
 
 
 def _utc_now() -> datetime:
