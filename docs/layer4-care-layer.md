@@ -84,7 +84,7 @@ Each rule looks at one signal. The numbers are proposed defaults in a settings f
 |---|---|---|
 | Fall confidence | at or above 0.8 | Urgent: "Possible fall detected at {time}" |
 | Help check | reports a call for help | Urgent: "Call for help heard at {time}" |
-| Heart rate | above 130 or below 40 beats per minute | Urgent: "Heart rate of {bpm} recorded at {time}" |
+| Heart rate | above 130 or below 40 beats per minute | Urgent: "Heart rate of {bpm} recorded at {time} on {date}" |
 | Monitoring check | a camera, mic or detector stopped for more than 30 seconds | Urgent: "Monitoring is degraded: {what stopped}" |
 | Anything else | below its threshold | Event log only |
 
