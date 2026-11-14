@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "home_id": "home-uuid",
+  "listen_port": 7443,
+  "dashboard_port": 7450,
+  "client_port": 7451,
+  "ollama_url": "http://127.0.0.1:11434",
+  "accepted_workers_file": "/abs/path/accepted-workers.json",
+  "state_dir": "/abs/path/coordinator",
+  "stop_file": "/abs/path/coordinator.stop"
+}

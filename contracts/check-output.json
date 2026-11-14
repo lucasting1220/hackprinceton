@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "ok": true,
+  "missing": [
+    {
+      "id": "ollama",
+      "reason": "not reachable at http://127.0.0.1:11434",
+      "required": false
+    }
+  ]
+}

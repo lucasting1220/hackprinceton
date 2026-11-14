@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "node_id": "node-uuid",
+  "state": "connected",
+  "missing": [
+    {
+      "id": "ollama",
+      "reason": "not reachable at http://127.0.0.1:11434",
+      "required": false
+    }
+  ],
+  "updated_at": "2026-11-14T03:12:45Z"
+}

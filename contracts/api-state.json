@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "updated_at": "2026-11-14T03:12:45Z",
+  "laptops": [
+    {
+      "node_id": "node-uuid",
+      "display_name": "Kitchen laptop",
+      "last_status_at": "2026-11-14T03:12:44Z",
+      "sensors": ["camera", "mic"],
+      "missing": []
+    }
+  ],
+  "jobs": [
+    {
+      "job": "fall_model",
+      "node_id": "node-uuid",
+      "state": "running"
+    }
+  ],
+  "dropped": [
+    {
+      "work": "deep_model",
+      "reason": "not enough memory"
+    }
+  ]
+}

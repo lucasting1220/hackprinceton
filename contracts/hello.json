@@ -1,0 +1,23 @@
+{
+  "type": "hello",
+  "schema_version": 1,
+  "token": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+  "display_name": "Kitchen laptop",
+  "specs": {
+    "os": "macos",
+    "os_version": "15.2",
+    "cpu": "Apple M2",
+    "cores": 8,
+    "memory_gb": 16,
+    "gpu": "apple-silicon"
+  },
+  "sensors": {
+    "camera": "j5create USB HD Webcam",
+    "mic": "j5create USB HD Webcam"
+  },
+  "tools": {
+    "python": "3.12.16",
+    "ollama": true,
+    "llama_cpp": false
+  }
+}
