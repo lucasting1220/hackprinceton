@@ -87,8 +87,8 @@ class AcceptedWorkers(Strict):
 
 
 class MissingItem(Strict):
-    id: str
-    reason: str
+    id: Annotated[str, Field(max_length=64)]
+    reason: Annotated[str, Field(max_length=2000)]
     required: StrictBool
 
 
@@ -179,3 +179,13 @@ class ApiState(Strict):
     laptops: list[Laptop]
     jobs: list[JobEntry]
     dropped: list[DroppedWork]
+
+
+class StatusMessage(Strict):
+    """Worker to coordinator, every STATUS_INTERVAL_S. Internal to Layer 2: no contract file."""
+
+    type: Literal["status"]
+    schema_version: Literal[1]
+    missing: Annotated[list[MissingItem], Field(max_length=100)]
+    memory_free_gb: Annotated[float, Field(ge=0, strict=True, allow_inf_nan=False)]
+    cpu_percent: Annotated[float, Field(ge=0, le=100, strict=True, allow_inf_nan=False)]

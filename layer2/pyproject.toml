@@ -4,14 +4,20 @@ version = "0.1.0"
 description = "Debbie Layer 2: the coordinator and worker programs"
 requires-python = "==3.12.*"
 dependencies = [
+    "fastapi>=0.115",
+    "psutil>=7.0",
     "pydantic>=2.11",
+    "uvicorn>=0.32",
+    "websockets>=14",
 ]
 
 [dependency-groups]
 dev = [
+    "httpx>=0.28",
     "mypy>=1.18",
     "pytest>=8.4",
     "ruff==0.17.5",
+    "types-psutil>=7.0",
 ]
 
 [build-system]
@@ -30,4 +36,8 @@ exclude = ["^\\.venv/"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-filterwarnings = ["error"]
+filterwarnings = [
+    "error",
+    # Starlette 1.10's TestClient asks for the httpx2 package; httpx still works.
+    "ignore:Using `httpx` with `starlette.testclient` is deprecated",
+]
