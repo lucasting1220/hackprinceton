@@ -186,6 +186,6 @@ class StatusMessage(Strict):
 
     type: Literal["status"]
     schema_version: Literal[1]
-    missing: list[MissingItem]
-    memory_free_gb: Annotated[float, Field(ge=0)]
-    cpu_percent: Annotated[float, Field(ge=0, le=100)]
+    missing: Annotated[list[MissingItem], Field(max_length=100)]
+    memory_free_gb: Annotated[float, Field(ge=0, strict=True, allow_inf_nan=False)]
+    cpu_percent: Annotated[float, Field(ge=0, le=100, strict=True, allow_inf_nan=False)]

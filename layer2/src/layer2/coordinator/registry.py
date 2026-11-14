@@ -31,6 +31,7 @@ class _Entry[C]:
     missing: list[MissingItem] = field(default_factory=list)
     connection: C | None = None
     replacements: deque[float] = field(default_factory=deque)
+    warned_at: float | None = None
 
 
 def _sensor_kinds(hello: Hello) -> list[Sensor]:
@@ -55,7 +56,12 @@ class Registry[C]:
         self._laptops: dict[str, _Entry[C]] = {}
 
     def join(self, node_id: str, hello: Hello, connection: C) -> C | None:
-        """Register an accepted hello. Returns the laptop's previous connection, to be closed."""
+        """Register an accepted hello. Returns the laptop's previous connection, to be closed.
+
+        Only status messages advance last_status_at of a known laptop, so one that keeps
+        rejoining without ever reporting still goes quiet. Its missing list is cleared until
+        the new connection reports.
+        """
         entry = self._laptops.get(node_id)
         if entry is None:
             self._laptops[node_id] = _Entry(
@@ -68,7 +74,7 @@ class Registry[C]:
         previous = entry.connection
         entry.display_name = hello.display_name
         entry.sensors = _sensor_kinds(hello)
-        entry.last_status_at = self._now()
+        entry.missing = []
         entry.connection = connection
         if previous is not None:
             self._count_replacement(node_id, entry)
@@ -81,7 +87,10 @@ class Registry[C]:
             entry.replacements and now - entry.replacements[0] > settings.REPLACEMENT_WARN_WINDOW_S
         ):
             entry.replacements.popleft()
-        if len(entry.replacements) > settings.REPLACEMENT_WARN_COUNT:
+        window = settings.REPLACEMENT_WARN_WINDOW_S
+        recently_warned = entry.warned_at is not None and now - entry.warned_at < window
+        if len(entry.replacements) > settings.REPLACEMENT_WARN_COUNT and not recently_warned:
+            entry.warned_at = now
             log.warning(
                 "L2 coordinator: laptop %s replaced its connection %d times in %.0f s; "
                 "two workers may share one token",

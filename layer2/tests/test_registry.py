@@ -3,6 +3,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 from conftest import contract
+from pydantic import ValidationError
 
 from layer2 import settings
 from layer2.contracts import ApiState, Hello, MissingItem, StatusMessage
@@ -140,3 +141,80 @@ def test_replacements_spread_over_time_do_not_warn(
 def test_status_message_round_trips() -> None:
     message = status()
     assert StatusMessage.model_validate_json(message.model_dump_json()) == message
+
+
+def test_rejoin_after_leave_is_not_a_replacement(
+    registry: Registry[str], clock: Clock, caplog: pytest.LogCaptureFixture
+) -> None:
+    caplog.set_level(logging.WARNING)
+    connections = [f"conn-{n}" for n in range(settings.REPLACEMENT_WARN_COUNT + 3)]
+    registry.join("node-1", HELLO, connections[0])
+    for previous, current in zip(connections, connections[1:], strict=False):
+        registry.leave("node-1", previous)
+        clock.advance(1)
+        assert registry.join("node-1", HELLO, current) is None
+    assert not caplog.records
+
+
+def test_rejoin_shows_the_new_name_and_sensors(registry: Registry[str]) -> None:
+    registry.join("node-1", HELLO, "conn-a")
+    registry.leave("node-1", "conn-a")
+    renamed = HELLO.model_copy(
+        update={
+            "display_name": "Renamed",
+            "sensors": HELLO.sensors.model_copy(update={"camera": None}),
+        }
+    )
+    registry.join("node-1", renamed, "conn-b")
+    [laptop] = registry.api_state().laptops
+    assert (laptop.display_name, laptop.sensors) == ("Renamed", ["mic"])
+
+
+def test_rejoin_clears_the_old_missing_list(registry: Registry[str]) -> None:
+    registry.join("node-1", HELLO, "conn-a")
+    item = MissingItem(id="ollama", reason="not reachable", required=False)
+    registry.status("node-1", "conn-a", status([item]))
+    registry.join("node-1", HELLO, "conn-b")
+    assert registry.api_state().laptops[0].missing == []
+
+
+def test_rejoin_without_status_lets_the_laptop_go_quiet(
+    registry: Registry[str], clock: Clock
+) -> None:
+    registry.join("node-1", HELLO, "conn-0")
+    for n in range(1, 6):
+        clock.advance(3)
+        registry.join("node-1", HELLO, f"conn-{n}")
+    assert registry.api_state().laptops[0].last_status_at == START
+
+
+def test_sharing_warning_is_logged_once_per_window(
+    registry: Registry[str], clock: Clock, caplog: pytest.LogCaptureFixture
+) -> None:
+    caplog.set_level(logging.WARNING)
+    registry.join("node-1", HELLO, "conn-0")
+    for n in range(1, 20):
+        clock.advance(1)
+        registry.join("node-1", HELLO, f"conn-{n}")
+    assert len(caplog.records) == 1
+    clock.advance(settings.REPLACEMENT_WARN_WINDOW_S)
+    for n in range(20, 26):
+        clock.advance(1)
+        registry.join("node-1", HELLO, f"conn-{n}")
+    assert len(caplog.records) == 2
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("memory_free_gb", float("inf")),
+        ("memory_free_gb", "3"),
+        ("cpu_percent", True),
+        ("cpu_percent", 101),
+        ("missing", [{"id": "x", "reason": "y", "required": False}] * 101),
+    ],
+)
+def test_bad_status_message_is_rejected(field: str, value: object) -> None:
+    data = status().model_dump()
+    with pytest.raises(ValidationError):
+        StatusMessage.model_validate({**data, field: value})
