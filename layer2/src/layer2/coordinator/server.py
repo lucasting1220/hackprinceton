@@ -1,7 +1,8 @@
 """The coordinator's two web apps.
 
 Control app (WebSocket /ws on 0.0.0.0:listen_port): workers join with `hello` and report with
-`status`. Dashboard app (127.0.0.1:dashboard_port): the dashboard page and GET /api/state.
+`status`. Dashboard app (127.0.0.1:dashboard_port): the dashboard page, GET /api/state (the
+Layer 1 contract) and GET /api/hardware (Layer 2 only).
 Neither ever logs a token, a whole `hello` or raw text a client chose.
 """
 

@@ -262,17 +262,18 @@ def test_hardware_endpoint_refuses_other_host_names(registry: Registry[WebSocket
     assert outsider.get("/api/hardware").status_code == 400
 
 
-def test_dashboard_page_shows_hardware(dashboard: TestClient) -> None:
+def test_dashboard_page_shows_each_laptop_as_one_card(dashboard: TestClient) -> None:
     page = dashboard.get("/").text
-    assert "/api/hardware" in page
-    for heading in (
+    assert "/api/state" in page and "/api/hardware" in page
+    for part in (
+        "RAM",
         "CPU",
-        "Cores",
-        "Memory",
-        "GPU",
-        "Ollama",
-        "llama.cpp",
-        "CPU load",
-        "Free memory",
+        "Jobs",
+        "No jobs yet",
+        "laptops reporting",
+        "<svg",
+        "createElementNS",
     ):
-        assert f"<th>{heading}</th>" in page
+        assert part in page or part.replace("<svg", "svg") in page
+    assert "__" not in page.split("<script>")[1], "a placeholder was left unfilled"
+    assert "<script src" not in page, "the page must work without internet"

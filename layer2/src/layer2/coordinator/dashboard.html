@@ -1,0 +1,219 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Laptop cluster</title>
+<style>
+  :root { --text: #1a1a1a; --muted: #666; --line: #ddd; --card: #fafafa; --bad: #b00020;
+          --ram: #2f6fdf; --cpu: #e08a00; --bar: #e8e8e8; }
+  body { font-family: system-ui, sans-serif; margin: 1.5rem; color: var(--text); background: #fff; }
+  h1 { margin: 0 0 0.5rem; font-size: 1.5rem; }
+  #summary { display: flex; gap: 1.5rem; flex-wrap: wrap; margin-bottom: 1rem; color: var(--muted); }
+  #summary b { color: var(--text); font-size: 1.2rem; }
+  #error { color: var(--bad); min-height: 1.2em; }
+  #cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 1rem; }
+  .card { border: 1px solid var(--line); border-radius: 8px; padding: 0.9rem; background: var(--card); }
+  .card.quiet { border-color: var(--bad); }
+  .head { display: flex; justify-content: space-between; align-items: baseline; gap: 0.5rem; }
+  .name { font-weight: 600; font-size: 1.1rem; }
+  .badge { font-size: 0.8rem; padding: 0.1rem 0.5rem; border-radius: 999px; background: #dff3e4; }
+  .quiet .badge { background: #fbe0e4; color: var(--bad); }
+  .specs { color: var(--muted); font-size: 0.85rem; margin: 0.3rem 0 0.6rem; }
+  .meter { margin: 0.35rem 0; font-size: 0.85rem; }
+  .bar { height: 10px; background: var(--bar); border-radius: 5px; overflow: hidden; }
+  .fill { height: 100%; }
+  .ram .fill { background: var(--ram); }
+  .cpu .fill { background: var(--cpu); }
+  svg { width: 100%; height: 60px; display: block; margin-top: 0.4rem; }
+  .legend { font-size: 0.75rem; color: var(--muted); }
+  .jobs { margin-top: 0.6rem; font-size: 0.85rem; }
+  .jobs ul { margin: 0.2rem 0 0; padding-left: 1.1rem; }
+  .none { color: var(--muted); }
+  #dropped-section { margin-top: 1.5rem; }
+</style>
+</head>
+<body>
+<h1>Laptop cluster</h1>
+<div id="summary"></div>
+<p id="error"></p>
+<div id="cards"></div>
+<section id="dropped-section">
+  <h2>Work that could not be placed</h2>
+  <ul id="dropped"></ul>
+</section>
+<script>
+const STALE_AFTER_MS = __STALE_AFTER_MS__;
+const POLL_MS = __POLL_MS__;
+const HISTORY_POINTS = __HISTORY_POINTS__;
+const SVG = "http://www.w3.org/2000/svg";
+const history = new Map();  // node_id -> [{ram: 0..1, cpu: 0..1}]
+
+function el(tag, className, text) {
+  const node = document.createElement(tag);
+  if (className) node.className = className;
+  if (text !== undefined) node.textContent = text;
+  return node;
+}
+
+async function getJson(url) {
+  const response = await fetch(url, { cache: "no-store", signal: AbortSignal.timeout(POLL_MS * 2) });
+  if (!response.ok) throw new Error(url + " answered " + response.status);
+  return response.json();
+}
+
+function meter(kind, label, fraction) {
+  const box = el("div", "meter " + kind);
+  box.appendChild(el("div", "", label));
+  const bar = el("div", "bar");
+  const fill = el("div", "fill");
+  fill.style.width = Math.max(0, Math.min(1, fraction)) * 100 + "%";
+  bar.appendChild(fill);
+  box.appendChild(bar);
+  return box;
+}
+
+function line(points, key, color) {
+  const path = document.createElementNS(SVG, "polyline");
+  const step = 100 / (HISTORY_POINTS - 1);
+  const start = HISTORY_POINTS - points.length;
+  path.setAttribute("points", points.map((p, i) => ((start + i) * step) + "," + (30 - p[key] * 28)).join(" "));
+  path.setAttribute("fill", "none");
+  path.setAttribute("stroke", color);
+  path.setAttribute("stroke-width", "1.5");
+  path.setAttribute("vector-effect", "non-scaling-stroke");
+  return path;
+}
+
+function chart(points) {
+  const svg = document.createElementNS(SVG, "svg");
+  svg.setAttribute("viewBox", "0 0 100 30");
+  svg.setAttribute("preserveAspectRatio", "none");
+  svg.appendChild(line(points, "ram", "var(--ram)"));
+  svg.appendChild(line(points, "cpu", "var(--cpu)"));
+  return svg;
+}
+
+function remember(nodeId, ram, cpu) {
+  const points = history.get(nodeId) || [];
+  points.push({ ram: ram, cpu: cpu });
+  while (points.length > HISTORY_POINTS) points.shift();
+  history.set(nodeId, points);
+  return points;
+}
+
+function card(laptop, hardware, jobs, now) {
+  const age = now - Date.parse(laptop.last_status_at);
+  const quiet = age > STALE_AFTER_MS;
+  const box = el("div", quiet ? "card quiet" : "card");
+  const head = el("div", "head");
+  head.appendChild(el("span", "name", laptop.display_name));
+  head.appendChild(el("span", "badge", quiet ? "not reporting" : "reporting"));
+  box.appendChild(head);
+  if (hardware) {
+    const s = hardware.specs;
+    box.appendChild(el("div", "specs",
+      s.os + " " + s.os_version + " · " + s.cpu + " · " + s.cores + " cores · " + s.gpu +
+      " · Ollama " + (hardware.tools.ollama ? "yes" : "no")));
+    const live = !quiet && hardware.memory_free_gb !== null && hardware.cpu_percent !== null;
+    if (live) {
+      const used = Math.max(0, s.memory_gb - hardware.memory_free_gb);
+      const ram = s.memory_gb > 0 ? used / s.memory_gb : 0;
+      const cpu = hardware.cpu_percent / 100;
+      box.appendChild(meter("ram", "RAM " + used.toFixed(1) + " of " + s.memory_gb + " GB in use", ram));
+      box.appendChild(meter("cpu", "CPU " + Math.round(hardware.cpu_percent) + " %", cpu));
+      box.appendChild(chart(remember(laptop.node_id, ram, cpu)));
+      box.appendChild(el("div", "legend", "Last two minutes: blue RAM, orange CPU"));
+    } else {
+      box.appendChild(el("div", "meter none", "RAM and CPU unknown: " +
+        (quiet ? "last report " + Math.round(age / 1000) + " s ago" : "waiting for the first report")));
+    }
+  }
+  const jobBox = el("div", "jobs", "Jobs");
+  if (jobs.length === 0) {
+    jobBox.appendChild(el("div", "none", "No jobs yet"));
+  } else {
+    const list = el("ul");
+    for (const job of jobs) list.appendChild(el("li", "", job.job + " (" + job.state + ")"));
+    jobBox.appendChild(list);
+  }
+  box.appendChild(jobBox);
+  if (laptop.missing.length > 0) {
+    box.appendChild(el("div", "specs", "Missing: " + laptop.missing.map((m) => m.id).join(", ")));
+  }
+  return box;
+}
+
+function summary(state, hardwareById, now) {
+  let reporting = 0, used = 0, total = 0;
+  for (const laptop of state.laptops) {
+    const quiet = now - Date.parse(laptop.last_status_at) > STALE_AFTER_MS;
+    if (!quiet) reporting += 1;
+    const hw = hardwareById.get(laptop.node_id);
+    if (hw) {
+      total += hw.specs.memory_gb;
+      if (!quiet && hw.memory_free_gb !== null) used += Math.max(0, hw.specs.memory_gb - hw.memory_free_gb);
+    }
+  }
+  const box = document.getElementById("summary");
+  box.replaceChildren();
+  const item = (value, label) => {
+    const span = el("span", "", " " + label);
+    span.prepend(el("b", "", value));
+    box.appendChild(span);
+  };
+  item(reporting + " of " + state.laptops.length, "laptops reporting");
+  item(used.toFixed(1) + " of " + total + " GB", "RAM in use across the cluster");
+  item(String(state.jobs.length), "jobs running");
+}
+
+function markAllUnknown(message) {
+  for (const box of document.getElementById("cards").children) {
+    box.className = "card quiet";
+    const badge = box.querySelector(".badge");
+    if (badge) badge.textContent = "unknown";
+  }
+  document.getElementById("error").textContent = message;
+}
+
+async function refresh() {
+  let state;
+  try {
+    state = await getJson("/api/state");
+  } catch (problem) {
+    markAllUnknown("Cannot reach the coordinator. Laptop status is unknown.");
+    return;
+  }
+  let hardwareById = new Map();
+  let hardwareError = "";
+  try {
+    const hardware = await getJson("/api/hardware");
+    hardwareById = new Map(hardware.laptops.map((h) => [h.node_id, h]));
+  } catch (problem) {
+    hardwareError = "Hardware details are unavailable right now.";
+  }
+  const now = Date.parse(state.updated_at);
+  const cards = document.getElementById("cards");
+  cards.replaceChildren();
+  for (const laptop of state.laptops) {
+    const jobs = state.jobs.filter((job) => job.node_id === laptop.node_id);
+    cards.appendChild(card(laptop, hardwareById.get(laptop.node_id), jobs, now));
+  }
+  if (state.laptops.length === 0) cards.appendChild(el("p", "none", "No laptops have joined yet."));
+  summary(state, hardwareById, now);
+  const dropped = document.getElementById("dropped");
+  dropped.replaceChildren();
+  for (const item of state.dropped) dropped.appendChild(el("li", "", item.work + ": " + item.reason));
+  if (state.dropped.length === 0) dropped.appendChild(el("li", "none", "Nothing"));
+  document.getElementById("error").textContent = hardwareError;
+}
+
+async function loop() {
+  await refresh();
+  setTimeout(loop, POLL_MS);
+}
+
+loop();
+</script>
+</body>
+</html>
