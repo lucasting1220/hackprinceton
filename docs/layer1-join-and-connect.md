@@ -1,8 +1,8 @@
 # Layer 1: Join and connect
 
-**Status: draft for team review. Nothing is built.** This replaces our first Layer 1 draft. It is written against Lucas's Layer 2 draft (`docs/layer2-device-management.md` on branch `layer-2`, commit `6d74cc4`), the team's concept and roadmap, and the team's layer notes. "Decided" lists the Layer 1 team's decisions; a row tagged with an ask also needs that owner's agreement. The asks and the handoff sections are proposals: names, fields and ports can change once, together, at hour 0. "Open questions" are not settled.
+**Status: draft for team review. Nothing is built.** This replaces our first Layer 1 draft. It is written against the other layer docs on `main` and the decisions in `docs/coherence-review.md`. "Decided" lists the Layer 1 team's decisions; a row tagged with an ask also needs that owner's agreement. The asks and the handoff sections are proposals: names, fields and ports can change once, together, at hour 0. "Open questions" are not settled.
 
-**Edited by Lucas, Nov 14:** watch data now covers sleep and steps as well as heart rate (the "Watch data" row, `POST /v1/watch-data`, build step 8 and its acceptance test). Nothing else in this copy has been changed; the other changes it needs are listed in `coherence-review.md`.
+**Corrected by Lucas, Nov 14,** to match the cross-layer decisions in `docs/coherence-review.md`. This doc is the reference for joining, connecting, the AWS relay and the iPhone app. Layer 1 makes no decisions about care or monitoring: it connects devices and delivers what Layer 4 sends. How the other layers work is defined in their own docs, not here.
 
 ## Summary
 
@@ -10,9 +10,9 @@ Layer 1 turns a few spare laptops and the family's iPhones into one paired home 
 
 - Each laptop gets a setup page. The first laptop creates the home and becomes the coordinator laptop (Layer 2's "central agent"). Each extra laptop joins as a worker once a caregiver approves it by scanning a QR code.
 - Layer 1 starts Lucas's coordinator and worker programs. It hands each worker the coordinator's address and a join token: the "address and a credential" in Layer 2's handoff.
-- Layer 1 builds the iPhone app, in its own `debbie-ios` project, and Layer 4 adds the care screens. The app pairs with the home by QR code. Its resident mode sends Apple Watch heart rate, sleep and steps from HealthKit to Layer 4.
+- Layer 1 builds the whole iPhone app, in its own `debbie-ios` project, including the care screens, which show data that Layer 4 supplies. The app pairs with the home by QR code. Its resident mode sends Apple Watch heart rate, sleep and steps from HealthKit to Layer 3.
 - Remote access goes through a small AWS relay. The home only makes outgoing connections (to the relay, and to AWS's video service during a live view), so there is no VPN app and no router setup. Messages between the home and phones are end-to-end encrypted, so the relay can't read them.
-- When the resident has allowed it, a caregiver can open a live view of the home camera. Video goes straight from the laptop to the phone, or through AWS's TURN server when it must, encrypted either way.
+- Once the resident has consented at setup, a caregiver can open a live view of the home camera at any time. Video goes straight from the laptop to the phone, or through AWS's TURN server when it must, encrypted either way.
 
 Output: paired laptops running Layer 2; a caregiver phone that gets alerts anywhere and survives network changes without re-pairing; and a live view on request.
 
@@ -22,35 +22,34 @@ Output: paired laptops running Layer 2; a caregiver phone that gets alerts anywh
 |---|---|
 | Setup page, launcher, pairing of laptops and phones, join tokens | Layer 1 |
 | Hardware check, keep-awake step, sensor check, resident consent screen | Layer 1 |
-| Setting up the demo laptops from one component list | Layer 1, with requirement lists from Lucas (ask L9) and the Layer 3 owner (ask T3) |
+| Setting up the demo laptops from one component list | Layer 1, with requirement lists from Lucas (ask L9) and the Layer 3 and Layer 4 owners (ask T3) |
 | Coordinator and worker programs, planner, jobs, 2-second status, dashboard | Layer 2 (Lucas) |
-| Camera and mic capture job | Layer 2 (Layer 2's "Kinds of work") |
-| Detection models: fall, sound, health analysis | Layer 3 |
-| Rule-based alerts, care logic, language model use, acknowledgments, escalation | Layer 4 (proposed, ask F1) |
-| iPhone app (`debbie-ios`): pairing, connection, push, live viewer, resident mode, and the status header on the home screen | Layer 1 |
-| Care screens inside the app: alerts, status (including the heart-rate trend and "no heart data"), history | Layer 4 (proposed, ask F4) |
+| Camera and mic capture job, with the frame feed for live view; receiving watch data at home | Layer 3 |
+| Detectors: fall model, speech-to-text, help check, heart-rate check | Layer 4 |
+| Rule-based alerts, "monitoring degraded", the daily report, answers to questions, live status | Layer 4 |
+| iPhone app (`debbie-ios`): pairing, connection, push, live viewer, resident mode, and every screen, including the care screens (alerts, live status, the daily report, the question box) | Layer 1, with the care screens' data from Layer 4 |
 | AWS relay: CDK stack, Lambdas, IoT, DynamoDB, push, offline watchdog, provisioning script | Layer 1 |
 | Hub connector on the coordinator laptop: AWS connection, encryption, outbox, health reports | Layer 1 |
-| Live-view sender on the camera laptop | Layer 1, fed by a local frame feed from Lucas's capture job (ask L6) |
+| Live-view sender on the camera laptop | Layer 1, fed by a local frame feed from Layer 3's capture job (ask T5) |
 
-Layer 1 builds no scheduler, cluster heartbeat, care engine or second dashboard. Its setup page links to Lucas's dashboard.
+Layer 1 builds no scheduler, cluster heartbeat, care engine or second dashboard, and it decides nothing about care or monitoring. Its setup page links to Lucas's dashboard.
 
 ## Decided
 
 | Topic | Decision |
 |---|---|
-| Laptops | The demo uses several laptops: one coordinator laptop and one or more workers, as in Layer 2. The first laptop set up becomes the coordinator, so start with the laptop that stays plugged in. The external webcam and mic plug into a worker (the camera laptop) |
+| Laptops | The demo uses several laptops: one coordinator laptop and one or more workers, as in Layer 2. The first laptop set up becomes the coordinator, so start with the laptop that stays plugged in. The external webcam, whose built-in mic is the only mic, plugs into a worker (the camera laptop) |
 | Laptop pairing | Layer 1 gives each worker a join token and writes the accepted tokens to a file the coordinator reads. The worker sends its token in `hello`; Lucas's coordinator only checks it and replies accept or reject (ask L2) |
 | Approving a laptop | The new laptop shows a QR code. A paired caregiver scans it in the app and approves |
 | Phone pairing | The coordinator laptop shows a single-use QR code that expires after 10 minutes. The person at that laptop confirms a 4-digit code that also shows on the phone. A phone pairs as a caregiver (it gets the home key) or as a resident (heart rate only). A caregiver phone can also turn on resident mode, so one iPhone can play both roles in the demo |
 | Caregiver identity | For the demo, the device credential a phone receives when it pairs. The hub vouches for each phone to the relay. Caregiver accounts (Cognito sign-in) come after the hackathon |
 | Encryption | Messages between the hub and phones are end-to-end encrypted with keys exchanged during pairing (see "Phone ↔ hub messages"). The relay sees only routing data: IDs, roles, times, sizes, which phones belong to a home, and when a live view starts |
 | Push | Amazon SNS to Apple's push service. The push carries the encrypted alert, and the app's notification extension decrypts it on the phone, so the notification says what happened |
-| Live video | In the demo. Layer 1 builds the sender: a browser window on the camera laptop that uses AWS's Kinesis Video Streams (KVS) WebRTC JavaScript library and gets its frames from Lucas's capture job (ask L6). Video only, no audio. Sessions last up to 5 minutes |
-| Live-view consent | Off until the resident turns it on during setup. The resident can turn it off at any time: on the coordinator's setup page, on the camera laptop's live notice, or in resident mode. The camera laptop shows a full-screen notice while someone is watching |
-| iPhone app | Layer 1 owns the Xcode project, `debbie-ios`, kept outside this repository. Layer 4 adds the care screens there (ask F4). One app, with a caregiver role and a resident mode |
-| Watch data | In the demo. Resident mode reads heart rate, last night's sleep (total, bedtime, wake time and interruptions) and steps so far today from HealthKit (synced from the Watch) and sends them to Layer 4 over home Wi-Fi. HealthKit can't be read while the phone is locked, so readings arrive in bursts after an unlock. The app sends everything since its last check, and the resident screen has a "Sync now" button |
-| Sound detection | Proposed: runs on a laptop mic, as in Layer 2. Phones are not sensors (ask T2) |
+| Live video | In the demo. Layer 1 builds the sender: a browser window on the camera laptop that uses AWS's Kinesis Video Streams (KVS) WebRTC JavaScript library and gets its frames from Layer 3's capture job (ask T5). Video only, no audio. Each session lasts up to 5 minutes, a limit of the video service, and the caregiver can start another at once |
+| Live-view consent | The resident consents once during setup; after that a caregiver can open a live view at any time. The resident can still turn it off: on the coordinator's setup page, on the camera laptop's live notice, or in resident mode. The camera laptop shows a full-screen notice while someone is watching |
+| iPhone app | Layer 1 owns the Xcode project, `debbie-ios`, kept outside this repository. Layer 1 builds every screen; Layer 4 supplies the data for the care screens (ask F4). One app, with a caregiver role and a resident mode |
+| Watch data | In the demo. Resident mode reads heart rate, last night's sleep (total, bedtime, wake time and interruptions) and steps so far today from HealthKit (synced from the Watch) and sends them to Layer 3 over home Wi-Fi. HealthKit can't be read while the phone is locked, so readings arrive in bursts after an unlock. The app sends everything since its last check, and the resident screen has a "Sync now" button |
+| Sound detection | A stretch goal owned by Layer 4. Nothing in Layer 1 depends on it. Phones are not sensors |
 | Component list | Layer 1 keeps one list of what each laptop role needs, including Python, Ollama and its models, and llama.cpp. For the demo, laptops are set up by hand from it |
 | Languages | Node/TypeScript for the laptop bridge and the AWS stack, Swift for the app |
 | Accounts | The team has a paid Apple Developer account, an AWS account with credits, one iPhone and an Apple Watch |
@@ -59,7 +58,7 @@ Layer 1 builds no scheduler, cluster heartbeat, care engine or second dashboard.
 
 ### To Lucas (Layer 2)
 
-Each ask is small and sized to sit next to Layer 2's build steps 1 and 2. "Needed by" counts hours from when the team starts building. If an ask doesn't suit Lucas's code, he names an alternative and we adapt.
+Each ask is small and sized to sit next to Layer 2's build steps 1 and 2. "Needed by" counts hours from when the team starts building. If an ask doesn't suit Lucas's code, he names an alternative and we adapt. Lucas's proposed answers are in the Layer 2 doc.
 
 | # | Ask | Why | Needed by |
 |---|---|---|---|
@@ -67,32 +66,33 @@ Each ask is small and sized to sit next to Layer 2's build steps 1 and 2. "Neede
 | L2 | The coordinator re-reads `accepted-workers.json` on each `hello`, looks up the token's hash, and replies with a `welcome` that accepts or rejects. Neither program logs the token or whole `hello` messages | Laptop pairing | Hour 10 |
 | L3 | The worker writes a small status file: connected, rejected or disconnected, plus anything missing | The setup page shows "Joined" only after acceptance | Hour 10 |
 | L4 | When its connection drops, the worker keeps running, writes `disconnected`, and retries every few seconds, re-reading `coordinator_url` from `worker.json` before each try. A `hello` from a laptop the coordinator already knows replaces that laptop's old connection | Switching to the hotspot, or restarting the coordinator, without re-pairing | Hour 10 |
-| L5 | The dashboard's data as JSON at a local URL (proposed shape in "Handoff to Layer 2") | The hub connector reports monitoring health and finds the camera laptop. It's written in Node, so it can't use the Python client's `status()` | Hour 18 |
-| L6 | On the camera laptop, the capture job serves `ws://127.0.0.1:<frame_feed_port>`: each frame one binary JPEG message, up to 15 per second, about 640×480, encoded only while a client is connected, accepting only the sender page's origin | Live view without a second program fighting over the webcam | Hour 20 |
+| L5 | The dashboard's data as JSON at a local URL (proposed shape in "Handoff to Layer 2") | The hub connector finds the camera laptop and shows which laptops are connected. It's written in Node, so it can't use the Python client's `status()` | Hour 18 |
+| L6 | Moved to Layer 3, which owns the capture job: see ask T5 | | |
 | L7 | Could the worker use the Ollama server that Ollama's own app runs at `ollama_url`, rather than starting its own? Two servers on one laptop would compete for the port and memory | One Ollama server per laptop | Hour 10 |
 | L8 | Programs never exit because something is missing; they run what they can and report the rest, as Layer 2 already says. Exit codes and a stop file as in "Handoff to Layer 2" | The launcher restarts only real crashes, and Windows gets a clean stop without signals | Hour 10 |
 | L9 | A short requirements list: Python version, pip packages, Ollama model tags for the planner and `quick` models, and the llama.cpp build if Layer 2's step 7 stays | Every demo laptop set up the same way | Hour 2 |
-| L10 | The client endpoint Layer 4 uses listens on 127.0.0.1 only, at `client_port`. And a check: Layer 1's bridge and Layer 4 also run on the coordinator laptop (ask F2). Does that leave room for the planner model and the split-model lender? | Nobody on the venue Wi-Fi can subscribe to fall events, and the coordinator laptop doesn't run out of memory | Hour 16 |
+| L10 | A local endpoint on 127.0.0.1 at `client_port`, where the bridge hands Lucas's coordinator the requests and watch data arriving from phones, and where the coordinator hands the bridge the messages Layer 4 sends for phones. And a check: Layer 1's bridge also runs on the coordinator laptop. Does that leave room for the planner model and the split-model lender? | Layer 4 runs on workers, so the coordinator carries its messages; and the coordinator laptop mustn't run out of memory | Hour 16 |
 
 We no longer ask Lucas for an enrollment API, phone credentials, an artifact manifest or the video sender. TLS between workers and the coordinator can wait until after the hackathon.
 
-### To the Layer 4 owner
+### To Layer 4
 
 | # | Ask |
 |---|---|
-| F1 | Own the rule-based alert path. Fixed thresholds and timers send an alert as soon as a rule fires. The language model only adds wording later, as an update to the same alert. The concept requires that an alert never waits on the language model |
-| F2 | Run on the coordinator laptop, listening on 127.0.0.1 only, and give Layer 1 a start command; Layer 1's launcher starts and restarts it. Use language models through Layer 2's `ask()` rather than loading one on this laptop, so the coordinator laptop stays light |
+| F1 | Decided: alerts are rule-based. A fixed rule sends a template alert as soon as it fires, and a language model's rewrite follows as an update to the same alert. An alert never waits on the language model |
+| F2 | Decided: Layer 4 runs on worker laptops, not the coordinator laptop, and Layer 1 does not start it. Lucas's coordinator carries every message between the bridge and Layer 4 |
 | F3 | Agree the local calls in "Handoff to Layer 4" |
-| F4 | Build the care screens (alerts; status, including the heart-rate trend and "no heart data"; history) in Layer 1's `debbie-ios` project, through pull requests |
+| F4 | Supply the data for the care screens (alerts, live status, the daily report, replies) through the messages in "Handoff to Layer 4". Layer 1 builds the screens |
 
-### To the Layer 3 owner
+### To Layer 3
 
 | # | Ask |
 |---|---|
 | T1 | Join the hour-0 agreement. Lucas's doc also needs your sign-off |
-| T2 | Confirm that sound detection runs on a laptop mic, and correct "Every phone listens…" in the team notes |
-| T3 | Send a pinned list of Python packages and model files, so every demo laptop is set up the same way |
-| T4 | Say whether any script opens the camera or mic itself instead of using Lucas's capture job; live view and the sensor check depend on it |
+| T2 | Agree the watch data fields in "Handoff to Layer 4" (`POST /v1/watch-data`) |
+| T3 | Layers 3 and 4: send a pinned list of Python packages and model files, so every demo laptop is set up the same way |
+| T4 | Decided: only the capture job opens the camera and mic. Everything else, including live view, reads from it |
+| T5 | On the camera laptop, the capture job serves `ws://127.0.0.1:<frame_feed_port>`: each frame one binary JPEG message, up to 15 per second at 640×480, encoded only while a client is connected, accepting only the sender page's origin. Needed by hour 20, for live view without a second program fighting over the webcam |
 
 ## Parts
 
@@ -107,14 +107,14 @@ Caregiver iPhone ◀──── push ─────┐
                    │ one outgoing connection
 ┌──────────── COORDINATOR LAPTOP ──────────┐
 │ Layer 1 bridge: setup, pairing, launcher,│◀── Resident mode:
-│   hub connector, LAN gateway             │    heart rate over
+│   hub connector, LAN gateway             │    watch data over
 │ Layer 2 coordinator and planner (Lucas)  │    home Wi-Fi
-│ Ollama · Layer 4 care agent (ask F2)     │
+│ Ollama (planner model) · event log       │
 └──────────────────┬───────────────────────┘
                    │ Layer 2 control (Lucas) and bridge link (Layer 1)
 ┌──────────── WORKER LAPTOPS ──────────────┐
-│ Layer 2 worker and capture job (Lucas)   │
-│ Layer 3 jobs · Ollama                    │──▶ live video to the caregiver
+│ Layer 2 worker (Lucas)                   │
+│ Layer 3 capture · Layer 4 jobs · Ollama  │──▶ live video to the caregiver
 │ Layer 1 bridge: setup, launcher,         │    iPhone, direct or via TURN
 │   live-view sender (camera laptop only)  │
 └──────────────────────────────────────────┘
@@ -125,15 +125,14 @@ Caregiver iPhone ◀──── push ─────┐
 | Layer 1 bridge | Layer 1 | The person setting up, from Terminal (later, at login) | Every laptop |
 | Coordinator program | Lucas | Layer 1 launcher, which restarts it after a crash | Coordinator laptop |
 | Worker program | Lucas | Layer 1 launcher, which restarts it after a crash | Each worker laptop |
-| Capture job, with the frame feed (ask L6) | Lucas | Lucas's worker | The camera laptop and the mic laptop |
-| Layer 3 jobs | Layer 3 | Lucas's worker | Wherever the planner places them |
+| Capture job, with the frame feed (ask T5) | Layer 3 | Lucas's worker | The camera laptop |
+| Layer 4 jobs: fall model, speech-to-text, rules | Layer 4 | Lucas's worker | Wherever the planner places them |
 | Ollama server | Ollama, installed by Layer 1 | Ollama's own app, at login | Every laptop that runs a model |
 | Planner and worker models | Lucas | Lucas's programs, through Ollama | Coordinator and worker laptops |
 | llama.cpp split-model parts | Lucas | Lucas's programs | See "Questions for Lucas" |
-| Layer 4 care agent | Layer 4 | Layer 1 launcher (ask F2) | Coordinator laptop |
 | Live-view sender | Layer 1 | Layer 1 bridge, only during a live view | The camera laptop |
 
-Each process has one supervisor: Layer 1 restarts what it starts, and Lucas restarts what he starts (Question 4 asks whether his worker restarts a job that exits).
+Each process has one supervisor: Layer 1 restarts what it starts, and Lucas restarts what he starts (his worker restarts a job that exits).
 
 ### Ports (proposed)
 
@@ -141,11 +140,10 @@ Each process has one supervisor: Layer 1 restarts what it starts, and Lucas rest
 |---|---|---|
 | 7443 | Lucas's coordinator: worker control and media | The local network |
 | 7450 | Lucas's dashboard, with its JSON at `/api/state` (ask L5) | Lucas decides; Layer 1 reads the JSON from 127.0.0.1 |
-| 7451 | The client endpoint Layer 4 uses (ask L10) | 127.0.0.1 only |
-| 7460 | The frame feed on the camera laptop (ask L6) | 127.0.0.1 only |
-| 7470 | Layer 1 bridge, local side: the setup page, the Confirm button, and the calls Layer 4 makes | 127.0.0.1 only |
+| 7451 | Lucas's coordinator: local calls from the bridge (ask L10) | 127.0.0.1 only |
+| 7460 | Layer 3's frame feed on the camera laptop (ask T5) | 127.0.0.1 only |
+| 7470 | Layer 1 bridge, local side: the setup page, the Confirm button, and the messages for phones that the coordinator hands over | 127.0.0.1 only |
 | 7480 | Layer 1 bridge, network side: phone pairing requests, the LAN gateway, laptop join requests, bridge links | The local network |
-| 7490 | Layer 4's API | 127.0.0.1 only |
 | 11434 | Ollama | 127.0.0.1 only |
 
 Nothing on the network side can confirm a pairing or post an alert. Those happen only on 127.0.0.1, so someone else on the venue Wi-Fi can't pair a phone or fake an alert.
@@ -159,9 +157,9 @@ Nothing on the network side can confirm a pairing or post an alert. Those happen
 2. **Check this laptop**: CPU, memory, disk, OS, camera and mic. This laptop coordinates, so a camera or mic on it won't be used.
 3. **Keep this laptop awake**: the person approves, and the bridge keeps the laptop and its screen awake while it runs (`caffeinate -dis -w <bridge pid>` on macOS; on Windows, screen and sleep set to Never when plugged in). Lids stay open during the demo.
 4. The bridge creates the home ID, the home key and its own key pair, and shows the home ID. Remote access shows as "not set up" until the team runs the provisioning script with that home ID (build step 5); the bridge loads the certificate the next time it starts.
-5. It writes `coordinator.json` and an empty `accepted-workers.json`, starts Lucas's coordinator, and starts Layer 4.
+5. It writes `coordinator.json` and an empty `accepted-workers.json`, and starts Lucas's coordinator.
 6. **Pair the caregiver's phone** (below). Pair the resident's iPhone the same way, choosing Resident, or, if the team has one iPhone, turn on resident mode on the caregiver's phone.
-7. **Resident consent**: the resident agrees to each sensor (camera, mic, heart rate) and chooses whether a caregiver may open a live view. A "no" to the camera or mic leaves that device unconfigured (its `worker.json` field is `null`), and the setup page says what won't run; Question 3 asks Lucas how his plan should show it. A "no" to heart rate leaves resident mode off.
+7. **Resident consent**: the resident agrees to each sensor (camera, mic, watch data) and, once, gives or withholds consent to live view. A "no" to the camera or mic leaves that device unconfigured (its `worker.json` field is `null`), and the setup page says what won't run; Layer 2's plan lists its jobs as dropped with the reason `declined`. A "no" to watch data leaves resident mode off.
 8. **Home created. Add a laptop.** The page links to Lucas's dashboard, which shows zero workers. Nothing claims monitoring is active yet.
 
 ### Pair a phone
@@ -190,11 +188,11 @@ Nothing on the network side can confirm a pairing or post an alert. Those happen
 
 ### Screens
 - **Laptop:** Welcome (Create or Join) · Check this laptop · Keep awake · Pairing QR and code, with Confirm · Resident consent · Find the home · Add-this-laptop QR · Check sensors · Starting · Joined or Home created, with a link to Lucas's dashboard · Paired phones (remove) · Live view on/off · the live notice on the camera laptop. Troubleshooting names what's missing, a wrong network, a denied permission or a rejected token, and never shows secrets.
-- **Phone:** Scan to pair · Show code (confirm on the laptop) · Home: Layer 1's status header with three states (Connection: relay reachable and the hub's last contact; Monitoring: from the heartbeat; Language model: from Layer 4's health), the Live view button, and Layer 4's alerts, status and history screens · Add a laptop · Resident mode (permission for heart rate, sleep and steps; last reading; Sync now; live view on/off) · Settings (unpair).
+- **Phone:** Scan to pair · Show code (confirm on the laptop) · Home: the connection header (relay reachable, and the hub's last contact), the Live view button, the Check now button (a silent re-check that refreshes live status), and the care screens built from Layer 4's data: alerts (read-only, with no acknowledge or false-alarm action), live status, the daily report and the question box · Add a laptop · Resident mode (permission for heart rate, sleep and steps; last reading; Sync now; live view on/off) · Settings (unpair).
 
 ## Handoff to Layer 2
 
-These are proposals for Lucas: he can rename any field or change any behaviour, and we'll match it. Layer 1 writes the config files and Lucas's programs read them. All paths are absolute. Once agreed, example files go in `layer1/contracts/`.
+These are proposals for Lucas: he can rename any field or change any behaviour, and we'll match it. Layer 1 writes the config files and Lucas's programs read them. All paths are absolute. Once agreed, example files go in the top-level `contracts/` folder.
 
 `coordinator.json`:
 ```json
@@ -225,8 +223,8 @@ These are proposals for Lucas: he can rename any field or change any behaviour, 
   "display_name": "Kitchen laptop",
   "coordinator_url": "ws://192.168.1.20:7443",
   "token_file": "/abs/path/worker-token",
-  "camera": "Logitech C920",
-  "mic": "Logitech C920",
+  "camera": "j5create USB HD Webcam",
+  "mic": "j5create USB HD Webcam",
   "frame_feed_port": 7460,
   "ollama_url": "http://127.0.0.1:11434",
   "python": "/abs/path/python",
@@ -239,33 +237,34 @@ These are proposals for Lucas: he can rename any field or change any behaviour, 
 - **Token.** 64 lowercase hex characters, written to `token_file` with no newline and readable only by the user running the bridge. `token_sha256` is the SHA-256 of those characters, in lowercase hex. Tokens never appear in logs or on command lines.
 - **`hello`** stays as Layer 2 defines it: the token goes in as the credential, and `display_name` as the laptop name. The coordinator finds the laptop's `node_id` from the token's hash. It replies `{"type": "welcome", "accepted": true, "node_id": "…"}`, or `{"type": "welcome", "accepted": false, "reason": "unknown_token"}` and then closes the connection.
 - **Sensors.** `camera` and `mic` name the only devices the worker may report and capture (a name or index Lucas's code can open), or are `null` when there is none or the resident declined it. Built-in cameras and mics aren't used unless named.
-- **`python`** is the interpreter Lucas's worker uses for Layer 3 jobs.
+- **`python`** is the interpreter Lucas's worker uses for Layer 3 and Layer 4 jobs.
 - **Files.** Every JSON file is written whole: to a temporary file, then renamed (retried if Windows reports the file busy). Times are ISO 8601 in UTC.
 - **Worker status file:** `{"node_id": "…", "state": "connected", "missing": [], "updated_at": "…"}`, where `state` is `connected`, `rejected` or `disconnected`, and `missing` items look like `check`'s.
-- **`check --config worker.json --json`** prints `{"ok": true, "missing": [{"id": "ollama", "reason": "not reachable at http://127.0.0.1:11434", "required": false}]}` and installs nothing. `ok` is false only when a required item is missing, and then `check` exits with 4. Ollama and llama.cpp are not required for fall and sound detection.
+- **`check --config worker.json --json`** prints `{"ok": true, "missing": [{"id": "ollama", "reason": "not reachable at http://127.0.0.1:11434", "required": false}]}` and installs nothing. `ok` is false only when a required item is missing, and then `check` exits with 4. Ollama and llama.cpp are not required for fall detection.
 - **Exit codes** for the coordinator and worker: 0 stopped normally, 2 bad config, 3 token rejected, 1 anything else. Missing items never stop them (ask L8). The launcher restarts a program only after code 1, and shows the reason for 2 and 3.
 - **Stop file.** When it appears, the program stops its jobs and exits within 10 seconds; after that, Layer 1 ends the process.
-- **Dashboard JSON** (ask L5): `GET http://127.0.0.1:7450/api/state` returns `{"updated_at": "…", "laptops": [{"node_id": "…", "display_name": "…", "last_status_at": "…", "sensors": ["camera", "mic"], "missing": []}], "jobs": [{"job": "fall_detection", "node_id": "…", "state": "running"}], "dropped": [{"work": "…", "reason": "…"}]}`, using Layer 2's job names and its `dropped` list. The hub connector judges staleness itself, from `last_status_at` and the laptops in `accepted-workers.json`.
+- **Dashboard JSON** (ask L5): `GET http://127.0.0.1:7450/api/state` returns `{"updated_at": "…", "laptops": [{"node_id": "…", "display_name": "…", "last_status_at": "…", "sensors": ["camera", "mic"], "missing": []}], "jobs": [{"job": "fall_model", "node_id": "…", "state": "running"}], "dropped": [{"work": "…", "reason": "…"}]}`, using Layer 2's job names and its `dropped` list. The hub connector uses it only to find the camera laptop and to show which laptops are connected; it makes no judgement about monitoring.
 - **Transport.** Workers reach the coordinator over plain WebSocket on the demo network (see Question 1 about which network). TLS with a pinned certificate is for after the hackathon, at Lucas's discretion.
 - **Network changes.** If the coordinator's address changes, for example after switching to the hotspot, the worker bridges find it again by mDNS and rewrite `coordinator_url`, and the worker picks it up on its next retry (ask L4). If mDNS fails, the person types the new address on the worker's setup page. The laptop keeps its node ID and token.
 
 ## Handoff to Layer 4
 
-These are proposals for the Layer 4 owner. Layer 4 runs on the coordinator laptop (ask F2) and listens on 127.0.0.1:7490. Layer 1's bridge receives Layer 4's calls on 127.0.0.1:7470. Layer 1 passes both addresses, plus Lucas's client endpoint (`http://127.0.0.1:7451`), in Layer 4's start command. Every call is JSON over HTTP on the same laptop.
+These are proposals for Lucas, as owner of Layers 3 and 4. Layer 4 runs on worker laptops, so the bridge never calls it directly. Lucas's coordinator, on the same laptop as the bridge, carries every message: the bridge posts to the coordinator on `127.0.0.1:7451`, and the coordinator posts to the bridge on `127.0.0.1:7470`. Every call is JSON over HTTP on the coordinator laptop.
 
 | From → to | Call | Fields |
 |---|---|---|
 | Layer 4 → Layer 1 | `POST /v1/alerts` | `alert_id, kind, severity, detected_at, title, body, update` |
 | Layer 4 → Layer 1 | `POST /v1/replies` | `request_id, title, body` |
-| Layer 4 → Layer 1 | `POST /v1/status` | the care status the app shows: latest heart rate and trend, `no_heart_data`, and anything else the care screens need |
-| Layer 1 → Layer 4 | `POST /v1/acks` | `alert_id, device_id, acked_at, false_alarm` |
+| Layer 4 → Layer 1 | `POST /v1/status` | live status: current activity; latest heart rate, sleep and steps, each with its age; `no_heart_data` |
+| Layer 4 → Layer 1 | `POST /v1/reports` | `report_id, date, title, body` (the daily report) |
 | Layer 1 → Layer 4 | `POST /v1/requests` | `request_id, device_id, kind, text` |
-| Layer 1 → Layer 4 | `POST /v1/watch-data` | `device_id, heart_rate: [{measured_at, bpm}], sleep: [{night_of, asleep_minutes, bedtime_at, wake_at, interruptions}], steps: [{measured_at, steps_today}]` |
-| Layer 1 → Layer 4 | `GET /v1/health` | returns `ok, rules_running, language_model_available` |
+| Layer 1 → Layer 3 | `POST /v1/watch-data` | `device_id, heart_rate: [{measured_at, bpm}], sleep: [{night_of, asleep_minutes, bedtime_at, wake_at, interruptions}], steps: [{measured_at, steps_today}]` |
 
-- Request `kind` is `ask` (a question in plain words, which Layer 4 answers) or `check_now` (the caregiver asks the home to check on the resident now; Layer 4 decides what that means, for example asking "Are you okay?" aloud).
-- Layer 4 sends an alert the moment a rule fires. If the language model later writes better wording, Layer 4 sends it with the same `alert_id` and `update: true`, and the phone replaces the first notification.
-- The hub connector encrypts each alert once with the home key and keeps it in an outbox on disk until the relay confirms it (the MQTT acknowledgment), resending after an outage. The LAN gateway serves the same encrypted message to phones on home Wi-Fi.
+- Request `kind` is `ask` (a question in plain words, which Layer 4 answers) or `check_now` (a silent re-check: Layer 4 sends a fresh live status at once; nothing is spoken in the home).
+- Layer 4 sends a template alert the moment a rule fires. When the language model's rewrite is ready, Layer 4 sends it with the same `alert_id` and `update: true`, and the phone replaces the first notification.
+- "Monitoring degraded" is an ordinary alert that Layer 4 decides to send. The bridge delivers it and adds nothing.
+- Nothing about an alert comes back from the phone: there are no acknowledgments and no false-alarm marks.
+- The hub connector encrypts each message once with the home key and keeps it in an outbox on disk until the relay confirms it (the MQTT acknowledgment), resending after an outage. The LAN gateway serves the same encrypted message to phones on home Wi-Fi.
 - Requests are asynchronous: the phone gets an ID at once and fetches the reply later, because AWS's HTTP API ends any request after 30 seconds.
 
 ## Phone ↔ hub messages (proposed)
@@ -287,7 +286,7 @@ The hub keeps one outgoing connection to AWS IoT Core. Nothing in the home accep
 | Part | Job |
 |---|---|
 | IoT Core | The hub's connection: MQTT over TLS on port 443 (which needs the ALPN setting AWS's IoT Device SDK adds), with a clean session so commands queued while the hub was offline aren't replayed. One policy for every home, keyed on the IoT thing name: connect only as itself, publish to `homes/{home_id}/hub/events`, and subscribe and receive on `homes/{home_id}/hub/commands`. An IoT rule sends hub events to the relay's Lambda, which takes `home_id` from the topic, never from the message |
-| API Gateway HTTP API + Lambda | The phone's API: send a request or acknowledgment, fetch messages, start or stop a live view, register for push. Each call carries the phone's device credential |
+| API Gateway HTTP API + Lambda | The phone's API: send a request, fetch messages, start or stop a live view, register for push. Each call carries the phone's device credential |
 | DynamoDB | One table: phones per home, encrypted messages (kept 7 days), the hub's last contact time, live-view sessions. The relay drops duplicate message IDs |
 | SNS → APNs | Push to caregiver phones with the team's APNs key, through two platform applications: APNS for TestFlight builds and APNS_SANDBOX for builds run from Xcode. Phones register their push token together with its environment |
 | EventBridge + Lambda | The offline watchdog, once a minute |
@@ -317,16 +316,16 @@ Every command carries its send time, and the hub ignores commands older than 30 
 | Push text | No. The push carries ciphertext that the phone decrypts |
 
 ### Health and offline alerts
-- The hub connector sends an encrypted heartbeat every minute. It includes monitoring health from Lucas's dashboard JSON (ask L5): which laptops report, whether the camera and mic laptops are up, and whether fall and sound detection are running.
-- If the camera or mic laptop's status goes stale, or fall or sound detection stops for more than 30 seconds (longer than Layer 2's few-second gap while a job moves), the hub connector sends an encrypted "monitoring degraded" notice. A sleeping worker must never look healthy.
-- The watchdog runs every minute. When a hub has been silent for 3 minutes, it pushes "hub offline", and "back online" when it returns. For the demo, use a 20-second heartbeat and a 1-minute limit so the push arrives within about 2 minutes; rehearse it or record it.
+- The hub connector sends an encrypted heartbeat every minute, so the relay knows the home is reachable. The heartbeat carries no judgement about monitoring.
+- Whether monitoring is degraded (a camera, mic, laptop or detector has stopped) is decided by Layer 4, which sends it as an alert like any other. The bridge only delivers it.
+- The watchdog runs every minute. When a hub has been silent for 3 minutes, it pushes "hub offline", and "back online" when it returns. This is a connection check, and nothing in the home could send it. For the demo, use a 20-second heartbeat and a 1-minute limit so the push arrives within about 2 minutes; rehearse it or record it.
 
 ## Live view
 
 1. The caregiver taps **Live view**. The app sends a live-view request encrypted with its own key (a request ID, the time and a fresh viewer client ID) and gets a session ID back at once.
 2. A Lambda checks that this phone is a caregiver for the home. For the home's channel, it gets the signaling endpoints and the ICE servers (KVS's STUN address, plus TURN addresses with a username and password that last 5 minutes), and pre-signs a 5-minute sender URL. It sends "start live view" to the hub with the sender URL, the ICE servers and the phone's encrypted request, unopened.
-3. The hub connector opens the request, which must decrypt with a paired caregiver's key, be under 30 seconds old and not have been seen before. Then it checks the resident's setting. If live view is off, it replies "denied" and the app says so. If it's on, it tells the camera laptop's bridge, over the bridge link, to open the sender and which viewer client ID it may answer.
-4. The sender is one Chrome or Edge window that the bridge starts with its own profile, in kiosk mode (Edge on Windows, where every laptop has it). The window is the full-screen **Live: your caregiver is watching** notice, with a **Turn off live view** button, and it holds the canvas being streamed, shown as a preview. It reads frames from Lucas's frame feed (ask L6), draws them on the canvas, and streams the canvas through the KVS JavaScript library, which takes the pre-signed URL through a custom request signer. Nothing may cover this window, because Chrome stops streaming a hidden canvas.
+3. The hub connector opens the request, which must decrypt with a paired caregiver's key, be under 30 seconds old and not have been seen before. Then it checks the resident's consent. If the resident has not consented, or has turned live view off, it replies "denied" and the app says so. If it's on, it tells the camera laptop's bridge, over the bridge link, to open the sender and which viewer client ID it may answer.
+4. The sender is one Chrome or Edge window that the bridge starts with its own profile, in kiosk mode (Edge on Windows, where every laptop has it). The window is the full-screen **Live: your caregiver is watching** notice, with a **Turn off live view** button, and it holds the canvas being streamed, shown as a preview. It reads frames from Layer 3's frame feed (ask T5), draws them on the canvas, and streams the canvas through the KVS JavaScript library, which takes the pre-signed URL through a custom request signer. Nothing may cover this window, because Chrome stops streaming a hidden canvas.
 5. When the sender is connected, the hub replies "ready". Only then does the Lambda pre-sign the viewer URL, which the phone fetches with its session ID along with the ICE servers. Video goes straight from laptop to phone when the networks allow, and otherwise through TURN, encrypted either way.
 6. The session ends after 5 minutes, when the caregiver taps **Stop**, or when the resident turns live view off. The bridge closes the sender window's process at once. **Keep watching** starts a new session.
 
@@ -341,9 +340,9 @@ Notes:
 
 ## Privacy claim
 
-Suggested pitch wording, for now: "AI monitoring runs inside the home, and video and audio are never uploaded for analysis. A caregiver can open an encrypted live view only when the resident has turned it on, and the laptop shows when someone is watching. Alerts are end-to-end encrypted, so our relay can't read them."
+Suggested pitch wording, for now: "AI monitoring runs inside the home, and video and audio are never uploaded for analysis. Nothing is recorded. Once the resident has consented, a caregiver can open an encrypted live view at any time, and the laptop shows when someone is watching. Alerts are end-to-end encrypted, so our relay can't read them."
 
-Say "never recorded" only if Lucas agrees to Question 2 (detection events instead of a day of recordings). This replaces the concept's "video and audio never leave the house", and the concept should be updated to match (Open question 1).
+No video or audio is stored: the daily report is written from the event log. This replaces the concept's "video and audio never leave the house", and the concept should be updated to match (Open question 1).
 
 ## When things fail
 
@@ -351,9 +350,9 @@ Say "never recorded" only if Lucas agrees to Question 2 (detection events instea
 |---|---|
 | Phone moves from Wi-Fi to cellular | The app switches from the LAN gateway to the relay. No re-pairing |
 | Home internet drops | Monitoring carries on locally. Alerts wait in the outbox and arrive on reconnect. The watchdog pushes "hub offline" |
-| Camera or mic laptop sleeps or crashes | Its status goes stale in Lucas's dashboard JSON, and the hub connector sends "monitoring degraded" |
-| Coordinator laptop restarts | Starting the bridge again relaunches Lucas's coordinator and Layer 4. Workers reconnect by themselves (ask L4). Pairings, tokens and keys are files and survive |
-| Network change (venue Wi-Fi to hotspot) | Worker bridges find the coordinator's bridge again by mDNS, or the person types its new address on the worker's setup page; nothing is re-paired. Caregiver phones use the relay meanwhile. Heart rate pauses until the resident's phone finds the bridge again by Bonjour |
+| Camera laptop sleeps or crashes | Layer 4 raises "monitoring degraded" and the bridge delivers it |
+| Coordinator laptop restarts | Starting the bridge again relaunches Lucas's coordinator. Workers reconnect by themselves (ask L4). Pairings, tokens and keys are files and survive |
+| Network change (venue Wi-Fi to hotspot) | Worker bridges find the coordinator's bridge again by mDNS, or the person types its new address on the worker's setup page; nothing is re-paired. Caregiver phones use the relay meanwhile. Watch data pauses until the resident's phone finds the bridge again by Bonjour |
 | Relay unreachable from the phone | The app shows "can't reach home" with the last contact time. It never shows an all-clear it can't confirm |
 | Live view stopped, expired or turned off | The sender window closes immediately |
 | A phone is unpaired (in its Settings, or removed on the coordinator's setup page) | The hub tells the relay, which rejects that phone's credential from then on |
@@ -369,10 +368,10 @@ Target: reconnect within 30 seconds once both ends have a working connection. Re
 | iPhones | One, paired with the Apple Watch. A second (a teammate's, added as an internal TestFlight tester) would let the caregiver and the resident be separate phones |
 | Demo phone settings | Focus and Do Not Disturb off; notifications allowed |
 | Chrome or Edge on the camera laptop | To check |
-| Demo laptops listed: OS, chip, memory, and which one gets the webcam and mic | To do |
+| Demo laptops listed: OS, chip, memory, and which one gets the webcam | To do |
 | Network test on venue Wi-Fi and the hotspot: phone to coordinator laptop, and laptop to laptop | To do, with Lucas |
 
-With one iPhone, it pairs as a caregiver and turns on resident mode. Do the heart-rate step on home Wi-Fi first, then switch the phone to cellular for the alert, "hub offline" and live-view steps.
+With one iPhone, it pairs as a caregiver and turns on resident mode. Do the watch data step on home Wi-Fi first, then switch the phone to cellular for the alert, "hub offline" and live-view steps.
 
 ## Build order (hackathon)
 
@@ -380,22 +379,22 @@ Two tracks run side by side: laptop and cloud (bridge, hub connector, relay, sen
 
 | Step | What | Depends on |
 |---|---|---|
-| 0 | Hour 0–1: agree the handoff files and ports with Lucas, the local calls with the Layer 4 owner, and the frame feed; get the Layer 3 owner's answers to T1–T4; check prerequisites; run the network test | none |
+| 0 | Hour 0–1: agree with Lucas the handoff files and ports, the messages in "Handoff to Layer 4", and the frame feed (asks T1–T5); check prerequisites; run the network test | none |
 | 0b | Hours 1–6, the riskiest outside services first: (a) as soon as the app has a build with push enabled, one push to it through SNS, then one decrypted by the notification extension on a locked phone; (b) AWS's KVS WebRTC JavaScript sample page as sender on the camera laptop and as viewer in Safari on the iPhone over cellular, with TURN forced (using a developer's temporary AWS credentials, for this test only). If (a) fails by hour 6, the app fetches alerts while it's open and the push tests are marked BLOCKED. If (b) fails by hour 8, tell the whole team before doing more video work | 0 |
 | 1 | Create a home: bridge, setup page, start Lucas's coordinator (a labelled stub until his step 1 lands), dashboard link | 0 |
 | 2 | Pair a phone: QR code, matching code, encrypted handover; the app keeps its keys in the shared Keychain | 1 |
 | 3 | Add a laptop: join request, approval from the phone, token, Lucas's worker accepted and shown on his dashboard | 2, Layer 2 step 1, asks L1–L4 |
-| 4 | Alert on the phone over home Wi-Fi: a stub Layer 4 posts an alert, the hub connector encrypts it, the LAN gateway serves it, and the app decrypts and shows it | 2 |
+| 4 | Alert on the phone over home Wi-Fi: a stub coordinator hands over an alert as if from Layer 4, the hub connector encrypts it, the LAN gateway serves it, and the app decrypts and shows it | 2 |
 | 5 | Relay: CDK stack, provisioning the hub, an alert pushed to a locked phone on cellular and decrypted by the notification extension, heartbeat, offline watchdog | 0b, 4 |
-| 6 | A real alert end to end: Layer 3 detects a staged fall, Layer 4's rule fires, the push arrives, with Ollama stopped | 5, Layer 2 step 2 with the capture job and `subscribe()`, Layers 3 and 4 |
-| 7 | Live view on cellular: Lucas's frame feed to the sender window, through KVS, to the app's viewer, with consent, the on-screen notice, the 5-minute limit, Stop and Turn off live view | 0b, 5, ask L6 |
-| 8 | Resident watch data (heart rate, sleep, steps): HealthKit to the LAN gateway to Layer 4 | 2, Layer 4 |
+| 6 | A real alert end to end: Layer 3 captures a staged fall, Layer 4's fall model and rule fire, the push arrives, with Ollama stopped | 5, Layer 2 steps 2 and 7, Layers 3 and 4 |
+| 7 | Live view on cellular: Layer 3's frame feed to the sender window, through KVS, to the app's viewer, with consent, the on-screen notice, the 5-minute limit, Stop and Turn off live view | 0b, 5, ask T5 |
+| 8 | Resident watch data (heart rate, sleep, steps): HealthKit to the LAN gateway, then through Lucas's coordinator to Layer 3 | 2, Layer 2 step 7, Layer 3 |
 | 9 | Hardware check, keep-awake, sensor check and resident consent screens | 3 |
 | 10 | Three full rehearsals and a backup recording | all |
 
 Targets for about 30 hours (compress if there's less): phone paired by hour 8, second laptop joined by hour 12, alert on the phone by hour 16, push and watchdog by hour 20, live view and a real alert end to end by hour 24, then rehearse.
 
-If time runs short, cut in this order: mDNS discovery (type the address), the app's home Wi-Fi route for caregivers (relay only), background heart-rate delivery (keep Sync now), decryption inside the push (show "New alert" and decrypt in the app), and the "monitoring degraded" notice (keep the dashboard). Keep pairing, the alert path, live view and the watchdog.
+If time runs short, cut in this order: mDNS discovery (type the address), the app's home Wi-Fi route for caregivers (relay only), background watch data delivery (keep Sync now), and decryption inside the push (show "New alert" and decrypt in the app). Keep pairing, the alert path, live view and the watchdog.
 
 ## Acceptance tests
 
@@ -409,12 +408,12 @@ If time runs short, cut in this order: mDNS discovery (type the address), the ap
 - [demo] An alert reaches a locked phone on cellular within 10 seconds and the notification names what happened, while the DynamoDB table and the logs hold only ciphertext.
 - [demo] With Ollama stopped, a staged fall still produces an alert.
 - [demo] Cut the coordinator laptop's internet: "hub offline" arrives; on reconnect, "back online" and the queued alerts arrive.
-- Close the camera laptop: "monitoring degraded" arrives.
-- [demo] Live view over cellular with TURN forced starts within 10 seconds, shows the notice on the camera laptop, ends on Stop, on Turn off live view and at 5 minutes, and is refused when the resident has it off.
-- [demo] A heart-rate reading, a sleep record and a step count from resident mode each reach Layer 4.
+- Close the camera laptop: Layer 4's "monitoring degraded" alert is delivered to the phone.
+- [demo] Live view over cellular with TURN forced starts within 10 seconds, shows the notice on the camera laptop, ends on Stop, on Turn off live view and at 5 minutes, and is refused when the resident has not consented or has turned it off.
+- [demo] A heart-rate reading, a sleep record and a step count from resident mode each reach Layer 3.
 - [demo] Camera and mic permissions work through the launch path used on stage.
 - [demo] The network test passes on the demo network.
-- Anything unavailable (video, Layer 4, a sensor) is shown as unavailable, never as ready.
+- Anything unavailable (video, a sensor, the connection to the home) is shown as unavailable, never as ready.
 
 Record PASS, FAIL, BLOCKED or NOT RUN with the commit, device and evidence. Stubs help development but don't count as integration.
 
@@ -424,7 +423,7 @@ Kept from the first draft, but not built tonight:
 - Installer: one command with a bundled Node runtime (Node's single-executable builds don't support Intel Macs), packaged Python per platform, download URLs and checksums in the component list, resumable downloads, disk checks and atomic activation.
 - Enrollment in Layer 1's bridge: invitations bound to one laptop's key, safe retries, revocation that closes live sessions, and recovery.
 - TLS with a pinned certificate between workers and the coordinator.
-- Caregiver accounts (Cognito), several caregivers, and a second contact for escalation (with the Layer 4 owner).
+- Caregiver accounts (Cognito) and several caregivers.
 - The hub enrolling itself from a certificate request, certificate rotation, and a new home key when a phone is removed.
 - Signed commands from phone to hub, and checking the viewer's DTLS fingerprint (sent encrypted by the phone) before the sender answers.
 - Per-sensor opt-out that Layer 2's plan understands, and pausing monitoring.
@@ -433,27 +432,27 @@ Kept from the first draft, but not built tonight:
 - Watch live mode (a short workout session for readings every few seconds) and Apple's fall-detection entitlement.
 - Live-view audio or talk-back, with the audio-consent notice the concept calls for.
 
-## Questions for Lucas
+## Questions for Lucas (answered Nov 14)
 
-These come from reading Layer 2 next to the concept. They're questions, not changes.
-
-1. **Demo network.** Should the whole demo cluster run on the hotspot? On venue Wi-Fi, plain WebSocket would carry join tokens and any forwarded video and audio, and llama.cpp's README calls its RPC server "fragile and insecure" and says never to run it on an open network. If we stay on venue Wi-Fi, could fall and sound detection stay on the sensor laptop, as your rule-based plan already does, and Layer 2's step 7 (the split model) be left out?
-2. **Daily review of recordings.** The concept discards video and audio after processing. Could the daily report use detection events and their times instead of a day of recordings?
-3. **Detection that can't run.** If fall or sound detection can't be placed, or the resident declines the camera or mic, what should the plan and the dashboard JSON say? We'd show the caregiver "monitoring degraded" or "declined" rather than a rejected plan.
-4. **The capture job.** When will it land? Does it keep the webcam when fall detection runs on the same laptop? Does the worker restart a Layer 3 job or the capture job when it exits?
-5. **Ollama down.** Can you confirm that an unreachable Ollama sends the planner straight to the rule-based plan?
+| Question | Answer |
+|---|---|
+| 1. Should the whole demo run on the hotspot? | Yes. It avoids sending tokens and a split model's traffic over an open network |
+| 2. Could the daily report use detection events instead of recordings? | Yes, and it is decided: only an event log is kept, and no video or audio is stored |
+| 3. What does the plan say when detection can't run or a sensor is declined? | The plan lists the work under `dropped` with a reason, including `declined`, and `/api/state` carries it |
+| 4. Who builds the capture job, and what restarts a job that exits? | Layer 3 builds it, and only it opens the webcam. Lucas's worker restarts any job that exits |
+| 5. Does an unreachable Ollama send the planner to the rule-based plan? | Yes, at once |
 
 ## Open questions
 
-1. **Whole team:** update the concept to match decisions made since it was written: several pooled laptops instead of one, 16 GB workers (from Layer 2), the privacy claim above, and Layer 2's daily review of recordings (Question 2).
-2. **Other owners:** Lucas, the Layer 4 owner and the Layer 3 owner answer their asks and the questions above at hour 0.
+1. **Whole team:** update the concept to match decisions made since it was written: several pooled laptops instead of one, 16 GB workers (from Layer 2), and the privacy claim above.
+2. **Lucas:** confirm the proposed answers to asks L1–L10 (in the Layer 2 doc) and the asks to Layers 3 and 4.
 3. **Team:** list the demo laptops, and pick the demo network after the hour-0 test.
 
 ## Glossary
 
-- **Coordinator laptop:** runs Lucas's coordinator and its planner model (through Ollama), Layer 1's bridge with the hub connector, and Layer 4. Layer 2 calls it the "central agent".
-- **Worker laptop:** runs Lucas's worker and Layer 3 jobs.
-- **Camera laptop, mic laptop:** the worker the external webcam (or mic) is plugged into. Built-in cameras and mics aren't used unless named in `worker.json`.
+- **Coordinator laptop:** runs Lucas's coordinator and its planner model (through Ollama), Layer 1's bridge with the hub connector, and the event log. It runs nothing from Layers 3 or 4.
+- **Worker laptop:** runs Lucas's worker, Layer 3's capture and Layer 4's jobs.
+- **Camera laptop:** the worker the external webcam is plugged into. Its built-in mic is the only mic. Built-in laptop cameras and mics aren't used unless named in `worker.json`.
 - **Home** (`home_id`): one coordinator, its workers and the paired phones. The same thing as Layer 2's cluster.
 - **Hub:** the coordinator laptop's bridge, acting for the whole home. It holds the home key and its own key pair, pairs phones, and reaches the relay through the hub connector.
 - **Bridge:** Layer 1's Node program on every laptop. On the coordinator laptop it also pairs phones and laptops, serves phones on home Wi-Fi (the **LAN gateway**), and encrypts messages for phones and holds the AWS connection (the **hub connector**).
@@ -468,18 +467,18 @@ These come from reading Layer 2 next to the concept. They're questions, not chan
 
 This doc covers two tracks. The iPhone track works in the `debbie-ios` folder from its own kickoff brief, which points back here. For the laptop and cloud track:
 
-Read this doc and Lucas's `docs/layer2-device-management.md` (branch `layer-2`). Build only Layer 1, in the order of "Build order (hackathon)", and nothing listed under "After the hackathon". Use clearly labelled stubs for Lucas's programs and for Layer 4 until their code exists, then switch to the real thing. Match "Phone ↔ hub messages" exactly, and pass the iPhone track's test vectors. Never write to another layer's directories or branches. Keep secrets out of the repo and the logs: AWS credentials, the APNs key, join tokens, device credentials and the home key. Run the [demo] acceptance tests and record the results.
+Read `CLAUDE.md` first, then this doc and `docs/layer2-device-management.md`. Build only Layer 1, in the order of "Build order (hackathon)", and nothing listed under "After the hackathon". Use clearly labelled stubs for Lucas's programs until their code exists, then switch to the real thing. Match "Phone ↔ hub messages" exactly, and pass the iPhone track's test vectors. Never write to another layer's directories or branches. Keep secrets out of the repo and the logs: AWS credentials, the APNs key, join tokens, device credentials and the home key. Run the [demo] acceptance tests and record the results.
 
 Code layout (can change once, together, before coding):
 - `layer1/bridge`: Node/TypeScript setup page, launcher, pairing, hub connector, LAN gateway and the live-view sender page
 - `layer1/cloud`: the CDK app, the Lambdas and the provisioning script
-- `layer1/contracts`: the shared example files and test vectors from "Handoff to Layer 2", "Handoff to Layer 4" and "Phone ↔ hub messages"
+- `layer1/contracts`: the phone-to-hub test vectors from "Phone ↔ hub messages". Example files shared with other layers ("Handoff to Layer 2", "Handoff to Layer 4") go in the top-level `contracts/` folder
 - `layer1/tests`
-- The iPhone app lives in its own `debbie-ios` project, with its notification extension and live viewer. Layer 4 adds its screens there through pull requests.
+- The iPhone app lives in its own `debbie-ios` project, with its notification extension, live viewer and every screen.
 
 ## References
 
-- Layer 2 draft: `docs/layer2-device-management.md`, branch `layer-2`, commit `6d74cc4`
+- The other layer docs and `docs/coherence-review.md`, on `main`
 - The team's concept and roadmap ("Local AI Home Caregiver") and layer notes, shared outside the repo
 - Node single-executable applications: https://nodejs.org/api/single-executable-applications.html
 - llama.cpp RPC: https://github.com/ggml-org/llama.cpp/blob/master/tools/rpc/README.md
