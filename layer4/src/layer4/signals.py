@@ -15,6 +15,10 @@ from layer4._checks import is_number, is_whole_number
 def _require_time_zone(name: str, value: datetime) -> None:
     if not isinstance(value, datetime) or value.utcoffset() is None:
         raise ValueError(f"{name} must be a datetime with a time zone, got {value!r}")
+    try:
+        value.astimezone(UTC)
+    except OverflowError as err:
+        raise ValueError(f"{name} is out of range in UTC, got {value!r}") from err
 
 
 @dataclass(frozen=True)
@@ -77,3 +81,6 @@ class MonitoringSignal:
                 f"checked_at ({self.checked_at.isoformat()}) is before "
                 f"stopped_at ({self.stopped_at.isoformat()})"
             )
+
+
+Signal = FallSignal | HelpSignal | HeartRateSignal | MonitoringSignal
