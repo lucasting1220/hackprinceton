@@ -49,7 +49,7 @@ this checkout. Do not work around either block.
 | 3 | Raw data: camera and mic capture, receiving watch data. Runs no AI | Python | `layer3/` | `l3/` | `docs/layer3-raw-data.md` |
 | 4 | Care layer: detectors and fixed rules that produce alerts, the report, answers and live status. No agent | Python | `layer4/` | `l4/` | `docs/layer4-care-layer.md` |
 
-Lucas approves every pull request into `main` and settles disagreements between layers.
+Pull requests do not wait for a human review: Claude merges each one itself once the definition of done (section 5) is met. Lucas settles disagreements between layers.
 
 ## 2. How the system fits together
 
@@ -143,7 +143,7 @@ A build step is done only when **every** item below is true. "Mostly done" is no
 **Commits**
 - One logical change per commit. Message format: `L2: add worker status reporting`, with the prefix `L1` to `L4`, or `ALL:` for shared files, then an imperative summary under 72 characters.
 - Run `/verify` before every commit. Every commit must leave the checks passing.
-- Commit or push only when your human asked you to.
+- Commit, push, open the pull request and merge it once the definition of done is met; you do not need to ask your human first.
 
 **Never**
 - force-push, or push straight to `main`
@@ -161,12 +161,12 @@ A build step is done only when **every** item below is true. "Mostly done" is no
   4. **Skills run:** `/verify`, `/review`, and `/cso` or `/qa` where required, with a one-line result each.
   5. **Weakened checks:** "none", or each one on its own line with the reason (section 5).
   6. **Stubs:** anything standing in for another layer.
-- **Merging:** Lucas approves on GitHub. Then the pull request's author merges it with a merge commit. Lucas merges pull requests that change shared files.
+- **Merging:** no human approval is needed. As soon as the definition of done (section 5) is met and the pull request is open, Claude merges it with a merge commit (`gh pr merge <number> --merge --delete-branch`) without asking. This includes pull requests that change shared files.
 
 ## 7. Preventing merge conflicts
 
 1. **Stay in your directory.** Only your layer's directory and your layer doc. `/guard` enforces this; do not unfreeze it to touch anything else.
-2. **Keep branches short.** One build step per branch, merged within a few hours. Ask for review as soon as the step is done; do not keep adding to an open pull request.
+2. **Keep branches short.** One build step per branch, merged within a few hours. Open and merge the pull request as soon as the step is done; do not keep adding to an open pull request.
 3. **Sync before you open a pull request.** Merge `origin/main` into your branch, rerun the checks, then open it. If `main` moves while it waits, merge again.
 4. **Shared files go in their own pull request, first.** A change to `contracts/`, `CLAUDE.md`, `ruff.toml`, `.gitignore`, `.gitattributes`, `.github/` or `.claude/` is never mixed into a layer pull request. It merges first; then each layer merges `main` and adapts.
 5. **No drive-by edits.** Do not reformat, re-sort imports, rename, move or re-wrap anything your step does not need to change. Run the formatter only on your own directory (`uv run ruff format .` from your layer's directory, never the repo root).
@@ -176,7 +176,7 @@ A build step is done only when **every** item below is true. "Mostly done" is no
 9. **Markdown: one paragraph per line.** Do not hard-wrap prose in `.md` files; one changed word then rewraps a whole paragraph and conflicts with everyone.
 10. **Never commit generated or local files:** build output, caches, model files, recordings, screenshots, `CLAUDE.local.md`, `.claude/settings.local.json`. The root `.gitignore` covers the common ones.
 11. **Line endings are LF everywhere.** `.gitattributes` enforces it; do not override it locally.
-12. **Resolving a conflict in a file you don't own:** never pick your side. Take `main`'s version, and tell your human so the owner can be asked.
+12. **Resolving merge conflicts:** Claude resolves them itself, without asking. In your own layer's files, keep both sides' intent and rerun the checks. In a file you don't own, take `main`'s version and note it in the pull request description.
 
 ## 8. Who owns which files
 
