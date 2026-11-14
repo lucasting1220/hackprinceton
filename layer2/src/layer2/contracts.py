@@ -87,8 +87,8 @@ class AcceptedWorkers(Strict):
 
 
 class MissingItem(Strict):
-    id: str
-    reason: str
+    id: Annotated[str, Field(max_length=64)]
+    reason: Annotated[str, Field(max_length=2000)]
     required: StrictBool
 
 

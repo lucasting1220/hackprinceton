@@ -1,4 +1,4 @@
-"""The dashboard page. It polls /api/state every second and shows a laptop in red as
+"""The dashboard page. It polls /api/state every DASHBOARD_POLL_S and shows a laptop in red as
 "not reporting" when its last status is older than STALE_AFTER_S. Staleness is measured
 against the response's own `updated_at`, never the browser's clock. Text is set with
 textContent only, because names and reasons come from workers."""
@@ -30,6 +30,7 @@ PAGE = f"""<!doctype html>
 </table>
 <script>
 const STALE_AFTER_MS = {int(settings.STALE_AFTER_S * 1000)};
+const POLL_MS = {int(settings.DASHBOARD_POLL_S * 1000)};
 
 function cell(row, text) {{
   const td = document.createElement("td");
@@ -37,10 +38,18 @@ function cell(row, text) {{
   row.appendChild(td);
 }}
 
+function markAllUnknown() {{
+  for (const row of document.getElementById("laptops").rows) {{
+    row.className = "quiet";
+    row.cells[1].textContent = "unknown";
+  }}
+}}
+
 async function refresh() {{
   const error = document.getElementById("error");
   try {{
     const response = await fetch("/api/state", {{ cache: "no-store" }});
+    if (!response.ok) throw new Error("status " + response.status);
     const state = await response.json();
     const now = Date.parse(state.updated_at);
     const body = document.getElementById("laptops");
@@ -59,12 +68,13 @@ async function refresh() {{
     }}
     error.textContent = "";
   }} catch (problem) {{
-    error.textContent = "Cannot reach the coordinator.";
+    markAllUnknown();
+    error.textContent = "Cannot reach the coordinator. Laptop status is unknown.";
   }}
 }}
 
 refresh();
-setInterval(refresh, 1000);
+setInterval(refresh, POLL_MS);
 </script>
 </body>
 </html>

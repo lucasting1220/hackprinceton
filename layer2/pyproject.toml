@@ -38,7 +38,6 @@ exclude = ["^\\.venv/"]
 testpaths = ["tests"]
 filterwarnings = [
     "error",
-    # Starlette 1.10's TestClient asks for the httpx2 package; httpx still works. Remove
-    # this line once httpx2 is approved as a dev dependency.
+    # Starlette 1.10's TestClient asks for the httpx2 package; httpx still works.
     "ignore:Using `httpx` with `starlette.testclient` is deprecated",
 ]

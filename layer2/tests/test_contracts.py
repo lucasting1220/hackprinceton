@@ -8,6 +8,7 @@ from layer2.contracts import (
     CheckOutput,
     CoordinatorConfig,
     Hello,
+    MissingItem,
     WelcomeAccepted,
     WelcomeRejected,
     WorkerConfig,
@@ -126,3 +127,10 @@ def test_times_are_written_in_utc() -> None:
     data = {**contract("worker-status.json"), "updated_at": "2026-11-14T07:00:00-05:00"}
     dumped = WorkerStatus.model_validate(data).model_dump(mode="json")
     assert dumped["updated_at"] == "2026-11-14T12:00:00Z"
+
+
+@pytest.mark.parametrize(("field", "length"), [("id", 65), ("reason", 2001)])
+def test_missing_item_text_is_capped(field: str, length: int) -> None:
+    item = {"id": "x", "reason": "y", "required": False, field: "z" * length}
+    with pytest.raises(ValidationError):
+        MissingItem.model_validate(item)
