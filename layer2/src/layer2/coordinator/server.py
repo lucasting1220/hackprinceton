@@ -181,6 +181,10 @@ def create_dashboard_app(registry: Registry[WebSocket]) -> FastAPI:
     async def api_state() -> JSONResponse:
         return JSONResponse(registry.api_state().model_dump(mode="json"))
 
+    @app.get("/api/hardware")
+    async def hardware() -> JSONResponse:
+        return JSONResponse(registry.hardware().model_dump(mode="json"))
+
     @app.get("/")
     async def page() -> HTMLResponse:
         return HTMLResponse(PAGE)

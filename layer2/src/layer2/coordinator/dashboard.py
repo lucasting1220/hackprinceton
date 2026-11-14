@@ -1,4 +1,5 @@
-"""The dashboard page. It polls /api/state every DASHBOARD_POLL_S and shows a laptop in red as
+"""The dashboard page. It polls /api/state and /api/hardware every DASHBOARD_POLL_S, lists
+each laptop's hardware and latest load, and shows a laptop in red as
 "not reporting" when its last status is older than STALE_AFTER_S. Staleness is measured
 against the response's own `updated_at`, never the browser's clock. Text is set with
 textContent only, because names and reasons come from workers."""
@@ -28,6 +29,14 @@ PAGE = f"""<!doctype html>
   </tr></thead>
   <tbody id="laptops"></tbody>
 </table>
+<h2>Hardware</h2>
+<table>
+  <thead><tr>
+    <th>Name</th><th>OS</th><th>CPU</th><th>Cores</th><th>Memory</th><th>GPU</th>
+    <th>Ollama</th><th>llama.cpp</th><th>CPU load</th><th>Free memory</th>
+  </tr></thead>
+  <tbody id="hardware"></tbody>
+</table>
 <script>
 const STALE_AFTER_MS = {int(settings.STALE_AFTER_S * 1000)};
 const POLL_MS = {int(settings.DASHBOARD_POLL_S * 1000)};
@@ -42,6 +51,45 @@ function markAllUnknown() {{
   for (const row of document.getElementById("laptops").rows) {{
     row.className = "quiet";
     row.cells[1].textContent = "unknown";
+  }}
+  for (const row of document.getElementById("hardware").rows) {{
+    row.className = "quiet";
+    row.cells[8].textContent = "unknown";
+    row.cells[9].textContent = "unknown";
+  }}
+}}
+
+function yesNo(value) {{
+  return value ? "yes" : "no";
+}}
+
+function load(value, unit, quiet) {{
+  if (quiet || value === null) return "unknown";
+  return (Math.round(value * 10) / 10) + unit;
+}}
+
+async function refreshHardware() {{
+  const response = await fetch("/api/hardware", {{ cache: "no-store" }});
+  if (!response.ok) throw new Error("status " + response.status);
+  const state = await response.json();
+  const now = Date.parse(state.updated_at);
+  const body = document.getElementById("hardware");
+  body.replaceChildren();
+  for (const laptop of state.laptops) {{
+    const quiet = now - Date.parse(laptop.last_status_at) > STALE_AFTER_MS;
+    const row = document.createElement("tr");
+    if (quiet) row.className = "quiet";
+    cell(row, laptop.display_name);
+    cell(row, laptop.specs.os + " " + laptop.specs.os_version);
+    cell(row, laptop.specs.cpu);
+    cell(row, String(laptop.specs.cores));
+    cell(row, laptop.specs.memory_gb + " GB");
+    cell(row, laptop.specs.gpu);
+    cell(row, yesNo(laptop.tools.ollama));
+    cell(row, yesNo(laptop.tools.llama_cpp));
+    cell(row, load(laptop.cpu_percent, " %", quiet));
+    cell(row, load(laptop.memory_free_gb, " GB", quiet));
+    body.appendChild(row);
   }}
 }}
 
@@ -66,6 +114,7 @@ async function refresh() {{
       cell(row, laptop.missing.map((item) => item.id).join(", ") || "nothing");
       body.appendChild(row);
     }}
+    await refreshHardware();
     error.textContent = "";
   }} catch (problem) {{
     markAllUnknown();
