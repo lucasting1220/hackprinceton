@@ -17,7 +17,7 @@ class ConfigError(Exception):
     """A config file is missing, unreadable or does not match its contract."""
 
 
-def _retry_while_busy[T](action: Callable[[], T]) -> T:
+def retry_while_busy[T](action: Callable[[], T]) -> T:
     """Windows reports a file busy while another program has it open; retry for a short time."""
     deadline = time.monotonic() + settings.FILE_BUSY_RETRY_S
     while True:
@@ -36,7 +36,7 @@ def load_json_model[M: BaseModel](path: Path, model: type[M]) -> M:
     next to the join token. A UTF-8 byte-order mark, which Windows tools often add, is allowed.
     """
     try:
-        text = _retry_while_busy(lambda: path.read_text(encoding="utf-8-sig"))
+        text = retry_while_busy(lambda: path.read_text(encoding="utf-8-sig"))
     except OSError as error:
         raise ConfigError(f"cannot read {path}: {error.strerror or type(error).__name__}") from None
     except UnicodeDecodeError:
@@ -92,7 +92,7 @@ def write_json_atomic(path: Path, data: BaseModel) -> None:
             temp_file.flush()
             os.fsync(temp_file.fileno())
         temp_path.chmod(_mode_for(path))
-        _retry_while_busy(lambda: temp_path.replace(path))
+        retry_while_busy(lambda: temp_path.replace(path))
     except BaseException:
         temp_path.unlink(missing_ok=True)
         raise

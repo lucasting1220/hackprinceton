@@ -6,6 +6,7 @@ import re
 from pathlib import Path
 
 from layer2.contracts import AcceptedWorkers
+from layer2.files import retry_while_busy
 
 _TOKEN = re.compile(r"[0-9a-f]{64}")
 
@@ -20,7 +21,7 @@ def is_well_formed(token: str) -> bool:
 
 def read_token_file(path: Path) -> str:
     try:
-        token = path.read_text(encoding="utf-8")
+        token = retry_while_busy(lambda: path.read_text(encoding="utf-8"))
     except OSError as error:
         raise TokenError(f"cannot read token file {path}: {error.strerror}") from error
     except UnicodeDecodeError as error:

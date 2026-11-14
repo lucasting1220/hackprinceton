@@ -1,12 +1,24 @@
 import json
+import platform
+import socket
+import subprocess
 import sys
+import threading
+import time
 from pathlib import Path
 
 import pytest
 from conftest import closed_port, contract
 
 from layer2 import settings
-from layer2.specs import collect_specs, collect_tools, missing_items, ollama_answers
+from layer2.specs import (
+    UnsupportedPlatformError,
+    collect_specs,
+    collect_tools,
+    missing_items,
+    ollama_answers,
+)
+from layer2.tokens import read_token_file
 
 TOKEN: str = contract("hello.json")["token"]
 
@@ -90,3 +102,99 @@ def test_specs_on_this_windows_machine() -> None:
     assert found.cores >= 1
     assert found.memory_gb >= 1
     assert found.cpu
+
+
+def _serve_once(reply: bytes, delay_s: float = 0.0) -> str:
+    """A one-shot TCP server that sends `reply` byte by byte, `delay_s` apart."""
+    listener = socket.socket()
+    listener.bind(("127.0.0.1", 0))
+    listener.listen(1)
+
+    def answer() -> None:
+        with listener:
+            try:
+                conn, _ = listener.accept()
+            except OSError:
+                return
+            with conn:
+                try:
+                    for byte in reply:
+                        conn.sendall(bytes([byte]))
+                        time.sleep(delay_s)
+                except OSError:
+                    return
+
+    threading.Thread(target=answer, daemon=True).start()
+    return f"http://127.0.0.1:{listener.getsockname()[1]}"
+
+
+def test_ollama_error_status_is_not_answering(ollama_url: str) -> None:
+    assert not ollama_answers(ollama_url + "/not-ollama")
+
+
+def test_non_http_reply_is_not_answering(tmp_path: Path) -> None:
+    url = _serve_once(b"SSH-2.0-OpenSSH_9.6\r\n")
+    assert not ollama_answers(url)
+    [item] = missing_items(write_worker_config(tmp_path, _serve_once(b"SSH-2.0-x\r\n")))
+    assert (item.id, item.required) == ("ollama", False)
+
+
+def test_slow_reply_hits_the_overall_deadline(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(settings, "OLLAMA_CHECK_TIMEOUT_S", 0.5)
+    url = _serve_once(b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n", delay_s=0.1)
+    started = time.monotonic()
+    assert not ollama_answers(url)
+    assert time.monotonic() - started < 1.5
+
+
+def test_proxy_settings_are_ignored(ollama_url: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    dead_proxy = f"http://127.0.0.1:{closed_port()}"
+    for name in ("HTTP_PROXY", "http_proxy", "ALL_PROXY", "all_proxy"):
+        monkeypatch.setenv(name, dead_proxy)
+    monkeypatch.delenv("NO_PROXY", raising=False)
+    monkeypatch.delenv("no_proxy", raising=False)
+    assert ollama_answers(ollama_url)
+
+
+def test_other_platforms_are_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(sys, "platform", "linux")
+    with pytest.raises(UnsupportedPlatformError):
+        collect_specs()
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="Mac sysctl paths")
+def test_mac_falls_back_when_sysctl_fails(monkeypatch: pytest.MonkeyPatch) -> None:
+    def broken_run(*args: object, **kwargs: object) -> object:
+        raise OSError("no sysctl")
+
+    monkeypatch.setattr(subprocess, "run", broken_run)
+    monkeypatch.setattr(platform, "machine", lambda: "arm64")
+    found = collect_specs()
+    assert found.cpu == platform.processor()
+    assert found.gpu == "apple-silicon"
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="Mac sysctl paths")
+def test_apple_silicon_is_found_under_rosetta(monkeypatch: pytest.MonkeyPatch) -> None:
+    def fake_run(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        stdout = "1\n" if command[-1] == "hw.optional.arm64" else "Apple M2\n"
+        return subprocess.CompletedProcess(command, 0, stdout=stdout, stderr="")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    monkeypatch.setattr(platform, "machine", lambda: "x86_64")
+    assert collect_specs().gpu == "apple-silicon"
+
+
+def test_busy_token_file_is_retried(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    path = tmp_path / "worker-token"
+    path.write_text(TOKEN, encoding="utf-8")
+    real_read_text = Path.read_text
+    failures = [PermissionError("busy")]
+
+    def flaky_read_text(self: Path, encoding: str | None = None, errors: str | None = None) -> str:
+        if failures:
+            raise failures.pop()
+        return real_read_text(self, encoding=encoding, errors=errors)
+
+    monkeypatch.setattr(Path, "read_text", flaky_read_text)
+    assert read_token_file(path) == TOKEN
