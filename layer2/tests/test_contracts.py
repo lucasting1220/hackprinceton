@@ -95,3 +95,10 @@ def test_bad_hello_error_hides_the_token() -> None:
     for text in (str(error), repr(error), error.json(include_input=False)):
         assert token[:16] not in text
         assert token[-16:] not in text
+
+
+@pytest.mark.parametrize("field", ["dashboard_port", "client_port"])
+def test_coordinator_ports_must_differ(field: str) -> None:
+    data = contract("coordinator.json")
+    with pytest.raises(ValidationError):
+        CoordinatorConfig.model_validate({**data, field: data["listen_port"]})

@@ -25,6 +25,12 @@ class CoordinatorConfig(Strict):
     state_dir: str
     stop_file: str
 
+    @model_validator(mode="after")
+    def _ports_differ(self) -> Self:
+        if len({self.listen_port, self.dashboard_port, self.client_port}) != 3:
+            raise ValueError("listen_port, dashboard_port and client_port must all differ")
+        return self
+
 
 class WorkerConfig(Strict):
     schema_version: Literal[1]
