@@ -1,0 +1,33 @@
+[project]
+name = "layer3"
+version = "0.1.0"
+description = "Debbie Layer 3: raw data. Camera and mic capture, and receiving watch data."
+requires-python = "==3.12.*"
+dependencies = [
+    "cv2-enumerate-cameras>=1.4,<2",
+    "numpy>=2.0,<3",
+    "opencv-python-headless>=5.0,<6",
+]
+
+[dependency-groups]
+dev = [
+    "mypy>=1.13",
+    "pytest>=8.0",
+    "ruff==0.17.5",
+]
+
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/layer3"]
+
+[tool.mypy]
+python_version = "3.12"
+disallow_untyped_defs = true
+warn_unused_ignores = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+filterwarnings = ["error"]
