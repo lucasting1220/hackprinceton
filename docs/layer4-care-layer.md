@@ -36,7 +36,7 @@ Data moves one way: every piece of fetched data goes to Layer 3, Layer 3 passes 
 | Reaching Layer 1 | Messages between Layer 4 and Layer 1's bridge are carried by Layer 2's coordinator |
 | The iPhone app | Layer 1 builds all of it. Layer 4 only supplies the data for each screen |
 | Language | Python |
-| Fall model | MediaPipe Pose Landmarker (lite) finds the body points in each frame; fixed rules in Layer 4 read them for the current activity and for falls. Decided Nov 14 |
+| Fall model | MediaPipe Pose Landmarker (full model, `pose_landmarker_full.task`) finds the body points in each frame; fixed rules in Layer 4 read them for the current activity and for falls. The lite model read a person lying on the floor as upright in webcam tests. The model file is not in the repository; the job's configuration gives its path. Decided Nov 14 |
 | Speech-to-text model | faster-whisper, `base.en`, int8 on the CPU, with its built-in voice detector. Decided Nov 14 |
 
 ## How data flows
