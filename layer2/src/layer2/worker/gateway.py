@@ -9,8 +9,12 @@ LAYER2_GATEWAY_TOKEN. Requests:
     {"token": "...", "type": "log_read", "since": "<ISO time>"}   or   "day": "YYYY-MM-DD"
     {"token": "...", "type": "state_read"}   (answer: "state", the /api/state data)
     {"token": "...", "type": "phone_send", "kind": "alerts", "body": {...}}   (to Layer 1's bridge)
-    {"token": "...", "type": "receive", "kind": "requests" | "watch-data", "wait_s": 25}
-        (from the bridge: subscribes this worker, then answers "message": {...} or null)
+    {"token": "...", "type": "receive", "kind": "requests" | "watch-data" | "watch-readings",
+     "wait_s": 25}
+        (from the bridge or another job: subscribes this worker, then answers "message": {...}
+        or null)
+    {"token": "...", "type": "pass_on", "kind": "watch-readings", "body": {...}}
+        (to the job that takes the kind; fails when no job takes it)
     {"token": "...", "type": "ask", "prompt": "...", "quality": "quick" | "deep"}
 
 Answers: {"ok": true, "truncated": false}, with "events": [...] for a read (truncated is true
@@ -39,6 +43,7 @@ from layer2.contracts import (
     InboundKind,
     LogAppend,
     LogRead,
+    PassOn,
     PhoneSend,
     Reply,
     StateRead,
@@ -117,15 +122,15 @@ class Relay:
             waiting.set_result(reply)
 
     async def ask(self, request: dict[str, Any]) -> Reply:
-        """Send a log_append, log_read or state_read (without its id) and wait for the
-        reply."""
-        connection = self._connection
-        if connection is None:
-            raise NotConnectedError("not connected to the coordinator")
+        """Send a log_append, log_read, state_read, phone_send or pass_on (without its id) and
+        wait for the reply."""
         request_id = uuid.uuid4().hex
         message = _REQUESTS[request["type"]].model_validate(
             {**request, "schema_version": 1, "id": request_id}
         )
+        connection = self._connection
+        if connection is None:
+            raise NotConnectedError("not connected to the coordinator")
         waiting: asyncio.Future[Reply] = asyncio.get_running_loop().create_future()
         self._pending[request_id] = waiting
         try:
@@ -137,8 +142,11 @@ class Relay:
             self._pending.pop(request_id, None)
 
 
-_REQUESTS: dict[str, type[LogAppend] | type[LogRead] | type[StateRead] | type[PhoneSend]] = {
+_REQUESTS: dict[
+    str, type[LogAppend] | type[LogRead] | type[StateRead] | type[PhoneSend] | type[PassOn]
+] = {
     "phone_send": PhoneSend,
+    "pass_on": PassOn,
     "log_append": LogAppend,
     "log_read": LogRead,
     "state_read": StateRead,
@@ -209,8 +217,8 @@ class Gateway:
 
     async def _receive(self, request: dict[str, Any]) -> dict[str, Any]:
         kind, wait_s = request.get("kind"), request.get("wait_s", 0)
-        if kind not in ("requests", "watch-data"):
-            return {"ok": False, "error": "kind must be requests or watch-data"}
+        if kind not in ("requests", "watch-data", "watch-readings"):
+            return {"ok": False, "error": "kind must be requests, watch-data or watch-readings"}
         if not isinstance(wait_s, int | float) or isinstance(wait_s, bool) or wait_s < 0:
             return {"ok": False, "error": "wait_s must be a number of seconds"}
         await self._relay.subscribe(kind)

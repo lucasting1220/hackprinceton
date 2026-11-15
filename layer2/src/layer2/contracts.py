@@ -270,13 +270,27 @@ class PhoneSend(Strict):
     body: dict[str, JsonValue]
 
 
-InboundKind = Literal["requests", "watch-data"]
-"""What Layer 1's bridge posts to the coordinator: requests from phones (for Layer 4) and watch
-readings (for Layer 3)."""
+InboundKind = Literal["requests", "watch-data", "watch-readings"]
+"""What the coordinator carries to the job that takes it: from Layer 1's bridge, requests from
+phones (for Layer 4) and watch data (for Layer 3); from Layer 3's watch data job, watch readings
+(for Layer 4, contracts/watch-reading.json)."""
+
+
+class PassOn(Strict):
+    """Worker to coordinator, for a job's pass_on() call: hand `body` to the job that takes
+    `kind`, the way the bridge's messages go. The reply comes once that job's worker has it, or
+    fails when no job takes `kind`. Internal to Layer 2; the body's fields belong to Layers 3
+    and 4. Only kinds that jobs send are allowed: a job can never pose as the bridge."""
+
+    type: Literal["pass_on"]
+    schema_version: Literal[1]
+    id: RequestId
+    kind: Literal["watch-readings"]
+    body: dict[str, JsonValue]
 
 
 class Subscribe(Strict):
-    """Worker to coordinator: a job on this worker takes `kind` from the bridge. The latest
+    """Worker to coordinator: a job on this worker takes `kind`. The latest
     subscriber of a kind gets it. Internal to Layer 2."""
 
     type: Literal["subscribe"]
@@ -285,8 +299,8 @@ class Subscribe(Strict):
 
 
 class Deliver(Strict):
-    """Coordinator to worker: one message from the bridge, for the job that subscribed to
-    `kind`. Internal to Layer 2; the body's fields belong to Layers 1, 3 and 4."""
+    """Coordinator to worker: one message from the bridge or another job, for the job that
+    subscribed to `kind`. Internal to Layer 2; the body's fields belong to Layers 1, 3 and 4."""
 
     type: Literal["deliver"]
     schema_version: Literal[1]

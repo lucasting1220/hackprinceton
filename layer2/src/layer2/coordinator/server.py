@@ -5,10 +5,11 @@ Control app (WebSocket /ws on 0.0.0.0:listen_port): workers join with `hello` an
 and `stop` orders that worker needs (coordinator/plan.py). Jobs reach the event log through
 their worker with `log_append` and `log_read`, read the home's state with `state_read`, and
 send messages for phones with `phone_send` (handed to Layer 1's bridge in the background),
-each answered with a `reply`; a job takes the bridge's requests or watch data with
-`subscribe`, and gets each one as a `deliver` (coordinator/inbox.py). Dashboard app
-(127.0.0.1:dashboard_port): the dashboard page, GET /api/state (the
-Layer 1 contract) and GET /api/hardware (Layer 2 only: specs and load, for the page).
+each answered with a `reply`; a job takes the bridge's requests or watch data, or another
+job's watch readings, with `subscribe`, and gets each one as a `deliver` (coordinator/inbox.py);
+a job hands watch readings on with `pass_on`, answered once the taker's worker has them.
+Dashboard app (127.0.0.1:dashboard_port): the dashboard page, GET /api/state (the Layer 1
+contract) and GET /api/hardware (Layer 2 only: specs and load, for the page).
 Neither ever logs a token, a whole `hello` or raw text a client chose.
 """
 
@@ -32,6 +33,7 @@ from layer2.contracts import (
     LogAppend,
     LoggedEvent,
     LogRead,
+    PassOn,
     PhoneSend,
     PlannerDecision,
     Reply,
@@ -175,12 +177,8 @@ def create_control_app(
     return app
 
 
-_FromWorker = TypeAdapter[StatusMessage | LogAppend | LogRead | StateRead | PhoneSend | Subscribe](
-    Annotated[
-        StatusMessage | LogAppend | LogRead | StateRead | PhoneSend | Subscribe,
-        Field(discriminator="type"),
-    ]
-)
+_Message = StatusMessage | LogAppend | LogRead | StateRead | PhoneSend | PassOn | Subscribe
+_FromWorker = TypeAdapter[_Message](Annotated[_Message, Field(discriminator="type")])
 
 
 async def _receive(
@@ -255,6 +253,10 @@ async def _receive(
                 carrying.add(task)
                 task.add_done_callback(carrying.discard)
                 continue
+            if isinstance(message, PassOn):
+                reply = await _pass_on(message, len(text.encode("utf-8")), subscriptions)
+                await send(reply.model_dump_json(exclude_none=True))
+                continue
             if isinstance(message, StateRead):
                 state = registry.api_state(placement.plan.dropped)
                 reply = Reply(type="reply", schema_version=1, id=message.id, ok=True, state=state)
@@ -278,6 +280,21 @@ async def _receive(
             task.cancel()
         if subscriptions is not None:
             subscriptions.drop(send)
+
+
+async def _pass_on(message: PassOn, size: int, subscriptions: Subscriptions | None) -> Reply:
+    """Hand a job's message to the job that takes its kind, as the bridge's are handed."""
+
+    def failed(error: str) -> Reply:
+        return Reply(type="reply", schema_version=1, id=message.id, ok=False, error=error)
+
+    if size > settings.INBOUND_MAX_BYTES:
+        return failed(f"a message may be at most {settings.INBOUND_MAX_BYTES} bytes")
+    if subscriptions is None:
+        return failed("this coordinator carries no messages between jobs")
+    if not await subscriptions.deliver(message.kind, message.body):
+        return failed(f"no job is taking {message.kind} right now")
+    return Reply(type="reply", schema_version=1, id=message.id, ok=True)
 
 
 async def _answer(request: LogAppend | LogRead, events: EventLog | None) -> Reply:

@@ -6,6 +6,9 @@ for Layer 3). Each body is one JSON object, carried as is. It goes to the worker
 subscribed to that kind (the latest subscriber wins, so a job that moves takes its messages
 with it). The bridge gets 202 once the message is handed to that worker, or 503 when no job
 takes that kind or its worker is gone, so the bridge can retry. Contents are never logged.
+
+Jobs hand messages to each other the same way (watch readings, Layer 3 to Layer 4): a job's
+pass_on() reaches deliver() through its worker's `pass_on` message (coordinator/server.py).
 """
 
 import json
