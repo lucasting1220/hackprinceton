@@ -164,7 +164,8 @@ At Confirm the hub seals the bundle with the phone key (`kid` `pair`, associated
 7. Then the type, by path:
    - `fetch` on `/v1/lan/messages` gets the page (§4.5).
    - `unpair` on `/v1/lan/commands`: the hub marks the phone removed and answers `202 {"v":1,"accepted":true}`.
-   - `request`, `laptop_approval` and `live_view_setting` on `/v1/lan/commands` get `501 not_supported` until the step that builds each.
+   - `laptop_approval` on `/v1/lan/commands` goes to Add a laptop (§6.5).
+   - `request` and `live_view_setting` on `/v1/lan/commands` get `501 not_supported` until the step that builds each.
    - Anything else gets `400 unsupported_type`: `ack`, an unknown type, `fetch` on `/v1/lan/commands`, a command on `/v1/lan/messages`, or a type that travels only through the relay.
 
 Checks 2 to 7 also run for commands that reach the hub through the relay (§5), with check 7 as for `/v1/lan/commands` and one memory of message IDs per phone, so the hub answers a command the same way on either route and a request can't be replayed by switching routes.
@@ -205,7 +206,7 @@ On `/v1/lan/messages` and `/v1/lan/commands`, 403 means only that the phone is u
 | 413    | `too_large`              | any POST           | The body is over 16 KiB                                                                                   |
 | 415    | `unsupported_media_type` | any POST           | The body isn't `application/json`                                                                         |
 | 500    | `internal`               | any                | Something unexpected. The hub logs the error's class, never the request                                   |
-| 501    | `not_supported`          | `/v1/lan/commands` | `request`, `laptop_approval` or `live_view_setting`, before the step that builds it                       |
+| 501    | `not_supported`          | `/v1/lan/commands` | `request` or `live_view_setting`, before the step that builds it                                          |
 
 ## 5. Relay API
 
@@ -307,6 +308,98 @@ The relay's codes follow §4.6's rules, except that 401 means the device can't s
 
 `/v1/commands` also passes on the hub's own answers (§5.5).
 
+## 6. Add a laptop
+
+A new laptop joins the home through the hub's network side (§4), and a caregiver's phone approves it. Only the hub and the new laptop's bridge speak §6.2, §6.3 and §6.6; the app reads the join QR code (§6.1) and sends `laptop_approval` (§6.5). Workers' bridges never offer pairing or Pair a phone. The new laptop finds the hub by the address the person types from the home laptop's page (`a.b.c.d`, `a.b.c.d:port`, a host name or an IPv6 address; port 7480 by default): there is no discovery yet.
+
+### 6.1 Join QR code
+
+The new laptop's setup page shows a code holding compact JSON with exactly seven fields, drawn as in §2.1 (byte mode, level M, 4-module border): `{"v":1,"kind":"join","join_id":"<uuid>","name":"Kitchen laptop","laptop_pub":"<base64url, 32 bytes>","exp":1794669600,"hub_pub":"<base64url, 32 bytes>"}`.
+
+- `join_id`, `exp` and `hub_pub` are the hub's answer to the join request (§6.2). `exp` is whole Unix seconds as a JSON integer, 10 minutes after the request, as in §2.1.
+- `name` is the laptop's name in NFC, under §2.2's rules. `laptop_pub` is the X25519 public key the laptop made for this join; it keeps the private key in memory only.
+- `hub_pub` is the hub's whole public key, as the pairing QR code carries it. The app compares it with the `hub_pub` it stored at pairing and refuses a code from another home. `hub` stays the 8-character tag of §4.1.
+- Both setup pages show the home code, the first 8 characters of `hub_pub`, so the person can check that the new laptop reached the right home.
+
+### 6.2 Join request
+
+The new laptop's bridge sends `POST /v1/join` with `{"v":1,"name":"Kitchen laptop","laptop_pub":"<base64url, 32 bytes>"}`. The hub checks the name (§2.2) and the key (32 bytes, not a low-order point), else `400 bad_request`. It keeps at most 8 joins waiting for approval, else `429 too_many_joins`, and answers `202 {"v":1,"join_id":"<uuid>","exp":1794669600,"hub_pub":"<base64url, 32 bytes>"}`. Waiting joins live in the hub's memory only, so a restarted hub answers `unknown_join` and the laptop shows a new code.
+
+### 6.3 Join status
+
+The new laptop's bridge asks every 2 seconds with `POST /v1/join/status` and `{"v":1,"join_id":"<uuid>"}`:
+
+| Answer                                                | When                                                           |
+| ----------------------------------------------------- | -------------------------------------------------------------- |
+| `202 {"v":1,"status":"waiting","exp":1794669600}`     | No caregiver has answered yet                                  |
+| `200 {"v":1,"status":"approved","ticket":<envelope>}` | A caregiver approved; the ticket (§6.4) is kept for 10 minutes |
+| `409 declined`                                        | A caregiver declined                                           |
+| `410 expired`                                         | The code ran out before anyone approved it                     |
+| `404 unknown_join`                                    | The hub doesn't know the join, for example after it restarted  |
+
+### 6.4 Join ticket
+
+On approval the hub makes a node ID (a UUID) and a join token (32 random bytes as 64 lowercase hex characters, `contracts/README.md`), adds `{node_id, display_name, token_sha256}` to `accepted-workers.json`, and only once that file is written seals the ticket to the laptop's key:
+
+```text
+shared     = X25519(hub_private, laptop_pub) = X25519(laptop_private, hub_pub)        32 bytes, never all zero
+laptop_key = HKDF-SHA256(ikm = shared, salt = UTF-8 join_id, info = "debbie/v1/laptop-key" ‖ hub_pub ‖ laptop_pub, L = 32)
+```
+
+- `hub_pub` and `laptop_pub` in `info` are the raw 32 bytes each. Binding both keys means the ticket opens under no other pair of keys.
+- The ticket is a §2.4 envelope with `kid` `join` and the associated data `debbie/v1/join` (the laptop doesn't know `home_id` yet), sealed with `laptop_key` and a fresh nonce.
+- Its plaintext is `{"v":1,"msg_id":"<uuid>","sent_at":"2026-11-14T15:12:03Z","type":"join_ticket","home_id":"<uuid>","node_id":"<uuid>","display_name":"Kitchen laptop","join_token":"<64 hex>","coordinator_port":7443}`. `coordinator_port` is `coordinator.json`'s `listen_port`; the laptop writes `coordinator_url` as `ws://<the address it reached the hub at>:<coordinator_port>/ws`.
+- The token appears only in the ticket's plaintext and in the laptop's token file, never in a log, a URL, a page or a command line. The hub keeps only its hash.
+
+### 6.5 Approval
+
+The app sends `laptop_approval` to `POST /v1/lan/commands` (or through the relay, §5) as a §3 wrapper sealed with the phone's own key. Its plaintext is `{"msg_id":"<uuid>","sent_at":"2026-11-14T15:12:03Z","type":"laptop_approval","join_id":"<uuid>","laptop_pub":"<base64url, 32 bytes>","name":"Kitchen laptop","approve":true}`, copied from the join QR code. After §4.4's checks 1 to 6, the hub checks, in this order:
+
+1. The phone is a caregiver's, else `400 forbidden`.
+2. `join_id` is a string, `approve` a boolean, `name` a valid name (§2.2) and `laptop_pub` 32 bytes, else `400 bad_request`.
+3. The hub has a join with that `join_id`, else `400 unknown_join`.
+4. Its `laptop_pub` and its NFC name equal the plaintext's, else `400 join_mismatch`.
+5. An approved join answers `202` again and mints nothing. Two approvals at once mint one token.
+6. The code hasn't expired and wasn't declined, else `400 expired`.
+7. `approve: false` declines the join (`202`). `approve: true` mints and seals the ticket (§6.4) and answers `202 {"v":1,"accepted":true}`. If `accepted-workers.json` can't be written, or already breaks Layer 2's rules, the join stays waiting, no ticket exists, and the answer is `500 internal`; the home laptop's page names the file.
+
+403 is never an approval's answer: on the LAN it means only an unknown or removed phone (§4.6), and a repeat is `409 duplicate` from check 6.
+
+### 6.6 Bridge link
+
+A joined laptop's bridge sends `POST /v1/link` to the hub every 5 seconds with a §3 wrapper of type `link_report`, sealed with the link key under `kid` = its node ID and the associated data `debbie/v1/{home_id}/{node_id}/link_report`:
+
+```text
+link_key = HKDF-SHA256(ikm = SHA-256(join_token) as 32 raw bytes, salt = UTF-8 node_id, info = "debbie/v1/link-key", L = 32)
+```
+
+- The hub derives the key from the node's `token_sha256` in `accepted-workers.json`, so it treats that hash as a secret: never logged and never shown. A node not in that file gets `403 unknown_node`, and the laptop's page says it is no longer part of the home.
+- The report's plaintext is `{"msg_id","sent_at","type":"link_report","state":"connected","missing":[{"id","reason","required"}]}`: the laptop's setup state (lowercase letters and `_`, at most 32) and what it is missing, as `contracts/check-output.json` lists it.
+- The hub checks the wrapper's shape (`400 bad_request`), the type (`400 unsupported_type`), the node, the envelope and the plaintext's `type`, `msg_id` and `sent_at` (`400 bad_envelope`), the 30-second clock rule (`400 stale`), a repeated `msg_id` (`409 duplicate`, in the same memory as phones' IDs) and the report's fields (`400 bad_request`).
+- It answers `200` with a `link_reply` wrapper sealed the same way (associated data `.../link_reply`), whose plaintext is `{"msg_id","sent_at","type":"link_reply","in_reply_to":"<the report's msg_id>","commands":[]}`. `commands` stays empty until step 7 carries live view over it; the hub may then hold the request open.
+
+### 6.7 Statuses and error codes
+
+| Status | Code             | Where                         | Meaning                                                             |
+| ------ | ---------------- | ----------------------------- | ------------------------------------------------------------------- |
+| 202    | none             | `/v1/join`, `laptop_approval` | The join is waiting; the approval or decline was taken              |
+| 400    | `forbidden`      | `laptop_approval`             | A resident's phone approved                                         |
+| 400    | `unknown_join`   | `laptop_approval`             | The hub has no such join                                            |
+| 400    | `expired`        | `laptop_approval`             | The code ran out, or the join was declined                          |
+| 400    | `join_mismatch`  | `laptop_approval`             | The key or name differs from the join's                             |
+| 403    | `unknown_node`   | `/v1/link`                    | The node isn't in `accepted-workers.json`                           |
+| 404    | `unknown_join`   | `/v1/join/status`             | The hub has no such join                                            |
+| 409    | `declined`       | `/v1/join/status`             | A caregiver declined                                                |
+| 410    | `expired`        | `/v1/join/status`             | The code ran out                                                    |
+| 429    | `too_many_joins` | `/v1/join`                    | 8 joins are already waiting                                         |
+| 500    | `internal`       | `laptop_approval`             | `accepted-workers.json` couldn't be written; the join stays waiting |
+
+| `type`        | Direction           | `kid`   | Plaintext fields besides `msg_id`, `sent_at` and `type`           |
+| ------------- | ------------------- | ------- | ----------------------------------------------------------------- |
+| `join_ticket` | hub → new laptop    | `join`  | `v, home_id, node_id, display_name, join_token, coordinator_port` |
+| `link_report` | worker laptop → hub | node ID | `state, missing`                                                  |
+| `link_reply`  | hub → worker laptop | node ID | `in_reply_to, commands`                                           |
+
 ## 8. Push
 
 The relay sends pushes straight to APNs over HTTP/2, each through its token's environment: `production` (TestFlight and App Store builds) or `sandbox` (builds run from Xcode). A token Apple refuses as `Unregistered`, `BadDeviceToken` or `DeviceTokenNotForTopic` is deleted and never retried, until the app registers again. Every push carries `apns-topic`, the app's bundle ID.
@@ -384,3 +477,5 @@ The bridge builds this file. These points differ from the app's `docs/CONTRACTS.
 - **Relay commands.** CONTRACTS.md answers only `202`. This file: the relay's own `403 forbidden`, `400 lan_only`, `400 unsupported_type`, `503 hub_offline` and `504 hub_timeout`, the hub's answers passed through, and a hub `403` turned into `401` (§5.5). A resident may send only `live_view_setting` and `unpair` through the relay.
 - **Relay sign-in.** The relay answers `401` for a device it can't sign in (`device_removed` only with the right credential) and `429 too_many_attempts` after repeated failures (§5.1), and has an unsigned `GET /healthz`.
 - **Hub-status pushes.** The hub-offline push carries `last_contact` in Unix seconds, and the app's monitoring notice comes from a `monitoring` message. This file: both pushes also carry `last_contact_at` in ISO 8601, and "monitoring degraded" is an ordinary alert (§3, §8.2).
+- **Join QR code.** The app's `JoinQR` has no `hub_pub`. This file: the code carries `hub_pub`, the whole hub key, and the app refuses a code whose `hub_pub` differs from the one it paired with (§6.1). The app should also refuse a join payload over 1,024 bytes, as it does a pairing one.
+- **Approval answers.** The mock answers `200 {"v":1,"ok":true}` and the app falls back to the relay on any answer outside 2xx. This file: `202 {"v":1,"accepted":true}`, and refusals are `400` with `forbidden`, `unknown_join`, `expired` or `join_mismatch`, or `409 duplicate` (§6.5); the app should fall back to the relay only when the LAN gateway can't be reached or answers 5xx.

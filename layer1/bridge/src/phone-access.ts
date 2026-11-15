@@ -1,13 +1,15 @@
 /**
  * Everything phones reach once a home exists: the phone list, the pairing session and the network
- * side on port 7480 with POST /v1/pair and the LAN gateway. main.ts starts it from its home-ready
+ * side on port 7480 with POST /v1/pair, the LAN gateway and step 3's join routes and link. main.ts starts it from its home-ready
  * hook on the coordinator. When it can't run, it says why, for the setup page, and the bridge runs
  * on without it.
  */
 import type { Home } from "./home.ts";
 import { HomeError, readHomeSecrets } from "./home.ts";
+import { HubJoin } from "./hub-join.ts";
 import { errorMessage } from "./json-file.ts";
-import { LanGateway } from "./lan-gateway.ts";
+import { LanGateway, type OpenedRequest } from "./lan-gateway.ts";
+import { LinkHub } from "./link.ts";
 import { lanAddresses, type NetworkSide, startNetworkSide } from "./network-server.ts";
 import type { MessageSource } from "./outbox.ts";
 import { Pairing } from "./pairing.ts";
@@ -26,7 +28,15 @@ export interface PhoneAccessOptions {
 
 /** What the pairing page reads: the parts while the network side runs, or why it doesn't. */
 export type PhoneAccessState =
-  | Readonly<{ on: true; pairing: Pairing; phones: PhoneRegistry; port: number }>
+  | Readonly<{
+      on: true;
+      pairing: Pairing;
+      phones: PhoneRegistry;
+      port: number;
+      /** Add a laptop (step 3): the joins waiting for approval, and the linked laptops. */
+      join: HubJoin;
+      link: LinkHub;
+    }>
   | Readonly<{ on: false; reason: string; retryable: boolean }>;
 
 /** The setup page's words for a port in use (the plan's "Failures and what the person sees"). */
@@ -69,16 +79,18 @@ export class PhoneAccess {
       return off(`the phone list can't be read: ${error.message}. Move the file away`);
     }
     let pairing: Pairing;
+    let join: HubJoin;
     try {
       const secrets = await readHomeSecrets(home.stateDir);
       pairing = new Pairing({ home, secrets, phones });
+      join = new HubJoin({ home, hubPrivateKey: secrets.hubPrivateKey, log });
     } catch (error) {
       if (!(error instanceof HomeError)) throw error;
       return off(`the home's keys can't be read: ${error.message}`);
     }
     const access = new PhoneAccess(home, options, { on: false, reason: "", retryable: true });
-    await access.#listen(pairing, phones);
-    access.#retry = () => access.#listen(pairing, phones);
+    await access.#listen(pairing, phones, join);
+    access.#retry = () => access.#listen(pairing, phones, join);
     return access;
   }
 
@@ -108,15 +120,18 @@ export class PhoneAccess {
     if (side !== undefined) await side.close();
   }
 
-  async #listen(pairing: Pairing, phones: PhoneRegistry): Promise<void> {
+  async #listen(pairing: Pairing, phones: PhoneRegistry, join: HubJoin): Promise<void> {
     const port = this.#options.port ?? settings.BRIDGE_NETWORK_PORT;
     const { outbox } = this.#options;
+    const handlers = { laptop_approval: (request: OpenedRequest) => join.approve(request) };
     const gateway = new LanGateway({
       homeId: this.#home.homeId,
       phones,
       log: this.#log,
+      handlers,
       ...(outbox === undefined ? {} : { outbox }),
     });
+    const link = new LinkHub({ home: this.#home, seen: gateway, log: this.#log });
     const pair = {
       method: "POST",
       path: "/v1/pair",
@@ -125,7 +140,7 @@ export class PhoneAccess {
     try {
       this.#side = await startNetworkSide(
         this.#home.hubPublicKey,
-        [pair, ...gateway.routes()],
+        [pair, ...gateway.routes(), ...join.routes(), ...link.routes()],
         port,
       );
     } catch (error) {
@@ -142,7 +157,7 @@ export class PhoneAccess {
       await this.#side.close();
       return;
     }
-    this.#state = { on: true, pairing, phones, port: this.#side.port };
+    this.#state = { on: true, pairing, phones, port: this.#side.port, join, link };
     this.#log(`L1 phones: the network side listens on port ${this.#side.port}`);
   }
 }

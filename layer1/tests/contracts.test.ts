@@ -11,6 +11,7 @@ import { describe, type TestContext, test } from "node:test";
 import { ALERT_FIELDS, parseAlert } from "../bridge/src/alert-intake.ts";
 import { createHome, type Home } from "../bridge/src/home.ts";
 import { readJsonFile } from "../bridge/src/json-file.ts";
+import { workerConfig } from "../bridge/src/laptop.ts";
 import * as settings from "../bridge/src/settings.ts";
 import { startStub, waitFor } from "./coordinator-fixtures.ts";
 
@@ -170,5 +171,34 @@ describe("the alert Layer 4 sends (no shared contracts/alert.json; the intake's 
       assert.ok(parsed.ok, parsed.ok ? "" : parsed.reason);
       assert.deepEqual(parsed.unknownFields, []);
     }
+  });
+});
+
+describe("contracts/worker.json, as a joined laptop's bridge writes it", () => {
+  test("has exactly its fields and types, null sensors, and coordinator_url's scheme and path", async () => {
+    const stateDir = path.resolve("state");
+    const joined = {
+      homeId: "home-uuid",
+      nodeId: "node-uuid",
+      name: "Kitchen laptop",
+      hubAddress: "192.168.1.20:7480",
+      hubPublicKey: "unused",
+      coordinatorPort: settings.COORDINATOR_LISTEN_PORT,
+      tokenSha256: "unused",
+    };
+    const hub = new URL("http://192.168.1.20:7480");
+    const written: Record<string, unknown> = workerConfig(stateDir, joined, hub, stateDir);
+    const example = await readContract("worker.json");
+    assert.deepEqual(Object.keys(written).sort(), Object.keys(example).sort());
+    for (const [field, value] of Object.entries(example)) {
+      const expected = field === "camera" || field === "mic" ? null : typeof value;
+      const actual = written[field] === null ? null : typeof written[field];
+      assert.equal(actual, expected, field);
+    }
+    const { coordinator_url: url } = written;
+    const { coordinator_url: exampleUrl } = example;
+    assert.equal(url, exampleUrl);
+    const parsed = new URL(String(url));
+    assert.deepEqual([parsed.protocol, parsed.pathname], ["ws:", "/ws"]);
   });
 });

@@ -28,7 +28,12 @@ export interface LanGatewayOptions {
   readonly log?: (line: string) => void;
   /** Step 4's outbox, which fills a fetch's page; without one every page is empty. */
   readonly outbox?: MessageSource;
+  /** Handlers for the later steps' command types, in place of 501 (step 3: laptop_approval). */
+  readonly handlers?: Readonly<Record<string, CommandHandler>>;
 }
+
+/** What a command type's handler answers for an opened request. */
+export type CommandHandler = (request: OpenedRequest) => Promise<Reply>;
 
 /** A request that passed checks 1 to 6: the phone, and the plaintext as a JSON object. */
 export type OpenedRequest = Readonly<{
@@ -74,6 +79,7 @@ export class LanGateway {
   readonly #now: () => number;
   readonly #log: (line: string) => void;
   readonly #outbox: MessageSource | undefined;
+  readonly #handlers: Readonly<Record<string, CommandHandler>>;
   /** Per phone, each msg_id seen in the last PHONE_SEEN_IDS_MS and when, oldest first. */
   readonly #seen = new Map<string, Map<string, number>>();
   /** Per phone, when its wrong clock was last logged. */
@@ -85,6 +91,15 @@ export class LanGateway {
     this.#now = options.now ?? Date.now;
     this.#log = options.log ?? ((line: string) => console.log(line));
     this.#outbox = options.outbox;
+    this.#handlers = options.handlers ?? {};
+  }
+
+  /**
+   * Records a msg_id from `sender`, false if it came in the last PHONE_SEEN_IDS_MS: the one memory
+   * of message IDs, which the bridge link shares under senders "node:<node_id>" (phone-hub.md §6.6).
+   */
+  rememberMsgId(sender: string, msgId: string): boolean {
+    return this.#remember(sender, msgId, this.#now());
   }
 
   /** §4.4's checks 1 to 6, in order, on a received wrapper. */
@@ -140,11 +155,13 @@ export class LanGateway {
     return { status: 200, body: { v: 1, messages: page.messages, next: page.next, hub } };
   }
 
-  /** A phone → hub command: `unpair` removes the phone; later steps' types get 501. */
+  /** A phone → hub command: `unpair` removes the phone, a handler's type goes to it, others 501. */
   async commands(body: unknown): Promise<Reply> {
     const opened = this.openPhoneRequest(body);
     if (!opened.ok) return opened.reply;
     const { type, deviceId } = opened.request;
+    const handler = Object.hasOwn(this.#handlers, type) ? this.#handlers[type] : undefined;
+    if (handler !== undefined) return handler(opened.request);
     if (LATER_COMMANDS.has(type)) return REFUSED.notSupported;
     if (type !== "unpair") return REFUSED.unsupportedType;
     await this.#phones.remove(deviceId);

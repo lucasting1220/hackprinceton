@@ -260,3 +260,52 @@ export const PUSH_HUB_STATUS_EXPIRY_MS = 60 * 60_000;
 
 /** At start, the relay pushes alerts it stored this recently but never pushed (R13). */
 export const RELAY_REPUSH_WINDOW_MS = 10 * 60_000;
+
+/** Build step 3, Add a laptop: the join (phone-hub.md §6) and the worker laptop's files. */
+/** How long a laptop's join code works before a caregiver approves it: 10 minutes. */
+export const JOIN_CODE_LIFETIME_MS = 10 * 60_000;
+
+/** The most joins the hub keeps waiting for approval at once. */
+export const JOINS_PENDING_MAX = 8;
+
+/** How long the new laptop waits for each answer from the home laptop's bridge. */
+export const JOIN_REQUEST_TIMEOUT_MS = 3_000;
+
+/** How often the new laptop asks whether its join was approved, and its page reloads. */
+export const JOIN_POLL_MS = 2_000;
+
+/** The join token: this many random bytes, written as twice as many lowercase hex characters. */
+export const JOIN_TOKEN_BYTES = 32;
+
+/** Names in a worker laptop's state folder; Layer 2 writes the status file and the worker folder. */
+export const WORKER_STATE_NAMES = {
+  laptop: "laptop.json",
+  workerConfig: "worker.json",
+  workerToken: "worker-token",
+  workerStatus: "worker-status.json",
+  workerStop: "worker.stop",
+  workerPid: "worker.pid",
+  workerStateDir: "worker",
+} as const;
+
+/** worker.json's frame_feed_port: Layer 3's frame feed on this laptop (CLAUDE.md section 9). */
+export const FRAME_FEED_PORT = 7460;
+
+/** The labelled stand-in for Layer 2's worker, relative to the repository root. */
+export const WORKER_STUB_PATH = ["layer1", "stubs", "fake-layer2-worker.ts"] as const;
+
+/** The Python version worker.json's python names, and how long finding it may take. */
+export const WORKER_PYTHON_VERSION = "3.12";
+export const PYTHON_FIND_TIMEOUT_MS = 10_000;
+
+/** How long Layer 2's check may run; its first run builds Layer 2's environment. */
+export const WORKER_CHECK_TIMEOUT_MS = 180_000;
+
+/** How often the bridge reads the worker's status file. */
+export const WORKER_STATUS_POLL_MS = 500;
+
+/** After this long still disconnected, the page says what to check. */
+export const WORKER_CONNECT_HINT_MS = 30_000;
+
+/** How often a worker laptop's bridge reports to the home laptop's bridge over the link. */
+export const LINK_REPORT_MS = 5_000;
