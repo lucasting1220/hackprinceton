@@ -386,7 +386,7 @@ class FeedItem(Strict):
     alert went out. Never anything else from the event. Internal to Layer 2."""
 
     at: UtcDatetime
-    label: Literal["Fall", "Call for help", "Heart rate", "Monitoring", "Event"]
+    label: Literal["Fall", "Call for help", "Speech heard", "Heart rate", "Monitoring", "Event"]
     alert: StrictBool
 
 

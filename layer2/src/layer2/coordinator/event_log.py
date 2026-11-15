@@ -108,11 +108,16 @@ _LABELS = {
 def feed_item(logged: LoggedEvent) -> FeedItem:
     """What the dashboard may show of an event: its time (`occurred_at` if it is a valid time,
     else when it was logged), a label from a fixed list chosen by its `kind` (Layer 4's event
-    records), and whether it carries an `alert_id`. Nothing else, so no detail about the
-    resident reaches a screen that judges can see."""
+    records; a "help" event without an alert is "Speech heard"), and whether it carries an
+    `alert_id`. Nothing else, so no detail about the resident reaches a screen that judges can
+    see."""
     event = logged.event
     kind = event.get("kind")
+    alert = bool(event.get("alert_id"))
     label = _LABELS.get(kind, "Event") if isinstance(kind, str) else "Event"
+    if kind == "help" and not alert:
+        # Layer 4 logs every transcript's verdict as "help"; only one that alerted was a call.
+        label = "Speech heard"
     at = logged.logged_at
     occurred = event.get("occurred_at")
     if isinstance(occurred, str):
@@ -122,7 +127,7 @@ def feed_item(logged: LoggedEvent) -> FeedItem:
             parsed = None
         if parsed is not None and parsed.tzinfo is not None:
             at = parsed
-    return FeedItem(at=at, label=label, alert=bool(event.get("alert_id")))
+    return FeedItem(at=at, label=label, alert=alert)
 
 
 def recent_feed(events: EventLog) -> list[FeedItem]:
