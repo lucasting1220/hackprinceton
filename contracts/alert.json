@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "type": "alert",
+  "alert_id": "6f1c2a8e-3b7d-4f0a-9c55-2e8d1a4b7f90",
+  "kind": "fall",
+  "severity": "urgent",
+  "detected_at": "2026-11-14T03:12:00Z",
+  "title": "Possible fall",
+  "body": "A possible fall was seen at 10:12 PM",
+  "update": false
+}
