@@ -312,3 +312,10 @@ export const LINK_REPORT_MS = 5_000;
 
 /** The longest camera or mic name the joined laptop's page saves into worker.json, in characters. */
 export const SENSOR_NAME_MAX_CHARS = 128;
+/** How often the relay looks for its stop file (relay.json's stop_file), and its stop deadline. */
+export const RELAY_STOP_POLL_MS = 1_000;
+export const RELAY_STOP_DEADLINE_MS = 10_000;
+
+/** How long the relay may take to start listening, and to finish pushes in flight when it stops. */
+export const RELAY_LISTEN_TIMEOUT_MS = 5_000;
+export const RELAY_PUSH_DRAIN_MS = 5_000;

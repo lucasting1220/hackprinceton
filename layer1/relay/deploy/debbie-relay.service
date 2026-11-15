@@ -1,0 +1,39 @@
+# Debbie relay, run by systemd as its own user. Install as /etc/systemd/system/debbie-relay.service
+# (RUNBOOK.md step 5). The relay stops itself on SIGTERM, or when relay.json's stop_file appears.
+[Unit]
+Description=Debbie relay (Layer 1)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=debbie-relay
+Group=debbie-relay
+WorkingDirectory=/opt/debbie/layer1
+ExecStart=/opt/node/bin/node /opt/debbie/layer1/relay/src/main.ts --config /etc/debbie-relay/relay.json
+# The APNs key stays root-only in /etc/debbie; systemd hands the relay a copy only it can read, at
+# /run/credentials/debbie-relay.service/apns-key.p8, which relay.json's key_file names.
+LoadCredential=apns-key.p8:/etc/debbie/apns-key.p8
+# The database and the stop file, both under /var/lib/debbie-relay (mode 0700).
+StateDirectory=debbie-relay
+StateDirectoryMode=0700
+ReadWritePaths=/var/lib/debbie-relay
+KillSignal=SIGTERM
+TimeoutStopSec=30
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictSUIDSGID=true
+LockPersonality=true
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

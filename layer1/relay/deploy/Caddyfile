@@ -1,0 +1,30 @@
+# Debbie relay: Caddy terminates TLS for relay.144-202-5-15.sslip.io and passes everything to the
+# relay on 127.0.0.1 at relay.json's listen_port. Port 80 stays closed, so the certificate comes
+# through the TLS-ALPN challenge on 443 (R5). Install as /etc/caddy/Caddyfile (RUNBOOK.md step 6).
+{
+	auto_https disable_redirects
+}
+
+relay.144-202-5-15.sslip.io {
+	tls {
+		issuer acme {
+			disable_http_challenge
+		}
+	}
+
+	# The hubs' WebSocket: Caddy passes the upgrade through, and keeps hub connections open for
+	# five minutes across a Caddy reload so hubs don't all reconnect at once.
+	handle /v1/hub {
+		reverse_proxy 127.0.0.1:7490 {
+			stream_close_delay 5m
+		}
+	}
+
+	# The phones' API and /healthz, which the relay answers itself, so it shows the relay is up.
+	handle {
+		request_body {
+			max_size 64KB
+		}
+		reverse_proxy 127.0.0.1:7490
+	}
+}
