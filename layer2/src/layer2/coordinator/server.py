@@ -334,6 +334,10 @@ def create_dashboard_app(
     async def hardware() -> JSONResponse:
         return JSONResponse(registry.hardware().model_dump(mode="json"))
 
+    @app.get("/api/details")
+    async def details() -> JSONResponse:
+        return JSONResponse(registry.details().model_dump(mode="json"))
+
     @app.get("/")
     async def page() -> HTMLResponse:
         return HTMLResponse(PAGE)
