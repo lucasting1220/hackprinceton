@@ -364,8 +364,8 @@ def create_dashboard_app(
 ) -> FastAPI:
     app = FastAPI(openapi_url=None, docs_url=None, redoc_url=None)
     page_html = PAGE.replace("__SETUP_LINK__", setup_link(bridge_url))
-    # Only this machine may read it, by address: a web page using DNS rebinding cannot.
-    app.add_middleware(TrustedHostMiddleware, allowed_hosts=["127.0.0.1", "localhost"])
+    # Only this machine may read it, by name: a web page using DNS rebinding cannot.
+    app.add_middleware(TrustedHostMiddleware, allowed_hosts=list(settings.DASHBOARD_HOST_NAMES))
 
     @app.get("/api/state")
     async def api_state() -> JSONResponse:

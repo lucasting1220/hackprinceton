@@ -17,6 +17,9 @@ FILE_BUSY_STEP_S: Final = 0.05
 SUBPROCESS_TIMEOUT_S: Final = 2.0
 REQUIRED_PYTHON: Final = (3, 12)
 DASHBOARD_POLL_S: Final = 1.0
+# Names the dashboard answers to. home.debbie.health's DNS record points at 127.0.0.1, so it
+# still opens this laptop's own dashboard; any other name is refused (DNS rebinding).
+DASHBOARD_HOST_NAMES: Final = ("127.0.0.1", "localhost", "home.debbie.health")
 WS_MAX_MESSAGE_BYTES: Final = 64 * 1024
 WS_PING_INTERVAL_S: Final = 5.0
 WS_PING_TIMEOUT_S: Final = 20.0
