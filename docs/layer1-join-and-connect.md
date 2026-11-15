@@ -1,10 +1,12 @@
 # Layer 1: Join and connect
 
-**Status: draft for team review. Nothing is built.** This replaces our first Layer 1 draft. It is written against the other layer docs on `main` and the decisions in `docs/coherence-review.md`. "Decided" lists the Layer 1 team's decisions; a row tagged with an ask also needs that owner's agreement. The asks and the handoff sections are proposals: names, fields and ports can change once, together, at hour 0. "Open questions" are not settled.
+**Status: being built.** Build steps 1 to 5 are on `main`: Create a home, Pair a phone, Add a laptop (with typed camera and mic names), alerts and Layer 4's other messages to phones over home Wi-Fi, and the relay with push and the offline watchdog. Live view (step 7) and the screens in step 9 are not built. `layer1/README.md` says how to run what is built, and `layer1/DEMO.md` is the demo-day runbook. This replaced our first Layer 1 draft. It is written against the other layer docs on `main` and the decisions in `docs/coherence-review.md`. "Decided" lists the Layer 1 team's decisions; a row tagged with an ask also needs that owner's agreement. The asks and the handoff sections are proposals: names, fields and ports can change once, together, at hour 0. "Open questions" are not settled.
 
 **Corrected by Lucas, Nov 14,** to match the cross-layer decisions in `docs/coherence-review.md`. This doc is the reference for joining, connecting, the relay and the iPhone app. Layer 1 makes no decisions about care or monitoring: it connects devices and delivers what Layer 4 sends. How the other layers work is defined in their own docs, not here.
 
 **Changed Nov 14: Vultr replaces AWS.** The relay is now one server the team runs on Vultr, with no AWS services. The hub now reaches the relay with a hub credential instead of a device certificate.
+
+**Updated Nov 15 to match what is built.** The relay runs at `https://relay.144-202-5-15.sslip.io`. mDNS is cut: the person types the coordinator's address. Until Layer 3's device list (ask T6) exists, camera and mic names are typed on the joined laptop's Camera and mic page, with the resident's consent box. A reply is sealed with the asking phone's own key. Every Layer 1 program stops on Ctrl+C or when its stop file appears.
 
 ## Summary
 
@@ -94,8 +96,8 @@ We no longer ask Lucas for an enrollment API, phone credentials, an artifact man
 | T2 | Agree the watch data fields in "Handoff to Layer 4" (`POST /v1/watch-data`) |
 | T3 | Layers 3 and 4: send a pinned list of Python packages and model files, so every demo laptop is set up the same way |
 | T4 | Decided: only the capture job opens the camera and mic. Everything else, including live view, reads from it |
-| T5 | On the camera laptop, the capture job serves `ws://127.0.0.1:<frame_feed_port>`: each frame one binary JPEG message, up to 15 per second at 640×480, encoded only while a client is connected, accepting only the sender page's origin. Needed by hour 20, for live view without a second program fighting over the webcam |
-| T6 | A device list and a device check for the setup page's Check sensors step, defined in a contract file first. The list reports each camera and mic with its exact name and its kind (built-in, external, Continuity Camera or virtual) and flags two devices with the same name. The check is a mode of the capture program, run before the worker starts, so T4 holds: it opens only the two named devices, reads one frame and about a second of audio, fails **Mic OK** when that audio is all zeros, and says how a Windows device renamed after moving to another port is found. The contract gives the command, the JSON output, the exit codes and the time limit. Needed by build step 3 |
+| T5 | On the camera laptop, the capture job serves `ws://127.0.0.1:<frame_feed_port>/live`: each frame one binary JPEG message, up to 15 per second at 640×480, encoded only while a client is connected, accepting only the sender page's origin. Needed by hour 20, for live view without a second program fighting over the webcam. Agreed in `contracts/frame-feed.json`, at `ws://127.0.0.1:7460/live` in its example |
+| T6 | A device list and a device check for the setup page's Check sensors step, defined in a contract file first. The list reports each camera and mic with its exact name and its kind (built-in, external, Continuity Camera or virtual) and flags two devices with the same name. The check is a mode of the capture program, run before the worker starts, so T4 holds: it opens only the two named devices, reads one frame and about a second of audio, fails **Mic OK** when that audio is all zeros, and says how a Windows device renamed after moving to another port is found. The contract gives the command, the JSON output, the exit codes and the time limit. Needed by build step 3. Until it exists, the person types the camera and mic names on the joined laptop's Camera and mic page |
 
 ## Parts
 
@@ -137,21 +139,23 @@ Caregiver iPhone ◀──── push ─────┐
 
 Each process has one supervisor: Layer 1 restarts what it starts, and Lucas restarts what he starts (his worker restarts a job that exits).
 
+Every Layer 1 program stops on Ctrl+C or when its stop file appears, which works on every system and from scripts: `bridge.stop` in the bridge's state folder (macOS: `~/Library/Application Support/Debbie`; Windows: `%LOCALAPPDATA%\Debbie`), and `relay.stop` in the relay's data folder. The bridge then stops the coordinator or worker it started.
+
 ### Ports (proposed)
 
 | Port | What listens | Reachable from |
 |---|---|---|
 | 7443 | Lucas's coordinator: worker control and media | The local network |
 | 7450 | Lucas's dashboard, with its JSON at `/api/state` (ask L5) | Lucas decides; Layer 1 reads the JSON from 127.0.0.1 |
-| 7451 | Lucas's coordinator: local calls from the bridge (ask L10) | 127.0.0.1 only |
+| 7451 | Lucas's coordinator: phones' requests and watch data from the bridge, at `client_port` (ask L10) | 127.0.0.1 only |
 | 7460 | Layer 3's frame feed on the camera laptop (ask T5) | 127.0.0.1 only |
-| 7470 | Layer 1 bridge, local side: the setup page, the Confirm button, and the messages for phones that the coordinator hands over | 127.0.0.1 only |
+| 7470 | Layer 1 bridge, local side: the setup page, the Confirm button, and the messages for phones that the coordinator hands over (alerts, replies, status and reports) at `bridge_url` | 127.0.0.1 only |
 | 7480 | Layer 1 bridge, network side: phone pairing requests, the LAN gateway, laptop join requests, bridge links | The local network |
 | 11434 | Ollama | 127.0.0.1 only |
 
 Nothing on the network side can confirm a pairing or post an alert. Those happen only on 127.0.0.1, so someone else on the venue Wi-Fi can't pair a phone or fake an alert.
 
-**Discovery.** The coordinator's bridge advertises its network side by mDNS (Bonjour) as `_debbie._tcp` on port 7480, with the first 8 characters of the hub's public key (base64url) in its TXT record, so phones and laptops can tell homes apart.
+**Discovery.** mDNS is cut. A joining laptop's person types the coordinator's address, which the coordinator's setup page shows under Laptops. Phones get the bridge's addresses in the pairing QR code. `GET /v1/hello` on port 7480 answers with the first 8 characters of the hub's public key (base64url), the home code, so phones and laptops can tell homes apart.
 
 ## Setting up a home
 
@@ -159,15 +163,15 @@ Nothing on the network side can confirm a pairing or post an alert. Those happen
 1. Run the setup command from Terminal (see "Network permissions"). The setup page opens in the browser. Choose **Create a home**.
 2. **Check this laptop**: CPU, memory, disk, OS, camera and mic. This laptop coordinates, so a camera or mic on it won't be used.
 3. **Keep this laptop awake**: the person approves, and the bridge keeps the laptop and its screen awake while it runs (`caffeinate -dis -w <bridge pid>` on macOS; on Windows, screen and sleep set to Never when plugged in). Lids stay open during the demo.
-4. The bridge creates the home ID, the home key and its own key pair, and shows the home ID. Remote access shows as "not set up" until the team runs the provisioning command on the relay server with that home ID (build step 5), which creates a hub credential that is copied to the coordinator laptop as "Remote connection (Vultr)" describes; the bridge picks it up the next time it starts.
+4. The bridge creates the home ID, the home key and its own key pair, and shows the home ID. Remote access shows as "not set up" until the team runs the provisioning command on the relay server with that home ID (build step 5), which creates a hub credential that is imported on the coordinator laptop as "Remote connection (Vultr)" describes; the bridge picks it up when it is restarted.
 5. It writes `coordinator.json` and an empty `accepted-workers.json`, and starts Lucas's coordinator.
-6. **Pair the caregiver's phone** (below). Pair the resident's iPhone the same way, choosing Resident, or, if the team has one iPhone, turn on resident mode on the caregiver's phone.
-7. **Resident consent**: the resident agrees to each sensor (camera, mic, watch data) and, once, gives or withholds consent to live view. A "no" to the camera or mic leaves that device unconfigured (its `worker.json` field is `null`), and the setup page says what won't run; Layer 2's plan lists its jobs as dropped with the reason `declined`. A "no" to watch data leaves resident mode off.
+6. **Pair the caregiver's phone** (below), after the home is provisioned on the relay, so the phone gets the relay's address. Pair the resident's iPhone the same way, choosing Resident, or, if the team has one iPhone, turn on resident mode on the caregiver's phone.
+7. **Resident consent** (not built yet; for now the camera and mic consent is a box on the camera laptop's Camera and mic page, see "Add a laptop"): the resident agrees to each sensor (camera, mic, watch data) and, once, gives or withholds consent to live view. A "no" to the camera or mic leaves that device unconfigured (its `worker.json` field is `null`), and the setup page says what won't run; Layer 2's plan lists its jobs as dropped with the reason `declined`. A "no" to watch data leaves resident mode off.
 8. **Home created. Add a laptop.** The page links to Lucas's dashboard, which shows zero workers. Nothing claims monitoring is active yet.
 
 ### Pair a phone
 1. The coordinator's setup page shows a pairing QR code (format in "Phone ↔ hub messages"): the bridge's network addresses, the hub's public key and a one-time secret. It expires after 10 minutes and is used up once the pairing is confirmed.
-2. The app asks for Local Network access first. It then scans the code, makes its own key pair, and sends its public key, a name (for example "Caregiver's iPhone") and its role, with a proof that it saw the QR code.
+2. The app asks for Local Network access first. It then scans the code, makes its own key pair, and sends its public key, a name (for example "Caregiver's iPhone", up to 64 characters and 1024 UTF-8 bytes) and its role, with a proof that it saw the QR code.
 3. The laptop and the phone show the same 4-digit code, and the person at the laptop clicks **Confirm**. Only someone at the coordinator laptop can confirm.
 4. The bridge sends back, encrypted with the phone's own key: the home ID, a device ID and device credential, the phone's role, the relay's address (empty until remote access is set up), for caregivers the home key, the home's name, and the bridge's network addresses, starting with the one this phone reached. Like every plaintext (see "Freshness" in "Phone ↔ hub messages") it also carries `msg_id` and `sent_at`, plus the format version `v`. The app needs every one of these fields except the home key.
 5. The hub tells the relay about the new phone (device ID, role and a hash of its credential) over its own relay connection. From then on, the relay accepts that phone. A phone paired before the hub has a relay connection (before build step 5, or while the hub is offline) is registered when the hub next connects: on every connection, and after every pairing or removal, the hub sends the relay its full list of paired phones. The relay keeps each listed phone as it is, push registration included, and revokes any phone missing from the list or marked removed, so a phone removed while the hub was offline is dropped too. A revoked phone stays revoked.
@@ -175,17 +179,18 @@ Nothing on the network side can confirm a pairing or post an alert. Those happen
 
 ### Add a laptop
 1. On the new laptop, run the setup command and choose **Join a home**. Then **Check this laptop** (Layer 2 needs at least 16 GB on a worker) and **Keep this laptop awake**.
-2. The bridge finds the coordinator's bridge on the local network by mDNS. If that fails, the person types the address shown on the coordinator's setup page.
+2. The person types the coordinator's address, shown under Laptops on the coordinator's setup page, and this laptop's name. mDNS is cut.
 3. It sends a join request (the laptop's name and public key) to the coordinator's bridge and shows an **Add this laptop** QR code.
 4. A caregiver taps **Add a laptop** in the app, scans the code and approves. The approval goes to the coordinator's bridge over home Wi-Fi, or through the relay when the phone isn't on the home network.
 5. The coordinator's bridge gives the laptop a node ID and a join token, encrypted to its key. It adds the token's hash to `accepted-workers.json` before sending the token.
-6. **Check sensors** (ask T6): the person picks the camera and the mic from the device names Layer 3's device list reports, or picks **No sensors on this laptop** (the HP), which skips the device check and says the laptop has no camera or mic. A sensor the resident declined (the bridge asks the coordinator's bridge, with its join token) shows **Declined by the resident**, and its field is written as `null`. When no external camera is listed, the page says to plug in the webcam and refresh, and two devices with the same name are flagged rather than guessed between. The pickers offer only external devices: never a built-in camera or mic (the demo MacBook Air's `MacBook Air Camera` and `MacBook Air Microphone`, for example), a Continuity Camera iPhone, or a virtual device, and they never preselect one. The camera and the mic are picked separately and never assumed to match, because they are separate devices with different names (on the demo camera laptop, `j5 WebCam JVCU100` and `Audio Streaming`); each is identified by its name, never by an index or the camera's Unique ID. The bridge then runs Layer 3's device check through the same launch path the demo uses, and the page shows **Camera OK** and **Mic OK**, or names the setting to change; a bridge started over SSH is told to restart from Terminal.app.
+6. **Check sensors** (ask T6). Until Layer 3's device list exists, this is built as the joined laptop's Camera and mic page: the person types each name exactly as the operating system shows it, or leaves a field empty for none, and ticks the box only when the resident agrees. Without that box nothing is saved; saving rewrites `worker.json` and restarts the worker. With T6 the person picks the camera and the mic from the device names Layer 3's device list reports, or picks **No sensors on this laptop** (the HP), which skips the device check and says the laptop has no camera or mic. A sensor the resident declined (the bridge asks the coordinator's bridge, with its join token) shows **Declined by the resident**, and its field is written as `null`. When no external camera is listed, the page says to plug in the webcam and refresh, and two devices with the same name are flagged rather than guessed between. The pickers offer only external devices: never a built-in camera or mic (the demo MacBook Air's `MacBook Air Camera` and `MacBook Air Microphone`, for example), a Continuity Camera iPhone, or a virtual device, and they never preselect one. The camera and the mic are picked separately and never assumed to match, because they are separate devices with different names (on the demo camera laptop, `j5 WebCam JVCU100` and `Audio Streaming`); each is identified by its name, never by an index or the camera's Unique ID. The bridge then runs Layer 3's device check through the same launch path the demo uses, and the page shows **Camera OK** and **Mic OK**, or names the setting to change; a bridge started over SSH is told to restart from Terminal.app.
 7. The bridge writes `worker.json` and the token file, deletes any old status and stop files, and starts Lucas's worker. It shows **Joined** only when the worker's status file says the coordinator accepted it.
 8. The bridge keeps a link to the coordinator's bridge, signed in with its join token, used to start and stop live view and to report setup progress.
 
 ### Network permissions
 - **iPhone**: the app declares local-network use and the Bonjour service it looks for, and allows plain HTTP to local addresses (from iOS 17, App Transport Security blocks connections to IP addresses otherwise). It brings up the Local Network prompt before pairing, and retries, because iOS may refuse the first request while that prompt is showing.
 - **Mac**: start the bridge from Terminal.app or over SSH; on the camera laptop, only directly in a Terminal.app window (not over SSH, and not inside tmux or screen), since macOS gives the camera and mic permission to the app that started the bridge. From macOS 15, programs started from other apps (VS Code, Cursor, iTerm) can't reach the local network or use mDNS until that app is allowed under Privacy & Security → Local Network.
+- **Mac coordinator**: when macOS asks whether `node` may accept incoming connections, choose Allow, or phones and other laptops can't reach port 7480.
 - **Windows coordinator**: allow Node and Python through the firewall and set the network to Private, or the other laptops can't reach it.
 - **Camera and mic**: on macOS the permission belongs to the app that started the bridge, so start it the same way every time.
 
@@ -195,7 +200,7 @@ Nothing on the network side can confirm a pairing or post an alert. Those happen
 
 ## Handoff to Layer 2
 
-These are proposals for Lucas: he can rename any field or change any behaviour, and we'll match it. Layer 1 writes the config files and Lucas's programs read them. All paths are absolute. Once agreed, example files go in the top-level `contracts/` folder.
+These were agreed with Lucas on Nov 14. Layer 1 writes the config files and Lucas's programs read them. All paths are absolute. The example files in the top-level `contracts/` folder are the truth and win where this section differs.
 
 `coordinator.json`:
 ```json
@@ -206,6 +211,7 @@ These are proposals for Lucas: he can rename any field or change any behaviour, 
   "dashboard_port": 7450,
   "client_port": 7451,
   "ollama_url": "http://127.0.0.1:11434",
+  "bridge_url": "http://127.0.0.1:7470",
   "accepted_workers_file": "/abs/path/accepted-workers.json",
   "state_dir": "/abs/path/coordinator",
   "stop_file": "/abs/path/coordinator.stop"
@@ -248,17 +254,17 @@ These are proposals for Lucas: he can rename any field or change any behaviour, 
 - **Stop file.** When it appears, the program stops its jobs and exits within 10 seconds; after that, Layer 1 ends the process.
 - **Dashboard JSON** (ask L5): `GET http://127.0.0.1:7450/api/state` returns `{"updated_at": "…", "laptops": [{"node_id": "…", "display_name": "…", "last_status_at": "…", "sensors": ["camera", "mic"], "missing": []}], "jobs": [{"job": "fall_model", "node_id": "…", "state": "running"}], "dropped": [{"work": "…", "reason": "…"}]}`, using Layer 2's job names and its `dropped` list. The hub connector uses it only to find the camera laptop and to show which laptops are connected; it makes no judgement about monitoring.
 - **Transport.** Workers reach the coordinator over plain WebSocket on the demo network (see Question 1 about which network). TLS with a pinned certificate is for after the hackathon, at Lucas's discretion.
-- **Network changes.** If the coordinator's address changes, for example after switching to the hotspot, the worker bridges find it again by mDNS and rewrite `coordinator_url`, keeping its `/ws` path, and the worker picks it up on its next retry (ask L4). If mDNS fails, the person types the new address on the worker's setup page. The laptop keeps its node ID and token.
+- **Network changes.** If the coordinator's address changes, for example after switching to the hotspot, the worker's bridge must rewrite `coordinator_url`, keeping its `/ws` path, and the worker picks it up on its next retry (ask L4). mDNS is cut, and the worker's setup page can't change the address yet, so set up every laptop on the demo network and keep the coordinator on it.
 
 ## Handoff to Layer 4
 
-These are proposals for Lucas, as owner of Layers 3 and 4. Layer 4 runs on worker laptops, so the bridge never calls it directly. Lucas's coordinator, on the same laptop as the bridge, carries every message: the bridge posts to the coordinator on `127.0.0.1:7451`, and the coordinator posts to the bridge on `127.0.0.1:7470`. Every call is JSON over HTTP on the coordinator laptop.
+Layer 4 runs on worker laptops, so the bridge never calls it directly. Lucas's coordinator, on the same laptop as the bridge, carries every message: the bridge posts phones' requests and watch data to the coordinator's `client_port` (`127.0.0.1:7451`), and the coordinator posts alerts, replies, status and reports to the bridge's `bridge_url` (`127.0.0.1:7470`). Every call is JSON over HTTP on the coordinator laptop.
 
 | From → to | Call | Fields |
 |---|---|---|
-| Layer 4 → Layer 1 | `POST /v1/alerts` | `alert_id, kind, severity, detected_at, title, body, update` |
+| Layer 4 → Layer 1 | `POST /v1/alerts` | `contracts/alert.json`: `alert_id, kind, severity, detected_at, title, body, update`, plus `type` and `schema_version` |
 | Layer 4 → Layer 1 | `POST /v1/replies` | `request_id, title, body` |
-| Layer 4 → Layer 1 | `POST /v1/status` | live status: current activity; latest heart rate, sleep and steps, each with its age; `no_heart_data` |
+| Layer 4 → Layer 1 | `POST /v1/status` | live status: `activity, heart_rate, sleep, steps, no_heart_data` (latest heart rate, sleep and steps, each with its age) |
 | Layer 4 → Layer 1 | `POST /v1/reports` | `report_id, date, title, body` (the daily report) |
 | Layer 1 → Layer 4 | `POST /v1/requests` | `request_id, device_id, kind, text` |
 | Layer 1 → Layer 3 | `POST /v1/watch-data` | `device_id, heart_rate: [{measured_at, bpm}], sleep: [{night_of, asleep_minutes, bedtime_at, wake_at, interruptions}], steps: [{measured_at, steps_today}]` |
@@ -268,14 +274,16 @@ These are proposals for Lucas, as owner of Layers 3 and 4. Layer 4 runs on worke
 - "Monitoring degraded" is an ordinary alert that Layer 4 decides to send. The bridge delivers it and adds nothing.
 - Nothing about an alert comes back from the phone: there are no acknowledgments and no false-alarm marks.
 - The hub connector encrypts each message once with the home key and keeps it in an outbox on disk until the relay confirms it (the relay's acknowledgment message), resending after an outage. The LAN gateway serves the same encrypted message to phones on home Wi-Fi.
+- The bridge answers each of these four calls with 202 once the message is sealed and in the outbox, and 400 naming the field and rule that failed. The coordinator answers the bridge's two calls with 202 once a worker's job has the message, and 503 when no job takes it; the phone then gets 503.
+- A reply is sealed with the asking phone's own key, not the home key, and only that phone fetches it. The hub remembers which phone sent each `request_id` for an hour, in memory.
 - Requests are asynchronous: the phone gets an ID at once and fetches the reply later, because a reply (for example an answer from the deep model) can take longer than a phone request should wait.
 
-## Phone ↔ hub messages (proposed)
+## Phone ↔ hub messages
 
-Both tracks build to this, and any change is agreed by both. The iPhone track drafts the remaining details and the test vectors in `debbie-ios/docs/CONTRACTS.md`. Once the laptop track's code passes the same vectors, they're copied to `layer1/contracts/phone-hub.md`.
+Both tracks build to this, and any change is agreed by both. `layer1/contracts/phone-hub.md` is the full contract, with the app's test vectors copied to `layer1/contracts/vectors.json`; it wins where this summary differs, and lists where the app still differs from it.
 
 - **QR code**: JSON `{v: 1, addrs, hub_pub, secret, exp}`. `addrs` lists every IPv4 address and port of the bridge's network side; `hub_pub` is the hub's 32-byte X25519 public key and `secret` 16 random bytes, both base64url; `exp` is a Unix time.
-- **Pairing request**: `{v, phone_pub, name, role, proof}`. `role` is `caregiver` or `resident`, and `proof = HMAC-SHA256(secret, phone_pub ‖ role ‖ 0x00 ‖ name in UTF-8)`. The same phone key may resend its request until the person confirms.
+- **Pairing request**: `{v, phone_pub, name, role, proof}`. `role` is `caregiver` or `resident`, and `proof = HMAC-SHA256(secret, phone_pub ‖ role ‖ 0x00 ‖ name in UTF-8)`. After NFC normalization the name has 1 to 64 characters and at most 1024 UTF-8 bytes. The same phone key may resend its request until the person confirms.
 - **Keys**: `shared = X25519(phone, hub)`. The phone's own key is `HKDF-SHA256(shared, salt = secret, info = "debbie/v1/phone-key", 32 bytes)`. The 4-digit code is the first 4 bytes of `HKDF-SHA256(shared, salt = secret, info = "debbie/v1/code", 4 bytes)` read as a big-endian number, mod 10000, zero-padded.
 - **Envelope** for every encrypted message: `{v: 1, kid, n, c}`, base64url. `kid` is `home` for the home key, the device ID for a phone's own key, or `pair` during pairing. `n` is a random 12-byte nonce, and `c` is the ChaCha20-Poly1305 ciphertext followed by its 16-byte tag. The associated data is `debbie/v1/{home_id}/{kid}/{type}`, or `debbie/v1/pair` during pairing.
 - **Freshness**: every plaintext carries `msg_id` and `sent_at`. Receivers drop repeated `msg_id`s and any command older than 30 seconds.
@@ -284,19 +292,19 @@ Both tracks build to this, and any change is agreed by both. The iPhone track dr
 
 ## Remote connection (Vultr)
 
-The relay is one Vultr Cloud Compute server that the team runs. The hub keeps one outgoing connection to it. Nothing in the home accepts connections from the internet, and laptop-to-laptop traffic stays on the local network.
+The relay is one Vultr Cloud Compute server that the team runs, at `https://relay.144-202-5-15.sslip.io`, with Caddy in front and coturn beside it. `layer1/relay/deploy/RUNBOOK.md` says how to deploy it and connect a home. The hub keeps one outgoing connection to it. Nothing in the home accepts connections from the internet, and laptop-to-laptop traffic stays on the local network.
 
 | Part | Job |
 |---|---|
 | Relay service (Node/TypeScript) | The hub's connection: one WebSocket over TLS on port 443, opened by the hub and signed in with the hub's credential. The relay takes the `home_id` from that credential, never from a message. Commands are not queued for an offline hub. Also the phone's API (send a request, fetch messages, start or stop a live view, register for push), where each call carries the phone's device credential, and live-view signaling |
 | SQLite, on the server | Phones per home, encrypted messages (kept 7 days), the hub's last contact time, live-view sessions. The relay drops duplicate message IDs |
-| Push to Apple | The relay sends to Apple's push service directly over HTTP/2 with the team's APNs key: the sandbox endpoint for builds run from Xcode, the production endpoint for TestFlight builds. Phones register their push token together with which of the two it belongs to |
+| Push to Apple | The relay sends to Apple's push service directly over HTTP/2 with the team's APNs key: the sandbox endpoint for builds run from Xcode, the production endpoint for TestFlight builds. One Team Scoped key signs pushes for both. Phones register their push token together with which of the two it belongs to |
 | Offline watchdog | A timer inside the relay service, once a minute |
 | TURN server (coturn) | Relays live video when the laptop and the phone can't connect directly. It runs on the same server and hands out credentials that last 5 minutes, signed with a secret it shares with the relay service |
-| HTTPS certificate | A free Let's Encrypt certificate for the relay's domain name (to buy; see "Prerequisites"), renewed automatically by a reverse proxy such as Caddy in front of the relay service |
+| HTTPS certificate | A free Let's Encrypt certificate for `relay.144-202-5-15.sslip.io`, a name sslip.io resolves to the server's address, so no domain was bought. Caddy, in front of the relay service, gets and renews it |
 | Vultr firewall | Opens only 443 (HTTPS and the hub's WebSocket), the TURN ports, and SSH from the team's own addresses |
 
-For the demo, the team runs a provisioning command on the relay server once it is set up (build step 5). Given the home ID that Create a home shows, it creates the home's record and a hub credential. It is run over SSH from the coordinator laptop, and its output goes straight into the credential file outside the repo, readable only by the user running the bridge, so the credential is never shown or put on a command line; the bridge picks it up on its next start. The Vultr API key never goes on a home laptop or a phone, or into the repo. After the hackathon, the hub enrolls itself with a request approved from a paired caregiver's phone.
+For the demo, the team runs a provisioning command on the relay server once it is set up (build step 5). Given the home ID that Create a home shows, it creates the home's record and a hub credential. It is run over SSH from the coordinator laptop, and its output goes straight into the credential file outside the repo, readable only by the user running the bridge, so the credential is never shown or put on a command line. The output is piped into `node layer1/bridge/src/relay-credential.ts import`, which checks it and saves `relay-credential.json` owner-only in the bridge's state folder (`RUNBOOK.md` step 8); the bridge picks it up when it is restarted. The Vultr API key never goes on a home laptop or a phone, or into the repo. After the hackathon, the hub enrolls itself with a request approved from a paired caregiver's phone.
 
 Every command carries its send time, and the hub ignores commands older than 30 seconds.
 
@@ -321,16 +329,18 @@ Every command carries its send time, and the hub ignores commands older than 30 
 | Push text | No. The push carries ciphertext that the phone decrypts |
 
 ### Health and offline alerts
-- The hub connector sends an encrypted heartbeat every minute, so the relay knows the home is reachable. The heartbeat carries no judgement about monitoring.
+- The hub connector sends an encrypted heartbeat every 20 seconds, so the relay knows the home is reachable. The heartbeat carries no judgement about monitoring.
 - Whether monitoring is degraded (a camera, mic, laptop or detector has stopped) is decided by Layer 4, which sends it as an alert like any other. The bridge only delivers it.
-- The watchdog runs every minute. When a hub has been silent for 3 minutes, it pushes "hub offline", and "back online" when it returns. This is a connection check, and nothing in the home could send it. For the demo, use a 20-second heartbeat and a 1-minute limit so the push arrives within about 2 minutes; rehearse it or record it.
+- The watchdog runs every minute. When a hub has been silent for `hub_silent_limit_s` (180 seconds in `relay.json`), it pushes "hub offline", and "back online" when it returns. This is a connection check, and nothing in the home could send it. For the demo, set the limit to 60 seconds, the shortest the relay accepts (three heartbeats), so the push arrives within about 2 minutes; rehearse it or record it.
 
 ## Live view
+
+Not built yet.
 
 1. The caregiver taps **Live view**. The app sends a live-view request encrypted with its own key (a request ID, the time and a fresh viewer client ID) and gets a session ID back at once.
 2. The relay checks that this phone is a caregiver for the home. It creates the session, makes TURN credentials that last 5 minutes, and sends "start live view" to the hub with the session ID, the TURN and STUN addresses with those credentials, and the phone's encrypted request, unopened.
 3. The hub connector opens the request, which must decrypt with a paired caregiver's key, be under 30 seconds old and not have been seen before. Then it checks the resident's consent. If the resident has not consented, or has turned live view off, it replies "denied" and the app says so. If it's on, it tells the camera laptop's bridge, over the bridge link, to open the sender and which viewer client ID it may answer.
-4. The sender is one Chrome or Edge window that the bridge starts with its own profile, in kiosk mode (Edge on Windows, where every laptop has it). The window is the full-screen **Live: your caregiver is watching** notice, with a **Turn off live view** button, and it holds the canvas being streamed, shown as a preview. It reads frames from Layer 3's frame feed (ask T5), draws them on the canvas, and streams the canvas with the browser's own WebRTC, exchanging connection details with the phone through the relay's signaling WebSocket for that session. Nothing may cover this window, because Chrome stops streaming a hidden canvas.
+4. The sender is one Chrome or Edge window that the bridge starts with its own profile, in kiosk mode (Edge on Windows, where every laptop has it). The window is the full-screen **Live: your caregiver is watching** notice, with a **Turn off live view** button, and it holds the canvas being streamed, shown as a preview. It reads frames from Layer 3's frame feed at `ws://127.0.0.1:7460/live`, as `contracts/frame-feed.json` gives (ask T5), draws them on the canvas, and streams the canvas with the browser's own WebRTC, exchanging connection details with the phone through the relay's signaling WebSocket for that session. Nothing may cover this window, because Chrome stops streaming a hidden canvas.
 5. When the sender is connected to signaling, the hub replies "ready", and the phone joins the same session's signaling with its session ID and receives the TURN and STUN addresses. Video goes straight from laptop to phone when the networks allow, and otherwise through the TURN server, encrypted either way.
 6. The session ends after 5 minutes, when the caregiver taps **Stop**, or when the resident turns live view off. The bridge closes the sender window's process at once. **Keep watching** starts a new session.
 
@@ -357,7 +367,7 @@ No video or audio is stored: the daily report is written from the event log. Thi
 | Home internet drops | Monitoring carries on locally. Alerts wait in the outbox and arrive on reconnect. The watchdog pushes "hub offline" |
 | Camera laptop sleeps or crashes | Layer 4 raises "monitoring degraded" and the bridge delivers it |
 | Coordinator laptop restarts | Starting the bridge again relaunches Lucas's coordinator. Workers reconnect by themselves (ask L4). Pairings, tokens and keys are files and survive |
-| Network change (venue Wi-Fi to hotspot) | Worker bridges find the coordinator's bridge again by mDNS, or the person types its new address on the worker's setup page; nothing is re-paired. Caregiver phones use the relay meanwhile. Watch data pauses until the resident's phone finds the bridge again by Bonjour |
+| Network change (venue Wi-Fi to hotspot) | mDNS is cut, and a worker can't be given a new coordinator address yet (see "Handoff to Layer 2", Network changes), so the demo stays on one network. Caregiver phones use the relay meanwhile. Watch data pauses while the resident's phone can't reach the bridge on home Wi-Fi |
 | Relay unreachable from the phone | The app shows "can't reach home" with the last contact time. It never shows an all-clear it can't confirm |
 | Live view stopped, expired or turned off | The sender window closes immediately |
 | A phone is unpaired (in its Settings, or removed on the coordinator's setup page) | The hub tells the relay, which rejects that phone's credential from then on |
@@ -368,9 +378,9 @@ Target: reconnect within 30 seconds once both ends have a working connection. Re
 
 | Item | State |
 |---|---|
-| Apple Developer account | Exists. App ID, push capability and APNs key (.p8, with its key ID and team ID) still to create |
-| Vultr account | Exists. Check the balance or credits, choose a region near the demo, create the server and its firewall |
-| Domain name | To buy. Point a name such as `relay.<domain>` at the Vultr server before build step 5 |
+| Apple Developer account | Exists. The APNs key is made: one Team Scoped key for sandbox and production, kept on the relay server only |
+| Vultr account | Exists. The server and its firewall are running (New Jersey) |
+| Domain name | Not needed: the relay uses `relay.144-202-5-15.sslip.io` |
 | iPhones | One, paired with the Apple Watch. A second (a teammate's, added as an internal TestFlight tester) would let the caregiver and the resident be separate phones |
 | Demo phone settings | Focus and Do Not Disturb off; notifications allowed |
 | Chrome or Edge on the camera laptop (the MacBook Air) | To check |
@@ -402,7 +412,7 @@ Two tracks run side by side: laptop and cloud (bridge, hub connector, relay, sen
 
 Targets for about 30 hours (compress if there's less): phone paired by hour 8, second laptop joined by hour 12, alert on the phone by hour 16, push and watchdog by hour 20, live view and a real alert end to end by hour 24, then rehearse.
 
-If time runs short, cut in this order: mDNS discovery (type the address), the app's home Wi-Fi route for caregivers (relay only), background watch data delivery (keep Sync now), and decryption inside the push (show "New alert" and decrypt in the app). Keep pairing, the alert path, live view and the watchdog.
+mDNS discovery is cut: the person types the address. If time runs short, cut next in this order: the app's home Wi-Fi route for caregivers (relay only), background watch data delivery (keep Sync now), and decryption inside the push (show "New alert" and decrypt in the app). Keep pairing, the alert path, live view and the watchdog.
 
 ## Acceptance tests
 
