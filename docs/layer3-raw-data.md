@@ -1,6 +1,31 @@
 # Layer 3: Raw data
 
-**Status: draft for team review. Nothing is built.** Items under "Decided" come from Lucas's design interviews of Nov 13 and 14. Items under "Proposed" and "Open questions" are not yet agreed.
+**Status: build steps 1, 2, 4 and 5 are built, steps 3 and 6 in part, step 7 not started (Nov 15); see "What is built".** Items under "Decided" come from Lucas's design interviews of Nov 13 and 14 and the Layer 3 owner's decisions of Nov 14 and 15. Items under "Open questions" are not yet agreed.
+
+## What is built
+
+As of Nov 15, on `main`, with the pull request numbers. Layer 3's checks pass on `main` on macOS (format, lint, types and 249 tests), and CI runs them on Windows and macOS for every pull request.
+
+| Build step | State | Pull requests |
+|---|---|---|
+| 1. Capture opens the webcam and delivers stamped frames to a test reader | Done on a Mac with the real webcam (`python -m layer3.frame_reader --config <worker.json>`). Not run on a Windows laptop; CI runs the tests there with a fake camera | #38 |
+| 2. Capture delivers stamped mic audio | Done on a Mac with the webcam's mic (`python -m layer3.audio_reader --config <worker.json>`). Not run on a Windows laptop; CI runs the tests there with a fake mic | #52 |
+| 3. Failure handling: report, retry, recover | In part. A camera or mic that fails is reopened every 3 seconds and resumes by itself, and the failure is logged. Not built: reporting "camera down", "mic down" or "declined" to Layer 2. Not run: unplugging the real webcam | #95, #96 |
+| 4. Capture runs as a Layer 2 job and feeds Layer 4 through `feed()` | Built. `layer3/jobs/capture/job.json` starts `python -m layer3.capture_job`, which serves `/camera` and `/mic` as `contracts/frame-feed.json` describes. Tested with fake devices; not yet run with the real webcam | #86, #95, #96 |
+| 5. Local video feed for Layer 1's live view | Built. The capture job serves `/live`, the JPEG only, to the live-view page's origin. Tested with a fake camera; not yet run with the real webcam | #96 |
+| 6. Watch data receiver | In part. `layer3/src/layer3/watch_receiver.py` takes a batch shaped as `contracts/watch-data.json`, removes repeats, refuses malformed readings, and returns each new reading with `last_received_at`. Tested with fake readings and a stub. Not built: the `watch_data` job that runs it under Layer 2 and passes each new reading on as `contracts/watch-reading.json` | #104, #111, #113 |
+| 7. Forwarding frames and audio to a model on another laptop | Not started | |
+
+**To see the watch receiver work:** from `layer3/`, run `uv run python stubs/watch_demo.py`. It sends 7 sample readings through the receiver on a stub of Layer 2 (`layer3/stubs/fake_layer2_client.py`) and passes on 6; the seventh is a repeat.
+
+**Not yet built:**
+
+- Reporting device state (up, down, declined) to Layer 2. Layer 2's job client has no call for a job's state yet.
+- The `watch_data` job: the program that runs the receiver under Layer 2, takes each batch from `receive("watch-data")` and passes each new reading on as `contracts/watch-reading.json`. It waits for Layer 2's `pass_on("watch-readings", reading)`, which is not on `main` yet. Layer 4's side already reads that file.
+- Passing `last_received_at` on while no reading arrives. Today it travels only with a new reading.
+- Tests that load `contracts/watch-data.json` and `contracts/watch-reading.json`, which the master sheet asks of each layer for every contract file it uses.
+- The device list and device check for Layer 1's setup page ("Camera OK", "Mic OK"). Until then the setup page takes typed device names.
+- Step 7, forwarding to another laptop.
 
 ## Summary
 
@@ -22,7 +47,9 @@ Data moves one way: every piece of fetched data goes to Layer 3, Layer 3 passes 
 | Video format | 640 by 480 at 15 frames per second, as a default setting |
 | Audio format | 16 kHz, one channel, as a default setting |
 | How raw | Every frame and all audio are passed on exactly as captured, each stamped with the time. Layer 3 does not skip silence or still frames |
-| Camera or mic failure | The capture job reports the failure to Layer 2, keeps trying to reopen the device every few seconds, and resumes by itself |
+| Timestamps | Frames and audio use the capturing laptop's clock, in UTC. Watch readings keep the time the watch measured them |
+| Audio chunk length | Half a second |
+| Camera or mic failure | The capture job reports the failure to Layer 2, keeps trying to reopen the device every 3 seconds, and resumes by itself |
 | Forwarding | When Layer 2's planner puts the fall model or speech-to-text on a different laptop, the capture job forwards the video or audio there through Layer 2 |
 | Compression | On the same laptop, frames are handed over as captured. When video is forwarded to another laptop, each frame is sent as a JPEG, because uncompressed video at this size is about 14 MB per second. Audio is sent as captured |
 | Video for live view | The capture job also provides the local video feed that Layer 1's live-view sender reads |
@@ -69,11 +96,11 @@ resident's iPhone ──▶ Layer 1 bridge ──▶ Layer 2 coordinator ──�
 
 ## Contracts with the other layers
 
-Proposals for each layer's owner to agree.
+Five files in `contracts/` are agreed: `worker.json` (its `camera`, `mic` and `frame_feed_port` fields), `job.json`, `frame-feed.json`, `watch-data.json` and `watch-reading.json`. Layer 3's code follows the first four; nothing in Layer 3 writes `watch-reading.json` yet. Where this section and a contract file differ, the file wins. The rest is still a proposal for each layer's owner to agree.
 
 **Layer 3 to Layer 2.** Each Layer 3 job is a folder with its script and a short description file (name, start command, kind, memory needed, sensor needed), as in the Layer 2 doc. The capture job reads which camera and mic to open from the `camera` and `mic` fields of the laptop's `worker.json`; a `null` field means there is none or the resident declined it. Device state (up, down, declined) is reported in the job's state, which Layer 2 includes in its 2-second status.
 
-**Layer 3 to Layer 4.** Layer 4 receives each feed through Layer 2's `feed(name)` call, wherever its job is running.
+**Layer 3 to Layer 4.** Layer 4 receives each feed through Layer 2's `feed(name)` call, wherever its job is running. As built, `feed()` carries `camera` and `mic` on the laptop holding the webcam (`contracts/frame-feed.json`). Watch readings do not go through `feed()`: each new reading is to be passed on as `contracts/watch-reading.json` with `layer2.pass_on("watch-readings", reading)`, which Layer 2 has not built yet.
 
 | Feed | Each item carries |
 |---|---|
@@ -89,15 +116,13 @@ Watch readings:
 | `sleep` | `night_of`, `asleep_minutes`, `bedtime_at`, `wake_at`, `interruptions` |
 | `steps` | `measured_at`, `steps_today` |
 
-**Layer 3 to Layer 1.** The local video feed on the camera laptop. Layer 1's doc proposes it as a WebSocket on `127.0.0.1` port 7460, one JPEG per message, up to 15 frames per second at 640 by 480, encoded only while a client is connected.
+**Layer 3 to Layer 1.** The local video feed on the camera laptop. Layer 1's doc proposes it as a WebSocket on `127.0.0.1` port 7460, one JPEG per message, up to 15 frames per second at 640 by 480, encoded only while a client is connected. As built, it is the `/live` path of the capture job's server, on the laptop's `frame_feed_port` (`contracts/frame-feed.json`).
 
-**Layer 1 to Layer 3.** Watch readings from the app, carried by Layer 1's bridge and Layer 2's coordinator. The Layer 1 doc defines this as `POST /v1/watch-data`, with the same fields as the table above. Every time must carry a time zone.
+**Layer 1 to Layer 3.** Watch readings from the app, carried by Layer 1's bridge and Layer 2's coordinator. The Layer 1 doc defines this as `POST /v1/watch-data`, with the same fields as the table above. Every time must carry a time zone. The example file is `contracts/watch-data.json`, and a Layer 3 job gets each batch from `layer2.receive("watch-data")`.
 
 ## Proposed, not yet confirmed
 
-1. **Timestamps.** Frames and audio use the capturing laptop's clock. Watch readings keep the time the watch measured them.
-2. **Audio chunk length:** half a second.
-3. **Retry interval** after a device failure: 3 seconds.
+Nothing is waiting here. Timestamps, the audio chunk length, the retry interval and recognising a repeat were settled on Nov 15 (`CLAUDE.md` section 2) and are in the "Decided" table.
 
 ## Risks
 
@@ -135,4 +160,4 @@ Watch readings:
 ## Open questions
 
 1. Whether the default video and audio formats suit the fall model and speech-to-text model, once Layer 4 chooses them.
-2. How the j5create webcam and its mic are named on Mac and on Windows, for the `camera` and `mic` fields in `worker.json`.
+2. How the j5create webcam and its mic are named on Windows, for the `camera` and `mic` fields in `worker.json`. On the demo Mac the webcam is `j5 WebCam JVCU100` and its mic is `Audio Streaming`.
