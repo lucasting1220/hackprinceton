@@ -14,8 +14,14 @@ for all clients, and a client that falls behind skips to the newest. Nothing is 
 no sample or pixel is logged. SIGTERM stops it within a few seconds.
 
     uv run --project layer3 python -m layer3.capture_job
+
+It has two more modes, for Layer 1's setup page, which print one JSON object and end:
+
+    ... capture_job list --json                     contracts/device-list.json
+    ... capture_job check --config <worker.json> --json   contracts/device-check.json
 """
 
+import argparse
 import asyncio
 import json
 import logging
@@ -23,7 +29,7 @@ import os
 import signal
 import sys
 import threading
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from functools import partial
@@ -33,8 +39,9 @@ import cv2
 from websockets.asyncio.server import ServerConnection, serve
 from websockets.exceptions import ConnectionClosed
 
-from layer3 import settings
+from layer3 import devices, settings
 from layer3.camera import CaptureError, Frame, frames
+from layer3.device_check import check_camera, check_mic, device_check
 from layer3.mic import AudioChunk, MicError, chunks
 from layer3.worker_config import ConfigError, load_camera, load_mic
 
@@ -42,6 +49,7 @@ logger = logging.getLogger(__name__)
 
 EXIT_OK = 0
 EXIT_BAD_CONFIG = 2
+EXIT_DEVICE_FAILED = 4
 _EPOCH = datetime(1970, 1, 1, tzinfo=UTC)
 
 
@@ -235,8 +243,47 @@ async def serve_feeds(
             thread.join(settings.FRAME_READ_TIMEOUT_SECONDS)
 
 
-def main() -> int:
+def _modes() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="python -m layer3.capture_job",
+        description="With no mode, the capture job. The modes are for Layer 1's setup page.",
+    )
+    modes = parser.add_subparsers(dest="mode", required=True)
+    listing = modes.add_parser("list", help="list the cameras and mics (device-list.json)")
+    listing.add_argument("--json", action="store_true", required=True)
+    check = modes.add_parser("check", help="check the named camera and mic (device-check.json)")
+    check.add_argument("--config", type=Path, required=True, help="the laptop's worker.json")
+    check.add_argument("--json", action="store_true", required=True)
+    return parser
+
+
+def _print(output: dict[str, object]) -> None:
+    sys.stdout.write(json.dumps(output) + "\n")
+    sys.stdout.flush()
+
+
+def run_mode(arguments: Sequence[str]) -> int:
+    """`list` or `check`: print one JSON object on standard output. Bad arguments exit with 2."""
+    chosen = _modes().parse_args(arguments)
+    if chosen.mode == "list":
+        listed = devices.list_names()
+        kinds = devices.read_kinds(listed.problems)
+        _print(devices.device_list(listed, kinds, datetime.now(UTC)))
+        return EXIT_OK
+    try:
+        camera_name, mic_name = load_camera(chosen.config), load_mic(chosen.config)
+    except ConfigError as error:
+        logger.error("L3 device check: %s", error)
+        return EXIT_BAD_CONFIG
+    result = device_check(lambda: check_camera(camera_name), lambda: check_mic(mic_name))
+    _print(result)
+    return EXIT_OK if result["ok"] else EXIT_DEVICE_FAILED
+
+
+def main(arguments: Sequence[str] = ()) -> int:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+    if arguments:
+        return run_mode(arguments)
     config = os.environ.get("LAYER2_WORKER_CONFIG")
     if not config:
         logger.error("L3 capture: LAYER2_WORKER_CONFIG is not set; start me through Layer 2")
@@ -266,4 +313,4 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(main(sys.argv[1:]))

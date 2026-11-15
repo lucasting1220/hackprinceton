@@ -94,6 +94,10 @@ class MicOpenFailed(MicError):
     """The mic failed while opening, or did not open in time."""
 
 
+class MicNoFirstChunk(MicOpenFailed):
+    """The mic opened but delivered no first chunk in time."""
+
+
 class MicReadFailed(MicError):
     """Reading a chunk from the mic raised an error."""
 
@@ -115,10 +119,14 @@ def list_mics() -> list[ListedMic]:
     interface = _host_interface()
     import sounddevice
 
-    hosts = sounddevice.query_hostapis()
+    try:
+        hosts = sounddevice.query_hostapis()
+        devices = sounddevice.query_devices()
+    except sounddevice.PortAudioError as error:
+        raise MicNotFound(f"the audio system could not list its mics: {error}") from error
     return [
         ListedMic(device["name"], index, float(device["default_samplerate"]))
-        for index, device in enumerate(sounddevice.query_devices())
+        for index, device in enumerate(devices)
         if device["max_input_channels"] > 0 and hosts[device["hostapi"]]["name"] == interface
     ]
 
@@ -298,7 +306,7 @@ class _Reader:
             return self._next(timeout)
         except queue.Empty:
             self._time_limit_ran_out = True
-            raise MicOpenFailed(
+            raise MicNoFirstChunk(
                 f"the mic opened but delivered no first chunk within {open_timeout:g} seconds"
             ) from None
 

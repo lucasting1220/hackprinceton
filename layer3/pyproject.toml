@@ -8,6 +8,7 @@ dependencies = [
     "layer2",
     "numpy>=2.0,<3",
     "opencv-python-headless>=5.0,<6",
+    "pyobjc-framework-AVFoundation>=13,<14; sys_platform == 'darwin'",
     "sounddevice>=0.5,<0.6",
     "websockets>=14",
 ]

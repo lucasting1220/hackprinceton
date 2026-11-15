@@ -231,6 +231,18 @@ def test_listing_mics_on_a_system_with_no_host_interface_set_is_mic_not_found(
         mic.list_mics()
 
 
+def test_an_audio_system_that_cannot_list_its_devices_is_mic_not_found(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def broken() -> object:
+        raise sounddevice.PortAudioError("Error querying device -1")
+
+    monkeypatch.setattr(sounddevice, "query_hostapis", broken)
+
+    with pytest.raises(MicNotFound, match="could not list its mics: Error querying device -1"):
+        mic.list_mics()
+
+
 def test_listing_that_blocks_is_mic_open_failed_and_the_mic_is_never_opened() -> None:
     gate = threading.Event()
     opened: list[ListedMic] = []
