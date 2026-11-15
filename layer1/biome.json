@@ -1,5 +1,6 @@
 {
   "$schema": "./node_modules/@biomejs/biome/configuration_schema.json",
+  "overrides": [{ "includes": ["contracts/vectors.json"], "formatter": { "enabled": false } }],
   "vcs": { "enabled": true, "clientKind": "git", "useIgnoreFile": true, "root": ".." },
   "files": { "ignoreUnknown": true, "includes": ["**", "!package-lock.json", "!.plans"] },
   "formatter": { "enabled": true, "indentStyle": "space", "indentWidth": 2, "lineWidth": 100 },
