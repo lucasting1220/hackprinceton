@@ -1,6 +1,6 @@
 """Types for the parts of MediaPipe that Layer 4 uses. The library ships none of its own.
 
-tests/test_mediapipe_stubs.py checks these files against the installed library with
+tests/test_library_stubs.py checks these files against the installed library with
 mypy.stubtest.
 """
 

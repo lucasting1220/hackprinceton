@@ -118,3 +118,21 @@ POSE_MODEL_SHA256 = "4eaa5eb7a98365221087693fcc286334cf0858e2eb6e15b506aa4a7ecdc
 POSE_MODEL_DOWNLOAD_TIMEOUT_S = 60.0
 FALL_HEALTH_CHECK_S = 10.0
 FALL_MODEL_RETRY_S = 30.0
+
+# Speech-to-text (the speech_to_text job). Mic chunks are 16 kHz mono (contracts/frame-feed.json).
+# A chunk is speech when the voice detector's score reaches the threshold. An utterance ends after
+# the silence end or at the longest utterance. The transcriber waits on at most the queue size of
+# utterances; when it falls behind, the oldest is dropped. No mic chunk for the detection gap means
+# speech-to-text has stopped; that is checked every STT_HEALTH_CHECK_S, and a model that cannot
+# open is retried every STT_MODEL_RETRY_S.
+MIC_SAMPLE_RATE = 16000
+STT_MODEL = "base.en"
+STT_COMPUTE_TYPE = "int8"
+STT_BEAM_SIZE = 1
+STT_VAD_THRESHOLD = 0.5
+STT_SILENCE_END = timedelta(seconds=1)
+STT_LONGEST_UTTERANCE = timedelta(seconds=10)
+STT_QUEUE_SIZE = 4
+STT_DETECTION_GAP = timedelta(seconds=5)
+STT_HEALTH_CHECK_S = 10.0
+STT_MODEL_RETRY_S = 30.0

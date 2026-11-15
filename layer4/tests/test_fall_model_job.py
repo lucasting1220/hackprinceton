@@ -12,16 +12,24 @@ from fakes import FakeEventLog, FakePhone
 
 from layer2.contracts import JobDescription
 from layer2.job_client import FeedItem
-from layer4.fall import Activity, CameraFrame, FallDetector, FallModel, FallModelError, FallReading
+from layer4.fall import (
+    WHAT_STOPPED,
+    Activity,
+    CameraFrame,
+    FallDetector,
+    FallModel,
+    FallModelError,
+    FallReading,
+)
 from layer4.jobs.fall_model import (
     FallJob,
-    StopReporter,
     decode_frame,
     ensure_model,
     main,
     open_model,
     run_frames,
 )
+from layer4.jobs.stop_reporter import StopReporter
 from layer4.settings import RuleThresholds
 from layer4.upper_tier import UpperTier
 
@@ -65,7 +73,12 @@ def build(
     log, phone = FakeEventLog(), FakePhone()
     upper = UpperTier(RuleThresholds(), log, phone)
     detector = FallDetector(ScriptedModel(confidences), clock=clock)
-    return FallJob(detector, upper, StopReporter(upper), started_at=T0), log, phone, detector
+    return (
+        FallJob(detector, upper, StopReporter(upper, WHAT_STOPPED), started_at=T0),
+        log,
+        phone,
+        detector,
+    )
 
 
 def feed(job: FallJob, clock: Clock, offsets_ms: list[int]) -> None:
@@ -138,7 +151,7 @@ def test_after_frames_come_back_a_new_stop_alerts_again() -> None:
 
 def test_a_model_that_cannot_open_is_reported_and_retried() -> None:
     log, phone = FakeEventLog(), FakePhone()
-    reporter = StopReporter(UpperTier(RuleThresholds(), log, phone))
+    reporter = StopReporter(UpperTier(RuleThresholds(), log, phone), WHAT_STOPPED)
     attempts: list[Path] = []
     model = ScriptedModel(iter([]))
 
