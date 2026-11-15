@@ -212,7 +212,7 @@ async def _receive(
             registry.status(node_id, socket, message)
             if not planned:
                 planned = True  # its memory is known now, so the plan can use this laptop
-                placement.replan(registry.connected(), registry.known())
+                placement.request_replan(lambda: (registry.connected(), registry.known()))
             for order in placement.orders(node_id, registry.job_reports()):
                 log.info("L2 coordinator: %s job %s on %s", order.type, order.job, node_id)
                 await socket.send_text(order.model_dump_json())
