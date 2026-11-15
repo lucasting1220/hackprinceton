@@ -2,16 +2,19 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 LAYER_DIRECTORY = Path(__file__).resolve().parents[1]
 
 
-def test_the_stubs_match_the_installed_mediapipe() -> None:
+@pytest.mark.parametrize("library", ["mediapipe", "faster_whisper"])
+def test_the_stubs_match_the_installed_library(library: str) -> None:
     checked = subprocess.run(
         [
             sys.executable,
             "-m",
             "mypy.stubtest",
-            "mediapipe",
+            library,
             "--ignore-missing-stub",
             "--mypy-config-file",
             str(LAYER_DIRECTORY / "pyproject.toml"),

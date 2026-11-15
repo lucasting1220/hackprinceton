@@ -1,3 +1,5 @@
 # Pose model files the fall_model job downloads; never committed.
 *.task
 *.task.part
+# The Whisper model files the speech_to_text job downloads; never committed.
+jobs/*/models/

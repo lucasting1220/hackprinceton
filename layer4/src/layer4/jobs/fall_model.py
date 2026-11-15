@@ -27,9 +27,9 @@ from numpy.typing import NDArray
 from layer2.job_client import FeedItem, Layer2, Layer2Error
 from layer4 import settings
 from layer4.fall import WHAT_STOPPED, FallDetector, FallModel, FallModelError
+from layer4.jobs.stop_reporter import StopReporter
 from layer4.layer2_ports import Layer2EventLog, Layer2Phone
 from layer4.mediapipe_fall import open_mediapipe_fall_model
-from layer4.signals import MonitoringSignal
 from layer4.upper_tier import UpperTier
 
 logger = logging.getLogger(__name__)
@@ -87,24 +87,6 @@ def ensure_model(
 
 def _now() -> datetime:
     return datetime.now(UTC)
-
-
-class StopReporter:
-    """Hands "fall detection stopped" to the rules until an alert for it has gone out."""
-
-    def __init__(self, upper: UpperTier) -> None:
-        self._upper = upper
-        self._alerted = False
-
-    def stopped(self, since: datetime, now: datetime) -> None:
-        if self._alerted:
-            return
-        signal = MonitoringSignal(what_stopped=WHAT_STOPPED, stopped_at=since, checked_at=now)
-        handled = self._upper.handle(signal)
-        self._alerted = handled.alert is not None and handled.alert_sent
-
-    def running(self) -> None:
-        self._alerted = False
 
 
 class FallJob:
@@ -197,7 +179,7 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     started_at = _now()
     upper = UpperTier(settings.RuleThresholds(), Layer2EventLog(client), Layer2Phone(client))
-    reporter = StopReporter(upper)
+    reporter = StopReporter(upper, WHAT_STOPPED)
     model = open_model(args.model, reporter, started_at)
     job = FallJob(FallDetector(model), upper, reporter, started_at)
     threading.Thread(
