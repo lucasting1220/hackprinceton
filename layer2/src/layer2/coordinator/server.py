@@ -6,7 +6,7 @@ and `stop` orders that worker needs (coordinator/plan.py). Jobs reach the event 
 their worker with `log_append` and `log_read`, and read the home's state with `state_read`,
 each answered with a `reply`. Dashboard app
 (127.0.0.1:dashboard_port): the dashboard page, GET /api/state (the
-Layer 1 contract) and GET /api/hardware (Layer 2 only).
+Layer 1 contract) and GET /api/hardware (Layer 2 only: specs and load, for the page).
 Neither ever logs a token, a whole `hello` or raw text a client chose.
 """
 
