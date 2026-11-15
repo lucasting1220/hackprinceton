@@ -5,11 +5,15 @@ description = "Debbie Layer 3: raw data. Camera and mic capture, and receiving w
 requires-python = "==3.12.*"
 dependencies = [
     "cv2-enumerate-cameras>=1.4,<2",
+    "layer2",
     "numpy>=2.0,<3",
     "opencv-python-headless>=5.0,<6",
     "sounddevice>=0.5,<0.6",
     "websockets>=14",
 ]
+
+[tool.uv.sources]
+layer2 = { path = "../layer2", editable = true }
 
 [dependency-groups]
 dev = [
