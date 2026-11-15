@@ -174,3 +174,28 @@ Added Nov 15 from Layer 1's ask T6. The setup page's Check sensors step: the dev
 - **`ok`** is `true` when each of `camera` and `mic` is `ok` or `none`.
 - **`check` exit codes:** 0 when `ok` is `true`, 4 when it is `false`, 2 when the config file cannot be read (nothing is printed on standard output then, and standard error says why). It prints within 15 seconds; a caller allows 20 before giving up.
 - **Times** are ISO 8601 in UTC, written with `Z`.
+
+## Layer 1 and Layer 4: phone requests, replies and live status
+
+Added Nov 15 from what Layer 1's bridge already sends and accepts (Layer 1 doc "Handoff to Layer 4", `layer1/contracts/phone-hub.md` §3, `layer1/bridge/src/handoff-intake.ts` and `phone-handoff.ts`). Layer 2's coordinator carries all three unchanged.
+
+| File | Written by | Read by | What it is |
+|---|---|---|---|
+| `phone-request.json` | Layer 1 bridge | Layer 4's `health_check` job | A caregiver's request: a question (`ask`) or a silent re-check (`check_now`) |
+| `reply.json` | Layer 4 | Layer 1 bridge | Layer 4's answer to one `ask` |
+| `live-status.json` | Layer 4 | Layer 1 bridge | The latest activity and health readings, for the care screen |
+
+### Rules that go with these files
+
+- **Paths:** the bridge posts a request to the coordinator at `POST /v1/requests` on `client_port`; Layer 4 takes it with `layer2.receive("requests")` (the first job to call it takes the kind; 503 to the bridge when none does). Layer 4 sends `layer2.to_phone("replies", reply)` and `layer2.to_phone("status", status)`, which Layer 2 posts unchanged to the bridge at `POST /v1/replies` and `POST /v1/status`.
+- **Request:** `request_id` (an ID, at most 64 of `A-Za-z0-9_.-`), `device_id` (the asking phone), `kind` `ask` or `check_now`, and `text` (at most 1,000 characters; at least one that is not a space for `ask`; may be `""` for `check_now`). `schema_version` and `type` are optional in version 1: the bridge does not send them today.
+- **`check_now`** is silent: Layer 4 sends a fresh live status at once and no reply. Nothing is said in the home.
+- **Reply:** only for `ask`. `request_id` from the request, `title` (1 to 200 characters) and `body` (1 to 4,000). The bridge seals it for the asking phone alone and refuses a `request_id` it has not seen in the last hour. The app does not show replies yet.
+- **Live status:** latest-only; each one replaces the last on the phones. `activity`, `heart_rate`, `sleep` and `steps` are each an object or `null`, and each object carries the time its reading was taken so the app can show its age. Layer 4 sends one on every new watch reading and on every `check_now`.
+  - `activity`: `{state, at}`, `state` one of `walking`, `sitting`, `lying_down`, `not_in_view`. `null` in version 1 until the fall model's activity reaches the job that sends live status.
+  - `heart_rate`: `{bpm, at, trend}`, `bpm` a whole number. `trend` is `rising`, `falling` or `steady` against the reading before it (`steady` within 5 bpm), or `null` with only one reading. **Layer 1 to confirm** these are the values the app reads.
+  - `sleep`: the latest sleep record, with the fields of `watch-reading.json`'s `sleep`.
+  - `steps`: `{steps_today, at}`.
+  - `no_heart_data`: `true` when no heart-rate reading has arrived in the last 30 minutes, or none ever.
+- **Times** are ISO 8601 in UTC with `Z`. `type` and `schema_version` are allowed in replies and live status, and the bridge does not pass them on.
+- **Privacy:** a request's text, a reply's body and readings are never logged by Layer 2 or Layer 4.

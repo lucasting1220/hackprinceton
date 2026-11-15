@@ -1,0 +1,8 @@
+{
+  "schema_version": 1,
+  "type": "request",
+  "request_id": "req-7c1e2a",
+  "device_id": "device-uuid",
+  "kind": "check_now",
+  "text": ""
+}

@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "type": "live_status",
+  "activity": null,
+  "heart_rate": {
+    "bpm": 72,
+    "at": "2026-11-14T03:12:45Z",
+    "trend": "steady"
+  },
+  "sleep": {
+    "night_of": "2026-11-13",
+    "asleep_minutes": 412,
+    "bedtime_at": "2026-11-14T03:40:00Z",
+    "wake_at": "2026-11-14T11:05:00Z",
+    "interruptions": 2
+  },
+  "steps": {
+    "steps_today": 230,
+    "at": "2026-11-14T11:20:00Z"
+  },
+  "no_heart_data": false
+}
