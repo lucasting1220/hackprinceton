@@ -99,6 +99,7 @@ svg.dots { width: 100%; height: 64px; display: block; margin: .3rem 0 .2rem; }
   <div class="brand">Debbie</div>
   <div class="group">Home</div>
   <a href="#overview" id="nav-overview">Overview</a>
+__SETUP_LINK__
   <div class="group">Laptops</div>
   <div id="nav-laptops"></div>
   <div class="grow"></div>
@@ -184,6 +185,9 @@ function icon(kind) {
     "stroke-linecap": "round", "stroke-linejoin": "round", "aria-hidden": "true" });
   if (kind === "home") {
     for (const [x, y] of [[3, 3], [13, 3], [3, 13], [13, 13]]) g.appendChild(svg("rect", { x, y, width: 8, height: 8, rx: 2 }));
+  } else if (kind === "setup") {
+    g.appendChild(svg("circle", { cx: 12, cy: 12, r: 9 }));
+    g.appendChild(svg("path", { d: "M12 8 V16 M8 12 H16" }));
   } else {
     g.appendChild(svg("rect", { x: 4, y: 5, width: 16, height: 11, rx: 1.5 }));
     g.appendChild(svg("path", { d: "M2 19 H22" }));
@@ -344,7 +348,10 @@ function overview(state, hwById, now) {
   for (const laptop of state.laptops) {
     grid.appendChild(laptopSummary(laptop, hwById.get(laptop.node_id), state.jobs.filter((j) => j.node_id === laptop.node_id), now));
   }
-  if (state.laptops.length === 0) grid.appendChild(el("div", "panel muted", "No laptops have joined yet."));
+  if (state.laptops.length === 0) {
+    const hint = document.getElementById("nav-setup") ? " Add one from Set up." : "";
+    grid.appendChild(el("div", "panel muted", "No laptops have joined yet." + hint));
+  }
   const dropped = el("div", "panel");
   dropped.appendChild(el("h2", "", "Work not placed"));
   if (state.dropped.length === 0) dropped.appendChild(el("div", "muted", "Everything is placed."));
@@ -439,6 +446,8 @@ function render() {
   document.getElementById("nav-overview").className = chosen ? "" : "on";
   const home = document.getElementById("nav-overview");
   if (!home.querySelector("svg")) home.prepend(icon("home"));
+  const setup = document.getElementById("nav-setup");
+  if (setup && !setup.querySelector("svg")) setup.prepend(icon("setup"));
   for (const laptop of state.laptops) {
     const a = el("a", laptop === chosen ? "on" : "");
     a.href = "#" + encodeURIComponent(laptop.node_id);

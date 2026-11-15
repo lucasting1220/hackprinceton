@@ -106,7 +106,9 @@ async def _serve(config: CoordinatorConfig) -> int:
     servers = [
         _server(control, "0.0.0.0", config.listen_port),
         _server(
-            create_dashboard_app(registry, placement, events), "127.0.0.1", config.dashboard_port
+            create_dashboard_app(registry, placement, events, config.bridge_url),
+            "127.0.0.1",
+            config.dashboard_port,
         ),
         _server(create_client_app(subscriptions), "127.0.0.1", config.client_port),
     ]

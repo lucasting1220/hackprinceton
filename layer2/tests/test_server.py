@@ -323,3 +323,18 @@ def test_details_show_the_latest_planner_decision(registry: Registry[WebSocket])
         "decided_at": "2026-11-15T02:00:00Z",
         "moved": ["fall_model"],
     }
+
+
+def test_the_sidebar_links_back_to_layer_1s_setup_page(registry: Registry[WebSocket]) -> None:
+    def page(bridge_url: str | None) -> str:
+        app = create_dashboard_app(registry, bridge_url=bridge_url)
+        text: str = TestClient(app, base_url="http://127.0.0.1").get("/").text
+        return text
+
+    linked = page(contract("coordinator.json")["bridge_url"])
+    assert '<a href="http://127.0.0.1:7470/" id="nav-setup">Set up</a>' in linked
+    assert "__SETUP_LINK__" not in linked
+    assert '<a href="http://localhost:7470/"' in page("http://user:pw@localhost:7470/x?y#z")
+    for refused in [None, "javascript:alert(1)", "http://evil.example:7470", "http://127.0.0.1:x"]:
+        shown = page(refused)
+        assert 'id="nav-setup"' not in shown and "__SETUP_LINK__" not in shown
