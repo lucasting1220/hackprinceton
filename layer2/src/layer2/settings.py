@@ -35,3 +35,6 @@ GATEWAY_REPLY_TIMEOUT_S: Final = 10.0
 QUICK_MODEL: Final = "llama3.1:8b"  # open: Layer 1 ask L9 (model tags)
 ASK_TIMEOUT_S: Final = 120.0
 ASK_MAX_PROMPT_CHARS: Final = 32_000
+PLANNER_MODEL: Final = "qwen2.5:3b"  # open: Layer 1 ask L9 (model tags)
+PLANNER_TIMEOUT_S: Final = 20.0
+PLAN_MEMORY_HEADROOM_GB: Final = 1.0

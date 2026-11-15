@@ -32,7 +32,7 @@ from websockets.exceptions import ConnectionClosed
 
 from layer2 import settings
 from layer2.contracts import LogAppend, LogRead, Reply, StateRead
-from layer2.worker.models import ModelError, generate
+from layer2.ollama import ModelError, generate
 
 log = logging.getLogger(__name__)
 
