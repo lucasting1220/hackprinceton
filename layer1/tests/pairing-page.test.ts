@@ -15,6 +15,9 @@ import { freePort, makeTempDir, STUB } from "./coordinator-fixtures.ts";
 import { FakePhone } from "./fake-phone.ts";
 import { pageClient } from "./page-client.ts";
 
+/** The QR code's own SVG; the sidebar's icons are SVGs too. */
+const QR_SVG = `<svg width="${settings.QR_DISPLAY_PX}"`;
+
 /** The fields of the network side's JSON replies that these tests read. */
 interface NetworkReply {
   readonly bundle?: Envelope;
@@ -119,7 +122,7 @@ test("the pairing states render, from the QR code to paired, with no secret as t
   assert.deepEqual([started.statusCode, started.headers.location], [303, "/pairing"]);
   const showing = (await s.get("/pairing")).page;
   const qr = s.qr();
-  assert.ok(showing.includes("<svg") && reloads(showing), showing);
+  assert.ok(showing.includes(QR_SVG) && reloads(showing), showing);
   assert.ok(showing.includes(`Phones reach this laptop at 127.0.0.1:${port}.`));
   assert.match(showing, /choose Allow/);
   assert.ok(!showing.includes(qr.secret), "the QR secret is on the page as text");
@@ -169,7 +172,7 @@ test("the pairing states render, from the QR code to paired, with no secret as t
   }
   // Another code can be shown once the phone has its keys.
   assert.equal((await s.post("/pairing/start")).statusCode, 303);
-  assert.ok((await s.get("/pairing")).page.includes("<svg"));
+  assert.ok((await s.get("/pairing")).page.includes(QR_SVG));
 });
 
 test("Cancel, Remove and a resident's pairing", async (t) => {
@@ -242,7 +245,7 @@ test("why pairing is unavailable: no home, no network, a port in use, an unreada
   await once(blocker, "close");
   await busy.post("/pairing/start"); // Pair a phone tries the port again
   assert.equal(busy.access()?.state().on, true);
-  assert.ok((await busy.get("/pairing")).page.includes("<svg"));
+  assert.ok((await busy.get("/pairing")).page.includes(QR_SVG));
 
   const broken = await serve(t);
   const phonesFile = path.join(broken.stateDir, settings.STATE_NAMES.phones);

@@ -10,6 +10,9 @@ import { freePort, makeTempDir, STUB, waitFor } from "./coordinator-fixtures.ts"
 import { FakePhone, FETCH_FIELDS, phoneWrapper } from "./fake-phone.ts";
 import { pageClient } from "./page-client.ts";
 
+/** The QR code's own SVG; the sidebar's icons are SVGs too. */
+const QR_SVG = `<svg width="${settings.QR_DISPLAY_PX}"`;
+
 /** The fields of the network side's JSON replies that these tests read. */
 interface NetworkReply {
   readonly bundle?: Envelope;
@@ -86,7 +89,7 @@ test("a phone pairs through both sides, stays paired across a restart, and Remov
   const home = await loadHome(stateDir);
   assert.ok(home !== undefined);
   assert.equal((await page.post("/pairing/start")).statusCode, 303);
-  assert.ok((await page.get("/pairing")).page.includes("<svg"));
+  assert.ok((await page.get("/pairing")).page.includes(QR_SVG));
   const state = first.phones()?.state();
   assert.ok(state?.on === true);
   const qr = state.pairing.qr(); // what the phone scans off the page
@@ -138,7 +141,11 @@ test("a phone pairs through both sides, stays paired across a restart, and Remov
   const secondPage = pageClient(second.url);
   assert.match((await secondPage.get("/")).page, /Caregiver&#39;s iPhone, caregiver, paired/);
   const devices = (await secondPage.get("/devices")).page;
-  assert.match(devices, /<a href="\/devices" class="on">/, "the Devices tab isn't the one shown");
+  assert.match(
+    devices,
+    /<a href="\/devices" id="nav-devices" class="on">/,
+    "the Devices tab isn't the one shown",
+  );
   assert.match(devices, /<div>Caregiver&#39;s iPhone<\/div><div class="muted">caregiver, paired /);
   assert.match(devices, /1 phone and 0 laptops connected/);
   const removed = await secondPage.post("/phones/remove", { device_id: deviceId });

@@ -4,7 +4,7 @@ import { type IncomingMessage, request } from "node:http";
 import path from "node:path";
 import { text } from "node:stream/consumers";
 import { type TestContext, test } from "node:test";
-import { createHome, loadHome } from "../bridge/src/home.ts";
+import { addAcceptedWorker, createHome, loadHome } from "../bridge/src/home.ts";
 import { readJsonFile } from "../bridge/src/json-file.ts";
 import { browserCommand, openInBrowser, startSetupServer } from "../bridge/src/setup-server.ts";
 import * as settings from "../bridge/src/settings.ts";
@@ -40,7 +40,7 @@ async function serve(t: TestContext, stub?: string) {
     });
   const token = async () => /name="token" value="([^"]+)"/.exec((await send("GET", "/")).page)?.[1];
   const post = (sent = "", headers = {}) => send("POST", "/home", headers, `token=${sent}`);
-  return { server, stateDir, dashboard, lines, send, token, post };
+  return { server, stateDir, dashboard, port, lines, send, token, post };
 }
 
 test("answers on 127.0.0.1 only for its own Host, and a POST only from its page", async (t) => {
@@ -105,13 +105,19 @@ test("every page loads the stylesheet the bridge serves under the page's own CSP
     welcome.includes(link) && !/<style|style="/.test(welcome),
     "an inline style or no link",
   );
-  assert.match(welcome, /<nav>.*<a href="\/" class="on">/s, "no sidebar");
-  assert.ok(!welcome.includes("Dashboard</span>"), "a dashboard link before there is a home");
+  assert.match(welcome, /<nav data-active="setup">.*<a href="\/" id="nav-setup" class="on">/s);
+  assert.ok(!welcome.includes('id="nav-overview"'), "a dashboard link before there is a home");
+  assert.ok(!welcome.includes('<div class="group">Laptops</div>'), "laptops before a home");
   const created = (await s.post(await s.token())).page;
-  const sidebar = `<a href="http://home.debbie.health:${s.dashboard}/">`;
+  const sidebar = `<a href="http://127.0.0.1:${s.dashboard}/#overview" id="nav-overview">`;
   assert.ok(
     created.includes(link) && created.includes(sidebar),
     "no sidebar link to the dashboard",
+  );
+  const byName = (await s.send("GET", "/", { host: `home.debbie.health:${s.port}` })).page;
+  assert.ok(
+    byName.includes(`<a href="http://home.debbie.health:${s.dashboard}/#overview"`),
+    "the dashboard link left the host name the page was opened with",
   );
   assert.ok(created.includes('<section class="panel"><h2>Phones</h2>'), "Phones isn't a panel");
   assert.ok((await s.send("GET", "/no-such-page")).page.includes(link), "the 404 page is unstyled");
@@ -129,14 +135,40 @@ test("the Devices tab says what is connected, before and after a home exists", a
   assert.equal(before.statusCode, 200);
   assert.match(
     before.page,
-    /<a href="\/"><svg.*<a href="\/devices" class="on">/s,
+    /<a href="\/" id="nav-setup"><svg.*<a href="\/devices" id="nav-devices" class="on">/s,
     "Devices isn't shown",
   );
   assert.match(before.page, /<h2>No devices<\/h2>/);
-  assert.match((await s.send("GET", "/")).page, /<a href="\/" class="on">/, "Set up isn't shown");
+  assert.match(
+    (await s.send("GET", "/")).page,
+    /<a href="\/" id="nav-setup" class="on">/,
+    "Set up isn't shown",
+  );
   await s.post(await s.token()); // no network side in this server, so nothing can connect
   const after = (await s.send("GET", "/devices")).page;
   assert.match(after, /No device can connect: the network side isn&#39;t running\./);
+});
+
+test("the home laptop's sidebar lists the laptops that joined it, by name", async (t) => {
+  const s = await serve(t);
+  await s.post(await s.token());
+  const home = await loadHome(s.stateDir);
+  assert.ok(home !== undefined);
+  const hash = (n: number) => String(n).repeat(64);
+  await addAcceptedWorker(home, { node_id: "n-2", display_name: "Kitchen", token_sha256: hash(2) });
+  await addAcceptedWorker(home, { node_id: "n-1", display_name: "Den", token_sha256: hash(1) });
+  for (const target of ["/", "/devices"]) {
+    const shown = (await s.send("GET", target)).page;
+    const dashboard = `http://127.0.0.1:${s.dashboard}`;
+    const den = shown.indexOf(`<a href="${dashboard}/#n-1">`);
+    const kitchen = shown.indexOf(`<a href="${dashboard}/#n-2">`);
+    assert.ok(den > shown.indexOf(">Laptops</div>") && kitchen > den, target);
+    assert.ok(!shown.includes(hash(1)) && !shown.includes(hash(2)), "a token hash is on the page");
+  }
+  await writeFile(home.acceptedWorkersFile, "{", "utf8");
+  const broken = (await s.send("GET", "/")).page;
+  assert.ok(broken.includes('id="nav-overview"') && !broken.includes("/#n-1"), "broken file");
+  assert.ok(s.lines.some((line) => line.startsWith("L1 setup: the sidebar lists no laptops: ")));
 });
 
 test("a POST with the token of an earlier bridge run gets a page that says to reload", async (t) => {
