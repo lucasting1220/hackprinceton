@@ -85,13 +85,31 @@ test("phone requests and watch data keep only the doc's fields and refuse malfor
     assert.equal(parsePhoneRequest("d1", broken), undefined);
   }
   const empty = { heart_rate: [], sleep: [], steps: [] };
-  assert.deepEqual(parseWatchData("d1", empty), { device_id: "d1", ...empty });
+  const posted = { schema_version: 1, type: "watch_data", device_id: "d1", ...empty };
+  assert.deepEqual(parseWatchData("d1", empty), posted);
+  // The device ID is the envelope's; the plaintext can't set it, the type or the version.
+  const claimed = { ...empty, device_id: "other", type: "x", schema_version: 9 };
+  assert.deepEqual(parseWatchData("d1", claimed), posted);
   for (const broken of [
     { sleep: [], steps: [] },
     { ...empty, heart_rate: [{ measured_at: "2026-11-14T03:12:45+01:00", bpm: 70 }] },
     { ...empty, heart_rate: [{ measured_at: "2026-11-14T03:12:45Z", bpm: -1 }] },
     { ...empty, steps: [{ measured_at: "2026-11-14T03:12:45Z", steps_today: 1.5 }] },
     { ...empty, sleep: [{ night_of: "2026-02-30", asleep_minutes: 1, interruptions: 0 }] },
+    { ...empty, heart_rate: [{ measured_at: "1970-01-01T23:59:59Z", bpm: 70 }] },
+    { ...empty, steps: [{ measured_at: "2999-12-31T00:00:01Z", steps_today: 1 }] },
+    {
+      ...empty,
+      sleep: [
+        {
+          night_of: "1970-01-01",
+          asleep_minutes: 1,
+          bedtime_at: "1970-01-02T00:00:00Z",
+          wake_at: "1970-01-02T08:00:00Z",
+          interruptions: 0,
+        },
+      ],
+    },
   ]) {
     assert.equal(parseWatchData("d1", broken), undefined);
   }

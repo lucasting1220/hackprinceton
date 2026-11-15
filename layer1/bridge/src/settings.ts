@@ -369,3 +369,10 @@ export const KEEP_AWAKE_STOP_TIMEOUT_MS = 5_000;
 
 /** The pairing and join QR codes' size on the page, in CSS pixels, small enough to fit a phone camera. */
 export const QR_DISPLAY_PX = 320;
+
+/** The `schema_version` of the watch data the bridge posts (contracts/watch-data.json). */
+export const WATCH_DATA_SCHEMA_VERSION = 1;
+
+/** The range every watch reading's time must fall in (contracts/README.md, what Layer 4 accepts). */
+export const WATCH_READING_EARLIEST_AT = "1970-01-02T00:00:00Z";
+export const WATCH_READING_LATEST_AT = "2999-12-31T00:00:00Z";
