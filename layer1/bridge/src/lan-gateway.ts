@@ -61,7 +61,14 @@ const REFUSED = {
   duplicate: errorReply(409, "duplicate", "This message was already received."),
   unsupportedType: errorReply(400, "unsupported_type", "This path doesn't take this type."),
   notSupported: errorReply(501, "not_supported", "The hub doesn't handle this type yet."),
+  lanOnly: errorReply(400, "lan_only", "This type travels on the home Wi-Fi only."),
 };
+
+/** The route a command came by: the LAN gateway's own path, or the relay link (step 5). */
+export type CommandRoute = "lan" | "relay";
+
+/** Types that never travel through the relay (phone-hub.md §5.5). */
+const LAN_ONLY: ReadonlySet<string> = new Set(["heart_rate", "fetch"]);
 
 /** Commands that a later step builds: 501 until then, on either route (Reconciliation 11). */
 const LATER_COMMANDS: ReadonlySet<string> = new Set(["laptop_approval", "live_view_setting"]);
@@ -157,13 +164,15 @@ export class LanGateway {
   }
 
   /**
-   * A phone → hub command: `unpair` removes the phone, `request` and `watch_data` go to the
-   * coordinator, a handler's type goes to it, and others get 501.
+   * A phone → hub command, by either route: through the relay, `heart_rate` and `fetch` get
+   * lan_only; `unpair` removes the phone, `request` and `watch_data` go to the coordinator, a
+   * handler's type goes to it, and others get 501.
    */
-  async commands(body: unknown): Promise<Reply> {
+  async commands(body: unknown, route: CommandRoute = "lan"): Promise<Reply> {
     const opened = this.openPhoneRequest(body);
     if (!opened.ok) return opened.reply;
     const { type, deviceId } = opened.request;
+    if (route === "relay" && LAN_ONLY.has(type)) return REFUSED.lanOnly;
     if (Object.hasOwn(HANDOFF_TYPES, type)) {
       const phone = () => this.#phones.lookup(deviceId);
       return this.#handoff?.forward(opened.request, phone) ?? COORDINATOR_DOWN;
@@ -174,7 +183,7 @@ export class LanGateway {
     if (type !== "unpair") return REFUSED.unsupportedType;
     await this.#phones.remove(deviceId);
     this.#seen.delete(deviceId);
-    this.#log(`L1 lan-gateway: phone ${deviceId} unpaired itself`);
+    this.#log(`L1 lan-gateway: phone ${deviceId} unpaired itself (${route})`);
     return { status: 202, body: { v: 1, accepted: true } };
   }
 

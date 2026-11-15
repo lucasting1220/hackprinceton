@@ -109,6 +109,8 @@ export interface PairingOptions {
   readonly phones: PhoneSaver;
   /** The clock, in milliseconds since the Unix epoch; tests pass their own. */
   readonly now?: () => number;
+  /** The bundle's relay_url, from relay-credential.json; empty while remote access isn't set up. */
+  readonly relayUrl?: string;
 }
 
 const MESSAGES: Readonly<Record<PairErrorCode, string>> = {
@@ -189,6 +191,8 @@ export class Pairing {
   readonly #secrets: HomeSecrets;
   readonly #phones: PhoneSaver;
   readonly #now: () => number;
+  /** The bundle's relay_url: empty while remote access isn't set up. */
+  readonly relayUrl: string;
   #session: Session | undefined;
 
   constructor(options: PairingOptions) {
@@ -196,6 +200,7 @@ export class Pairing {
     this.#secrets = options.secrets;
     this.#phones = options.phones;
     this.#now = options.now ?? Date.now;
+    this.relayUrl = options.relayUrl ?? "";
   }
 
   /**
@@ -397,7 +402,7 @@ export class Pairing {
       device_id: deviceId,
       role: holder.role,
       device_credential: credential,
-      relay_url: settings.RELAY_URL,
+      relay_url: this.relayUrl,
       ...(holder.role === "caregiver"
         ? { home_key: toBase64url(this.#secrets.homeKey.export()) }
         : {}),

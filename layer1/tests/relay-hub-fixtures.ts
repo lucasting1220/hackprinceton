@@ -21,6 +21,7 @@ import { type TestPhone, type TestRelay, tempDir, testConfig } from "./relay-fix
 const WAIT_MS = 3_000;
 
 export interface HubRelay extends TestRelay {
+  /** The hub socket now running; restart() replaces it. */
   readonly hub: HubSocket;
   readonly hubUrl: string;
   readonly hubCredential: string;
@@ -28,6 +29,8 @@ export interface HubRelay extends TestRelay {
   readonly contacts: string[];
   /** Each onStored call: home and msg_id. */
   readonly stored: Array<readonly [string, string]>;
+  /** Stops the hub socket and the server, then serves again on the same port with the same store. */
+  restart(): Promise<void>;
 }
 
 /** A relay holding one home with a hub credential and `phones`; everything closes with the test. */
@@ -50,33 +53,40 @@ export async function startHubRelay(
   const log = (line: string) => logs.push(line);
   const contacts: string[] = [];
   const stored: Array<readonly [string, string]> = [];
-  const hub = createHubSocket({
-    onContact: (home, atMs) => {
-      contacts.push(home);
-      store.recordContact(home, atMs);
-    },
-    onStored: (home, wrapper) => stored.push([home, wrapper.msg_id]),
-    ...options,
-    store,
-    log,
-  });
-  const server = createPhoneApi({
-    store,
-    config,
-    log,
-    commands: hub,
-    onUnpair: (home, deviceId) => hub.phoneUnpaired(home, deviceId),
-  });
-  server.on("upgrade", (request, socket, head) => hub.handleUpgrade(request, socket, head));
-  server.listen(0, "127.0.0.1");
-  await once(server, "listening");
+  const serve = async (port: number) => {
+    const hub = createHubSocket({
+      onContact: (home, atMs) => {
+        contacts.push(home);
+        store.recordContact(home, atMs);
+      },
+      onStored: (home, wrapper) => stored.push([home, wrapper.msg_id]),
+      ...options,
+      store,
+      log,
+    });
+    const server = createPhoneApi({
+      store,
+      config,
+      log,
+      commands: hub,
+      onUnpair: (home, deviceId) => hub.phoneUnpaired(home, deviceId),
+    });
+    server.on("upgrade", (request, socket, head) => hub.handleUpgrade(request, socket, head));
+    server.listen(port, "127.0.0.1");
+    await once(server, "listening");
+    const stop = async () => {
+      hub.close();
+      server.closeAllConnections();
+      await new Promise((resolve) => server.close(resolve));
+    };
+    return { hub, stop, port: (server.address() as AddressInfo).port };
+  };
+  let running = await serve(0);
+  const { port } = running;
   t.after(async () => {
-    hub.close();
-    server.closeAllConnections();
-    await new Promise((resolve) => server.close(resolve));
+    await running.stop();
     store.close();
   });
-  const { port } = server.address() as AddressInfo;
   return {
     store,
     config,
@@ -84,10 +94,16 @@ export async function startHubRelay(
     hubUrl: `ws://127.0.0.1:${port}${HUB_PATH}`,
     logs,
     homeId,
-    hub,
+    get hub() {
+      return running.hub;
+    },
     hubCredential,
     contacts,
     stored,
+    async restart() {
+      await running.stop();
+      running = await serve(port);
+    },
   };
 }
 

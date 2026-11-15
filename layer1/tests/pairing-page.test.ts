@@ -211,6 +211,16 @@ test("the states a page reload can't reach render too: expired, uncollected, sav
   assert.equal(saving.reload, settings.PAIRING_PAGE_RELOAD_SECONDS);
 });
 
+test("a paired phone is told it reaches home only on Wi-Fi only while there is no relay_url", () => {
+  const phone = { deviceId: "d", name: "Sam", role: "caregiver" } as const;
+  const view = { state: "confirmed", phone, collected: true, collecting: false } as const;
+  const remote = /Remote access isn&#39;t set up yet/;
+  assert.match(pairingBody(view, undefined, "t").body.text, remote);
+  const withRelay = pairingBody(view, undefined, "t", "https://relay.example.com").body.text;
+  assert.doesNotMatch(withRelay, remote);
+  assert.match(withRelay, /Sam is paired as a caregiver\./);
+});
+
 test("why pairing is unavailable: no home, no network, a port in use, an unreadable list", async (t) => {
   const none = await serve(t);
   assert.match((await none.get("/pairing")).page, /isn't available: there is no home yet/);

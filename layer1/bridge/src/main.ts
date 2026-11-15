@@ -5,6 +5,13 @@ import { type HomeAlerts, openHomeAlerts } from "./alert-intake.ts";
 import { type Home, HomeError, loadHome, resolveStateDir } from "./home.ts";
 import { errorMessage, removePath } from "./json-file.ts";
 import { PhoneAccess, type PhoneAccessOptions } from "./phone-access.ts";
+import { readRelayCredential } from "./relay-credential.ts";
+import {
+  RelayLink,
+  type RelayLinkTiming,
+  type RemoteAccess,
+  remoteAccessText,
+} from "./relay-link.ts";
 import {
   browserCommand,
   openInBrowser,
@@ -28,6 +35,8 @@ export interface BridgeOptions
   readonly open?: (url: string) => Promise<void>;
   /** The network side's port and addresses; tests pass port 0 and their own addresses. */
   readonly network?: Omit<PhoneAccessOptions, "log">;
+  /** The relay link's times; tests pass shorter ones. */
+  readonly relayTiming?: Partial<RelayLinkTiming>;
 }
 
 let outputGuarded = false;
@@ -62,16 +71,22 @@ export async function startBridge(options: BridgeOptions) {
   let phones: Promise<PhoneAccess | undefined> | undefined;
   let started: PhoneAccess | undefined;
   let stopping: Promise<void> | undefined;
+  let remote: RemoteAccess = { state: "not_set_up" };
+  let relayLink: RelayLink | undefined;
 
   /**
    * The home-ready hook, after a home loads at start and after Create a home: starts the phone
    * side on the coordinator. Steps 4 and 5 start their outbox and relay link here too.
    */
   async function onHomeReady(home: Home): Promise<void> {
-    const { outbox, handoff } = (await openAlerts(home)) ?? {};
+    const credential = await readRelayCredential(home.stateDir, home.homeId);
+    const relayUrl = credential.state === "ok" ? credential.credential.relayUrl : "";
+    const alertsOpened = await openAlerts(home);
+    const { outbox, handoff } = alertsOpened ?? {};
     const network = {
       ...options.network,
       log,
+      relayUrl,
       ...(outbox === undefined ? {} : { outbox }),
       ...(handoff === undefined ? {} : { handoff }),
     };
@@ -82,6 +97,39 @@ export async function startBridge(options: BridgeOptions) {
     const access = await phones;
     if (stopping !== undefined) await access?.close();
     else started = access;
+    if (stopping === undefined) startRelayLink(credential, alertsOpened, access);
+  }
+
+  /** Step 5: the relay link, when relay-credential.json is usable and the home's parts are up. */
+  function startRelayLink(
+    credential: Awaited<ReturnType<typeof readRelayCredential>>,
+    homeAlerts: HomeAlerts | undefined,
+    access: PhoneAccess | undefined,
+  ): void {
+    if (relayLink !== undefined) return;
+    if (credential.state !== "ok") {
+      remote = credential.state === "none" ? { state: "not_set_up" } : credential;
+      if (credential.state === "unusable") {
+        log(`L1 bridge: remote access is off: ${remoteAccessText(credential)}`);
+      }
+      return;
+    }
+    const parts = access?.relayParts();
+    if (homeAlerts === undefined || parts === undefined) {
+      remote = { state: "stopped" };
+      log("L1 bridge: remote access is off: the phone list or the alerts couldn't start");
+      return;
+    }
+    const { gateway, phones: registry } = parts;
+    relayLink = RelayLink.start({
+      credential: credential.credential,
+      homeKey: homeAlerts.homeKey,
+      phones: registry,
+      outbox: homeAlerts.outbox,
+      commands: (wrapper) => gateway.commands(wrapper, "relay"),
+      log,
+      ...(options.relayTiming === undefined ? {} : { timing: options.relayTiming }),
+    });
   }
 
   /** Step 4: the home key and the outbox, for the alert intake and the LAN gateway's fetch. */
@@ -102,6 +150,7 @@ export async function startBridge(options: BridgeOptions) {
     onHomeReady,
     phoneAccess: () => started,
     homeAlerts: () => alertsReady,
+    remoteAccess: () => remoteAccessText(relayLink?.status() ?? remote),
   });
   const stopFile = path.join(options.stateDir, settings.STATE_NAMES.bridgeStop);
   try {
@@ -115,6 +164,7 @@ export async function startBridge(options: BridgeOptions) {
     clearInterval(stopFilePoll);
     for (const [signal, handler] of signalHandlers) process.off(signal, handler);
     log(`L1 bridge: ${reason}; stopping`);
+    await relayLink?.close();
     await (await phones)?.close().catch((error: unknown) => {
       log(`L1 bridge: could not stop the network side: ${errorMessage(error)}`);
       process.exitCode = 1;
@@ -160,6 +210,8 @@ export async function startBridge(options: BridgeOptions) {
     stopFile,
     /** The phone side, once the home is ready and until the bridge stops. */
     phones: () => started,
+    /** The relay link, while relay-credential.json is usable and the bridge runs (step 5). */
+    relayLink: () => relayLink,
     /** The shutdown a stop signal or the stop file starts; resolves once it is done. */
     stop(reason: string): Promise<void> {
       requestStop(reason);

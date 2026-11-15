@@ -27,6 +27,8 @@ export interface PhoneAccessOptions {
   readonly outbox?: MessageSource;
   /** The handoff to Layer 2's coordinator, for the LAN gateway's `request` and `watch_data`. */
   readonly handoff?: PhoneHandoff;
+  /** The pairing bundle's relay_url, from relay-credential.json; empty without one (step 5). */
+  readonly relayUrl?: string;
 }
 
 /** What the pairing page reads: the parts while the network side runs, or why it doesn't. */
@@ -42,6 +44,9 @@ export type PhoneAccessState =
     }>
   | Readonly<{ on: false; reason: string; retryable: boolean }>;
 
+/** What the relay link uses: the phone list, and the gateway that answers relayed commands. */
+export type RelayParts = Readonly<{ phones: PhoneRegistry; gateway: LanGateway }>;
+
 /** The setup page's words for a port in use (the plan's "Failures and what the person sees"). */
 const portInUse = (port: number) =>
   `port ${port} is in use by another program. Stop it, then press Pair a phone again`;
@@ -55,6 +60,8 @@ export class PhoneAccess {
   #closed = false;
   /** Starts the network side again with the same phone list and pairing session. */
   #retry: (() => Promise<void>) | undefined;
+  /** The phone list and the gateway, for the relay link, even while the network side is off. */
+  #forRelay: RelayParts | undefined;
 
   private constructor(home: Home, options: PhoneAccessOptions, state: PhoneAccessState) {
     this.#home = home;
@@ -85,7 +92,13 @@ export class PhoneAccess {
     let join: HubJoin;
     try {
       const secrets = await readHomeSecrets(home.stateDir);
-      pairing = new Pairing({ home, secrets, phones });
+      const { relayUrl } = options;
+      pairing = new Pairing({
+        home,
+        secrets,
+        phones,
+        ...(relayUrl === undefined ? {} : { relayUrl }),
+      });
       join = new HubJoin({ home, hubPrivateKey: secrets.hubPrivateKey, log });
     } catch (error) {
       if (!(error instanceof HomeError)) throw error;
@@ -115,6 +128,11 @@ export class PhoneAccess {
     await this.#retry?.();
   }
 
+  /** The phone list and the gateway's command switch, for step 5's relay link. */
+  relayParts(): RelayParts | undefined {
+    return this.#forRelay;
+  }
+
   /** Stops the network side. */
   async close(): Promise<void> {
     this.#closed = true;
@@ -135,6 +153,7 @@ export class PhoneAccess {
       ...(outbox === undefined ? {} : { outbox }),
       ...(handoff === undefined ? {} : { handoff }),
     });
+    this.#forRelay = { phones, gateway };
     const link = new LinkHub({ home: this.#home, seen: gateway, log: this.#log });
     const pair = {
       method: "POST",

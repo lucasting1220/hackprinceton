@@ -111,7 +111,13 @@ export class PairingPage {
       const body = html`<p>Phone pairing isn't available: ${why}.</p>${back}`;
       return { status: 200, body: page(TITLE, body) };
     }
-    const { body, reload } = pairingBody(state.pairing.view(), state.pairing.qr(), this.#token);
+    const { pairing } = state;
+    const { body, reload } = pairingBody(
+      pairing.view(),
+      pairing.qr(),
+      this.#token,
+      pairing.relayUrl,
+    );
     return { status: 200, body: page(TITLE, html`${notice}${body}${back}`, reload) };
   }
 
@@ -159,12 +165,14 @@ export class PairingPage {
 
 /**
  * The Pair a phone page's body for the pairing session's `view`, with the QR code while one shows,
- * and how often the page reloads while it waits for the phone.
+ * and how often the page reloads while it waits for the phone. Without `relayUrl` (no credential
+ * file), a paired phone is told it reaches home only on home Wi-Fi.
  */
 export function pairingBody(
   view: PairingView,
   qr: QrPayload | undefined,
   token: string,
+  relayUrl = "",
 ): { body: Html; reload?: number } {
   const again = (label: string) => form("/pairing/start", token, label);
   const reload = settings.PAIRING_PAGE_RELOAD_SECONDS;
@@ -198,7 +206,7 @@ ${form("/pairing/cancel", token, "Cancel")}`;
         const body = html`<p>${name} didn't collect its keys. If it doesn't show as paired, remove it on the home page and pair it again.</p>${again("Pair another phone")}`;
         return { body };
       }
-      const remote = settings.RELAY_URL === "" ? html`<p>${REMOTE_NOT_SET_UP}</p>` : "";
+      const remote = relayUrl === "" ? html`<p>${REMOTE_NOT_SET_UP}</p>` : "";
       const body = html`<p>${name} is paired as ${roleWords(role)}.</p>${remote}${again("Pair another phone")}`;
       return { body };
     }

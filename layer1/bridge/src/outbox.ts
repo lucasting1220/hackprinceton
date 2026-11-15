@@ -10,6 +10,9 @@
  *   append: drop by age and count, and a latest-only type's older message, add
  *           ─▶ write the whole file ─ok─▶ swap in memory ─▶ the seq
  *                                   └─fails─▶ memory unchanged, rejects
+ *
+ * Step 5's relay state per message: none (pending) ─ack─▶ relayed; ─nack invalid or too_large─▶
+ * refused. A marked message stays for the LAN gateway until retention drops it.
  */
 import { randomBytes } from "node:crypto";
 import { rename } from "node:fs/promises";
@@ -24,7 +27,15 @@ import {
 import * as settings from "./settings.ts";
 import { isUtcTime, parseWrapper, utcSeconds, type Wrapper } from "./wire.ts";
 
-export type OutboxEntry = Readonly<{ seq: number; created_at: string; wrapper: Wrapper }>;
+/** A message's relay state: absent while pending, so an outbox from before step 5 loads as is. */
+export type RelayState = "relayed" | "refused";
+
+export type OutboxEntry = Readonly<{
+  seq: number;
+  created_at: string;
+  wrapper: Wrapper;
+  relay?: RelayState;
+}>;
 
 /** A fetch's page (§4.5): `next` is null only while the outbox has never held a message. */
 export type OutboxPage = Readonly<{ messages: readonly Wrapper[]; next: string | null }>;
@@ -71,12 +82,15 @@ function parseState(data: unknown): State | undefined {
   const entries: OutboxEntry[] = [];
   for (const item of messages as unknown[]) {
     if (!isRecord(item)) return undefined;
-    const { seq, created_at: createdAt, wrapper } = item;
+    const { seq, created_at: createdAt, wrapper, relay } = item;
     if (!isSeq(seq) || !isUtcTime(createdAt)) return undefined;
     if (seq <= (entries.at(-1)?.seq ?? 0) || seq >= nextSeq) return undefined;
     const parsed = parseWrapper(wrapper);
     if (!parsed.ok) return undefined;
-    entries.push({ seq, created_at: createdAt, wrapper: parsed.wrapper });
+    const entry = { seq, created_at: createdAt, wrapper: parsed.wrapper };
+    if (relay === undefined) entries.push(entry);
+    else if (relay === "relayed" || relay === "refused") entries.push({ ...entry, relay });
+    else return undefined;
   }
   return { epoch, nextSeq, messages: entries };
 }
@@ -93,6 +107,7 @@ export class Outbox implements MessageSource {
   #tail: Promise<unknown> = Promise.resolve();
   #setAside: string | undefined;
   #unwritable: string | undefined;
+  readonly #added = new Set<() => void>();
 
   private constructor(file: string, state: State, options: OutboxOptions) {
     this.#file = file;
@@ -145,27 +160,78 @@ export class Outbox implements MessageSource {
         (item) => !latestOnly || item.wrapper.type !== wrapper.type,
       );
       const next = { ...kept, nextSeq: seq + 1, messages: [...older, entry] };
-      const saved = this.#kept(next, now);
-      const file = {
-        schema_version: 1,
-        epoch: saved.epoch,
-        next_seq: saved.nextSeq,
-        messages: saved.messages,
-      };
-      try {
-        await updateJsonFile(this.#file, () => file);
-      } catch (error) {
-        if (!(error instanceof JsonFileError)) throw error;
-        this.#unwritable = error.message;
-        this.#log(`L1 outbox: could not save message ${wrapper.msg_id}: ${error.message}`);
-        throw new OutboxError(`the outbox can't be written: ${error.message}`, { cause: error });
-      }
-      this.#state = saved;
-      this.#unwritable = undefined;
+      await this.#save(this.#kept(next, now), `could not save message ${wrapper.msg_id}`);
+      for (const listener of this.#added) listener();
       return seq;
     });
     this.#tail = Promise.allSettled([run]);
     return run;
+  }
+
+  /** Calls `listener` after each append is on disk (step 5's relay link); the result stops it. */
+  onAdded(listener: () => void): () => void {
+    this.#added.add(listener);
+    return () => this.#added.delete(listener);
+  }
+
+  /**
+   * Messages not yet relayed or refused, created at or after `notBefore` (a UTC time) when given,
+   * oldest first, at most `limit`.
+   */
+  pending(limit: number, notBefore?: string): OutboxEntry[] {
+    const from = notBefore === undefined ? Number.NEGATIVE_INFINITY : Date.parse(notBefore);
+    const found: OutboxEntry[] = [];
+    for (const entry of this.#kept(this.#state).messages) {
+      if (found.length >= limit) break;
+      if (entry.relay === undefined && Date.parse(entry.created_at) >= from) found.push(entry);
+    }
+    return found;
+  }
+
+  /** Marks a pending message relayed, on the relay's ack; it stays for the LAN gateway. */
+  markRelayed(msgId: string): Promise<void> {
+    return this.#mark(msgId, "relayed");
+  }
+
+  /** Marks a pending message refused by the relay, so it isn't sent again; the page says so. */
+  markRefused(msgId: string): Promise<void> {
+    return this.#mark(msgId, "refused");
+  }
+
+  /** Sets a pending message's relay state on disk, then in memory; gone or marked, nothing. */
+  #mark(msgId: string, relay: RelayState): Promise<void> {
+    const run = this.#tail.then(async () => {
+      const kept = this.#kept(this.#state);
+      const at = kept.messages.findIndex(
+        (entry) => entry.wrapper.msg_id === msgId && entry.relay === undefined,
+      );
+      const entry = kept.messages[at];
+      if (entry === undefined) return;
+      const messages = kept.messages.with(at, { ...entry, relay });
+      await this.#save({ ...kept, messages }, `could not mark message ${msgId} ${relay}`);
+    });
+    this.#tail = Promise.allSettled([run]);
+    return run;
+  }
+
+  /** Writes `next` as the whole file, then swaps it in; a failed write changes nothing. */
+  async #save(next: State, failure: string): Promise<void> {
+    const file = {
+      schema_version: 1,
+      epoch: next.epoch,
+      next_seq: next.nextSeq,
+      messages: next.messages,
+    };
+    try {
+      await updateJsonFile(this.#file, () => file);
+    } catch (error) {
+      if (!(error instanceof JsonFileError)) throw error;
+      this.#unwritable = error.message;
+      this.#log(`L1 outbox: ${failure}: ${error.message}`);
+      throw new OutboxError(`the outbox can't be written: ${error.message}`, { cause: error });
+    }
+    this.#state = next;
+    this.#unwritable = undefined;
   }
 
   page(after: string | null, limit: number, wanted: (wrapper: Wrapper) => boolean): OutboxPage {
@@ -194,6 +260,12 @@ export class Outbox implements MessageSource {
     const found: string[] = [];
     if (this.#unwritable !== undefined) found.push(`Alerts can't be saved: ${this.#unwritable}`);
     if (this.#setAside !== undefined) found.push(this.#setAside);
+    const refused = this.#kept(this.#state).messages.filter((entry) => entry.relay === "refused");
+    if (refused.length > 0) {
+      found.push(
+        `The relay refused ${refused.length} message(s) as invalid or too large; they reach phones only on home Wi-Fi.`,
+      );
+    }
     return found;
   }
 

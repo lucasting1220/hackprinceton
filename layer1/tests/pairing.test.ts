@@ -19,7 +19,6 @@ import {
   BUNDLE_COLLECTION_MS,
   HOME_NAME,
   PAIRING_CODE_LIFETIME_MS,
-  RELAY_URL,
 } from "../bridge/src/settings.ts";
 import { FakePhone } from "./fake-phone.ts";
 
@@ -50,7 +49,7 @@ interface Fixture {
   readonly clock: { ms: number };
 }
 
-function fixture(): Fixture {
+function fixture(relayUrl?: string): Fixture {
   const { privateKey } = generateKeyPairSync("x25519");
   const hubPublicKey = toBase64url(fromBase64url(privateKey.export({ format: "jwk" }).x, 32));
   const homeKey = createSecretKey(randomBytes(32));
@@ -61,6 +60,7 @@ function fixture(): Fixture {
     secrets: { homeKey, hubPrivateKey: privateKey },
     phones,
     now: () => clock.ms,
+    ...(relayUrl === undefined ? {} : { relayUrl }),
   });
   return { pairing, phones, homeKey, hubPublicKey, clock };
 }
@@ -227,7 +227,7 @@ for (const role of ["caregiver", "resident"] as const) {
     assert.equal(get("home_id"), HOME_ID);
     assert.equal(get("device_id"), result.deviceId);
     assert.equal(get("role"), role);
-    assert.equal(get("relay_url"), RELAY_URL);
+    assert.equal(get("relay_url"), "", "without relay-credential.json, relay_url is empty");
     assert.equal(get("home_name"), HOME_NAME);
     assert.deepEqual(get("lan"), { addrs: [ADDRS[1], ADDRS[0]] });
     const credential = get("device_credential");
@@ -386,4 +386,14 @@ test("once the phone has collected its bundle, a new code can be shown at once",
   assert.deepEqual(f.pairing.start(ADDRS), { ok: false, reason: "collecting" });
   bundleOf(f.pairing.handleRequest(phone.request(), ADDRS[0]));
   assert.equal(f.pairing.start(ADDRS).ok, true);
+});
+
+test("with relay-credential.json, the bundle's relay_url is the credential file's", async () => {
+  const f = fixture("https://relay.example.com");
+  const phone = new FakePhone(started(f));
+  expect(f.pairing.handleRequest(phone.request(), ADDRS[0]), 202);
+  assert.ok((await f.pairing.confirm(pendingId(f))).ok);
+  const bundle = phone.openBundle(bundleOf(f.pairing.handleRequest(phone.request(), ADDRS[0])));
+  assert.equal(Reflect.get(Object(bundle), "relay_url"), "https://relay.example.com");
+  assert.equal(f.pairing.relayUrl, "https://relay.example.com");
 });
