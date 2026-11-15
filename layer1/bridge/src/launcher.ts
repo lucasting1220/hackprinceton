@@ -1,5 +1,6 @@
 import { type ChildProcess, spawn } from "node:child_process";
 import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { connect } from "node:net";
 import path from "node:path";
 import { createInterface } from "node:readline";
 import { setTimeout as sleep } from "node:timers/promises";
@@ -18,7 +19,7 @@ export type CoordinatorProgram = "real" | "stub";
 
 /**
  * Exit code 0 ends in "stopped", 3 in "rejected", and 2 in "bad_config" when the program itself
- * said why; any other end restarts.
+ * said why; any other end restarts. While "starting", a coordinator left running is asked to stop.
  */
 export type CoordinatorState =
   | "stopped"
@@ -38,15 +39,17 @@ export interface CoordinatorStatus {
   pid: number | null;
 }
 
-/** Absolute paths, and coordinator.json's stop_file; tests shorten the times. */
+/** Absolute paths, and coordinator.json's stop_file and dashboard_port; tests shorten the times. */
 export interface LauncherOptions {
   repoRoot: string;
   configFile: string;
   stopFile: string;
+  dashboardPort: number;
   /** Gets the launcher's lines and the coordinator's stderr lines; console.log by default. */
   log?: (line: string) => void;
   stopDeadlineMs?: number;
   restartBackoffMs?: readonly number[];
+  backoffResetMs?: number;
 }
 
 /** What a run printed: whether the program itself spoke, and the line that says why it ended. */
@@ -102,6 +105,7 @@ export class CoordinatorLauncher {
       log: (line) => console.log(line),
       stopDeadlineMs: settings.COORDINATOR_STOP_DEADLINE_MS,
       restartBackoffMs: settings.COORDINATOR_RESTART_BACKOFF_MS,
+      backoffResetMs: settings.COORDINATOR_BACKOFF_RESET_MS,
       ...options,
     };
   }
@@ -112,8 +116,8 @@ export class CoordinatorLauncher {
   }
 
   /**
-   * Unless the coordinator runs or is due to restart: deletes a stale stop file, and starts the
-   * chosen program.
+   * Unless the coordinator runs or is due to restart: asks one that an earlier bridge left running
+   * to stop, deletes a stale stop file, and starts the chosen program.
    */
   start(): Promise<void> {
     return this.#inTurn(() => this.#start());
@@ -138,7 +142,10 @@ export class CoordinatorLauncher {
   async #start(): Promise<void> {
     if (this.#child !== null || this.#state === "restarting") return;
     this.#state = "starting";
+    this.#lastErrorLine = null;
+    this.#crashes = 0;
     try {
+      await this.#stopLeftover();
       rmSync(this.#options.stopFile, { force: true });
       this.#program = chooseProgram(this.#options.repoRoot);
     } catch (error) {
@@ -149,6 +156,36 @@ export class CoordinatorLauncher {
     this.#say(this.#program === "real" ? "starting Layer 2's coordinator" : STARTING_STUB);
     this.#spawn(this.#program);
     await new Promise((resolve) => setImmediate(resolve)); // a failed spawn is reported by then
+  }
+
+  /** A coordinator that an earlier bridge left running keeps the ports; its stop file ends it. */
+  async #stopLeftover(): Promise<void> {
+    const { dashboardPort, stopFile, stopDeadlineMs } = this.#options;
+    const where = `${settings.LOCAL_HOST}:${dashboardPort}`;
+    if (!(await this.#inUse(where, dashboardPort))) return;
+    this.#say(`${where} is in use; asking the coordinator there to stop`);
+    writeFileSync(stopFile, "", { encoding: "utf8" });
+    const deadline = performance.now() + stopDeadlineMs;
+    while (existsSync(stopFile) && performance.now() < deadline) {
+      await sleep(settings.COORDINATOR_STOP_POLL_MS);
+    }
+    if (existsSync(stopFile)) this.#say(`nothing took the stop file within ${stopDeadlineMs} ms`);
+  }
+
+  /** Whether a program accepts connections on this local port, as a running dashboard does. */
+  #inUse(where: string, port: number): Promise<boolean> {
+    const timeout = settings.COORDINATOR_PROBE_TIMEOUT_MS;
+    const socket = connect({ host: settings.LOCAL_HOST, port, timeout });
+    const answer = new Promise<boolean>((resolve) => {
+      // A program that listens answers at once, so no answer in time means the port is free.
+      socket.once("connect", () => resolve(true)).once("timeout", () => resolve(false));
+      socket.on("error", (error: NodeJS.ErrnoException) => {
+        // A refused connection is the usual answer: nothing listens there.
+        if (error.code !== "ECONNREFUSED") this.#say(`cannot check ${where}: ${error.message}`);
+        resolve(false);
+      });
+    });
+    return answer.finally(() => socket.destroy());
   }
 
   async #stop(): Promise<void> {
@@ -202,6 +239,7 @@ export class CoordinatorLauncher {
       this.#lastErrorLine = error.code === "ENOENT" ? `${file} not found` : error.message;
       this.#say(`cannot start the coordinator: ${this.#lastErrorLine}`);
     });
+    const startedAt = performance.now();
     const run: RunOutput = { own: false, errorLine: null };
     // After EMFILE or ENFILE, Node gives the child no stderr; its error event says why.
     if (child.stderr) {
@@ -215,7 +253,7 @@ export class CoordinatorLauncher {
     }
     this.#closed = new Promise((resolve) => {
       child.once("close", (code, signal) => {
-        const delay = this.#ended(child, code ?? signal, run);
+        const delay = this.#ended(child, code ?? signal, run, performance.now() - startedAt);
         if (delay !== null) this.#restartTimer = setTimeout(() => this.#spawn(program), delay);
         resolve();
       });
@@ -225,7 +263,7 @@ export class CoordinatorLauncher {
   }
 
   /** Applies the exit policy, and returns the wait before a restart or null for none. */
-  #ended(child: ChildProcess, end: number | string | null, run: RunOutput) {
+  #ended(child: ChildProcess, end: number | string | null, run: RunOutput, ranMs: number) {
     if (this.#child !== child) return null; // it never started
     this.#child = null;
     if (this.#state === "stopping" || end === 0) {
@@ -241,6 +279,7 @@ export class CoordinatorLauncher {
       this.#say(`the coordinator exited with code ${end}; not restarting: ${why}`);
       return null;
     }
+    if (ranMs >= this.#options.backoffResetMs) this.#crashes = 0;
     const delay = restartDelay(this.#crashes, this.#options.restartBackoffMs);
     this.#crashes += 1;
     this.#state = "restarting";

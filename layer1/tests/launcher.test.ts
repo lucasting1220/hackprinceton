@@ -14,7 +14,7 @@ import {
   windowsTreeStopCommand,
 } from "../bridge/src/launcher.ts";
 import * as settings from "../bridge/src/settings.ts";
-import { makeTempDir, STUB, waitFor, writeConfig } from "./coordinator-fixtures.ts";
+import { makeTempDir, STUB, startStub, waitFor, writeConfig } from "./coordinator-fixtures.ts";
 
 const DECLARED = '[project]\nname = "layer2"\n\n[project.scripts]\nlayer2-coordinator = "m:run"\n';
 
@@ -107,6 +107,20 @@ describe("the coordinator launcher", () => {
     assert.deepEqual(ours, [starting, "L1 launcher: the coordinator stopped"]);
   });
 
+  test("asks a coordinator an earlier bridge left running to stop, then starts", async (t) => {
+    const leftover = await startStub(t);
+    await waitFor(() => leftover.stderr().includes("ready"));
+    const { configFile, stopFile, dashboardPort } = leftover;
+    const options = { configFile, stopFile, dashboardPort };
+    const { launcher, lines } = await launch(t, await readFile(STUB, "utf8"), options);
+    await launcher.start();
+    const where = `127.0.0.1:${dashboardPort}`;
+    assert.equal(lines[0], `L1 launcher: ${where} is in use; asking the coordinator there to stop`);
+    assert.equal(await leftover.exitCode, 0);
+    await waitFor(() => lines.some((line) => line.includes("ready")));
+    assert.equal(launcher.status().state, "running");
+  });
+
   test("restarts after any end but 0, 2 or 3, and a 2 from uv itself, until stopped", async (t) => {
     const own = "STUB layer2-coordinator:";
     for (const [code, stderr, restarts, state, lastErrorLine] of [
@@ -130,6 +144,24 @@ process.exitCode = ${code};`;
       assert.equal(read("starts").length, starts, `started again after ${stderr}`);
       assert.deepEqual(launcher.status(), { program: "stub", state, lastErrorLine, pid: null });
     }
+  });
+
+  test("the backoff starts again after a long run, and after start()", async (t) => {
+    // The second run lasts 300 ms; without the reset, the third start would wait 60 s.
+    const child = `import { appendFileSync, readFileSync } from "node:fs";
+appendFileSync("starts", "x");
+process.stderr.write("crashed\\n");
+if (readFileSync("starts", "utf8").length === 2) setTimeout(() => process.exit(1), 300);
+else process.exitCode = 1;`;
+    const options = { restartBackoffMs: [50, 60_000], backoffResetMs: 200 };
+    const { launcher, read } = await launch(t, child, options);
+    await launcher.start();
+    await waitFor(() => read("starts").length === 3, 3_000);
+    await waitFor(() => launcher.status().state === "restarting"); // in 60 s
+    await launcher.stop();
+    await launcher.start();
+    assert.equal(launcher.status().lastErrorLine, null);
+    await waitFor(() => read("starts").length === 5, 3_000);
   });
 
   test("a coordinator that ignores its stop file is ended with its children", async (t) => {
