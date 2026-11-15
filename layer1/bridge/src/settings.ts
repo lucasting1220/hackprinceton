@@ -105,3 +105,24 @@ export const QR_ERROR_CORRECTION = "M";
 
 /** The light border around every QR code the bridge draws, in modules (phone-hub.md §2.1). */
 export const QR_BORDER_MODULES = 4;
+
+/** Layer 1 bridge, network side: pairing and the LAN gateway, on every IPv4 interface. */
+export const BRIDGE_NETWORK_PORT = 7480;
+export const BRIDGE_NETWORK_HOST = "0.0.0.0";
+
+/**
+ * The JSON request limits, on the network side and in step 4's alert intake: the largest body,
+ * and the times within which the headers and then the whole request must arrive, or it gets 408.
+ */
+export const JSON_REQUEST_MAX_BYTES = 16 * 1024;
+export const JSON_REQUEST_HEADERS_TIMEOUT_MS = 5_000;
+export const JSON_REQUEST_TIMEOUT_MS = 10_000;
+
+/** How often the server checks those two times; Node's default, 30 s, would let a request run 40 s. */
+export const JSON_REQUEST_TIMEOUT_CHECK_MS = 1_000;
+
+/** The pairing QR code lists at most this many of the laptop's addresses (phone-hub.md §2.1). */
+export const LAN_ADDRESSES_MAX = 4;
+
+/** GET /v1/hello's hub tag: this many first characters of the hub's public key (phone-hub.md §4.1). */
+export const HUB_TAG_CHARS = 8;

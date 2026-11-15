@@ -117,3 +117,17 @@ describe("contracts/api-state.json", () => {
     assert.match(updatedAt, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z$/);
   });
 });
+
+describe("the bridge's ports", () => {
+  test("7470 and 7480 differ from each other and from coordinator.json's three ports", () => {
+    const ports = [
+      settings.COORDINATOR_LISTEN_PORT,
+      settings.DASHBOARD_PORT,
+      settings.COORDINATOR_CLIENT_PORT,
+      settings.BRIDGE_LOCAL_PORT,
+      settings.BRIDGE_NETWORK_PORT,
+    ];
+    assert.ok(ports.every((port) => Number.isInteger(port) && port >= 1 && port <= 65535));
+    assert.equal(new Set(ports).size, ports.length, "the five ports must differ");
+  });
+});
