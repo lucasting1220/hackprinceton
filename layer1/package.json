@@ -8,6 +8,7 @@
     "format": "biome format --write .",
     "format:check": "biome format .",
     "lint": "biome lint --error-on-warnings .",
+    "net:test": "node scripts/network-test.ts",
     "relay": "node relay/src/main.ts",
     "start": "node bridge/src/main.ts",
     "stub:alert": "node stubs/fake-layer2-to-phone.ts",
