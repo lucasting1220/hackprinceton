@@ -192,7 +192,7 @@ Added Nov 15 from what Layer 1's bridge already sends and accepts (Layer 1 doc "
 - **`check_now`** is silent: Layer 4 sends a fresh live status at once and no reply. Nothing is said in the home.
 - **Reply:** only for `ask`. `request_id` from the request, `title` (1 to 200 characters) and `body` (1 to 4,000). The bridge seals it for the asking phone alone and refuses a `request_id` it has not seen in the last hour. The app does not show replies yet.
 - **Live status:** latest-only; each one replaces the last on the phones. `activity`, `heart_rate`, `sleep` and `steps` are each an object or `null`, and each object carries the time its reading was taken so the app can show its age. Layer 4 sends one on every new watch reading and on every `check_now`.
-  - `activity`: `{state, at}`, `state` one of `walking`, `sitting`, `lying_down`, `not_in_view`. `null` in version 1 until the fall model's activity reaches the job that sends live status.
+  - `activity`: `{state, at}`, `state` one of `walking`, `sitting`, `lying_down`, `not_in_view`. `at` is when that activity began. `null` until the fall model has logged an activity (Layer 4's `fall_model` job writes it to the event log when it changes; `health_check` reads it).
   - `heart_rate`: `{bpm, at, trend}`, `bpm` a whole number. `trend` is `rising`, `falling` or `steady` against the reading before it (`steady` within 5 bpm), or `null` with only one reading. **Layer 1 to confirm** these are the values the app reads.
   - `sleep`: the latest sleep record, with the fields of `watch-reading.json`'s `sleep`.
   - `steps`: `{steps_today, at}`.
