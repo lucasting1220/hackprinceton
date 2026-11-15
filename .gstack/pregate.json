@@ -7,6 +7,7 @@
     "contracts/**": ["layer2/tests/test_contracts.py"],
     "layer2/**": ["layer2/tests/test_contracts.py"],
     "layer4/**": ["layer4/tests/test_package.py"],
-    "layer1/**": ["layer1/tests/contracts.test.ts"]
+    "layer1/**": ["layer1/tests/contracts.test.ts"],
+    "layer3/**": ["layer3/tests/test_worker_config.py"]
   }
 }
