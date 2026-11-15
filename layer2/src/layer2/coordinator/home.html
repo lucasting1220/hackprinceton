@@ -68,6 +68,8 @@ main { flex: 1; background: var(--bg); overflow-y: auto; padding: 2.2rem 2.6rem;
 .chip { width: 10px; height: 10px; border-radius: 3px; flex: none; }
 .muted { color: var(--muted); }
 .small { font-size: .85rem; }
+.time { font-variant-numeric: tabular-nums; min-width: 6.5rem; }
+.st.alert { color: var(--pink); letter-spacing: .04em; }
 .banner { display: flex; align-items: center; gap: 1.2rem; margin-bottom: 1.4rem; padding: 1rem 1.4rem; }
 .badge { font-weight: 700; font-size: .85rem; letter-spacing: .06em; padding: .45rem .8rem; border-radius: 8px; flex: none; }
 .badge.ai { background: rgba(10,132,255,.18); color: var(--blue); }
@@ -115,6 +117,7 @@ const cpuHistory = new Map();  // node_id -> [0..1], newest last
 let latest = null;
 let restarts = new Map();  // "node_id job" -> restarts, from /api/details
 let decision = null;  // the latest re-plan, from /api/details
+let feed = [];  // recent events, newest first, from /api/details
 const CRASHING_AFTER = 3;  // restarts before a job is shown as crashing
 
 function el(tag, className, text) {
@@ -280,6 +283,21 @@ function plannerBanner() {
   return box;
 }
 
+// The latest events: time, kind and whether an alert went out. Nothing more about the resident.
+function eventsPanel() {
+  const panel = el("div", "panel");
+  panel.appendChild(el("h2", "", "Recent events"));
+  if (feed.length === 0) panel.appendChild(el("div", "muted", "Nothing has happened in the last day."));
+  for (const item of feed) {
+    const row = el("div", "row");
+    row.appendChild(el("span", "muted time", new Date(item.at).toLocaleTimeString()));
+    row.appendChild(el("span", "", item.label));
+    if (item.alert) row.appendChild(el("span", "st alert", "ALERT SENT"));
+    panel.appendChild(row);
+  }
+  return panel;
+}
+
 function laptopSummary(laptop, hw, jobs, now) {
   const quiet = now - Date.parse(laptop.last_status_at) > STALE_AFTER_MS;
   const panel = el("div", "panel link" + (quiet ? " quiet" : ""));
@@ -342,6 +360,7 @@ function overview(state, hwById, now) {
     dropped.appendChild(row);
   }
   grid.appendChild(dropped);
+  grid.appendChild(eventsPanel());
   view.appendChild(grid);
   return view;
 }
@@ -466,9 +485,11 @@ async function refresh() {
     const details = await getJson("/api/details");
     restarts = new Map(details.jobs.map((j) => [j.node_id + " " + j.job, j.restarts]));
     decision = details.planner || null;
+    feed = details.events || [];
   } catch (problem) {
     restarts = new Map();  // the page still works without the extra details
     decision = null;
+    feed = [];
   }
   for (const hw of hwById.values()) {
     if (hw.cpu_percent === null) continue;

@@ -367,6 +367,15 @@ class PlannerDecision(Strict):
     moved: list[str]
 
 
+class FeedItem(Strict):
+    """One event on the dashboard's feed: when, what kind (from a fixed list), and whether an
+    alert went out. Never anything else from the event. Internal to Layer 2."""
+
+    at: UtcDatetime
+    label: Literal["Fall", "Call for help", "Heart rate", "Monitoring", "Event"]
+    alert: StrictBool
+
+
 class DashboardDetails(Strict):
     """GET /api/details on the dashboard port: what the page shows beyond /api/state and
     /api/hardware. Internal to Layer 2: Layer 1 reads only /api/state."""
@@ -375,3 +384,4 @@ class DashboardDetails(Strict):
     updated_at: UtcDatetime
     jobs: list[JobHealth]
     planner: PlannerDecision | None = None
+    events: list[FeedItem] = Field(default_factory=list)

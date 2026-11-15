@@ -17,7 +17,7 @@ from pathlib import Path
 from pydantic import JsonValue, ValidationError
 
 from layer2 import settings
-from layer2.contracts import LoggedEvent
+from layer2.contracts import FeedItem, LoggedEvent
 from layer2.files import retry_while_busy
 
 log = logging.getLogger(__name__)
@@ -95,3 +95,38 @@ class EventLog:
                 skipped += 1
         if skipped:
             log.warning("L2 coordinator: skipped %d unreadable lines in %s", skipped, path.name)
+
+
+_LABELS = {
+    "fall": "Fall",
+    "help": "Call for help",
+    "heart_rate": "Heart rate",
+    "monitoring": "Monitoring",
+}
+
+
+def feed_item(logged: LoggedEvent) -> FeedItem:
+    """What the dashboard may show of an event: its time (`occurred_at` if it is a valid time,
+    else when it was logged), a label from a fixed list chosen by its `kind` (Layer 4's event
+    records), and whether it carries an `alert_id`. Nothing else, so no detail about the
+    resident reaches a screen that judges can see."""
+    event = logged.event
+    kind = event.get("kind")
+    label = _LABELS.get(kind, "Event") if isinstance(kind, str) else "Event"
+    at = logged.logged_at
+    occurred = event.get("occurred_at")
+    if isinstance(occurred, str):
+        try:
+            parsed = datetime.fromisoformat(occurred.replace("Z", "+00:00"))
+        except ValueError:
+            parsed = None
+        if parsed is not None and parsed.tzinfo is not None:
+            at = parsed
+    return FeedItem(at=at, label=label, alert=bool(event.get("alert_id")))
+
+
+def recent_feed(events: EventLog) -> list[FeedItem]:
+    """The newest FEED_EVENTS events from the last FEED_WINDOW_S, newest first. Blocking."""
+    since = datetime.now(UTC) - timedelta(seconds=settings.FEED_WINDOW_S)
+    found = events.since(since, limit=settings.FEED_EVENTS)
+    return [feed_item(logged) for logged in reversed(found)]

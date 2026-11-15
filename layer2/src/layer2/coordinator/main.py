@@ -105,7 +105,9 @@ async def _serve(config: CoordinatorConfig) -> int:
     control = create_control_app(config, registry, placement, events, subscriptions)
     servers = [
         _server(control, "0.0.0.0", config.listen_port),
-        _server(create_dashboard_app(registry, placement), "127.0.0.1", config.dashboard_port),
+        _server(
+            create_dashboard_app(registry, placement, events), "127.0.0.1", config.dashboard_port
+        ),
         _server(create_client_app(subscriptions), "127.0.0.1", config.client_port),
     ]
     stop_file = Path(config.stop_file)
