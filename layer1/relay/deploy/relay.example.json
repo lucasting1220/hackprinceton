@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "listen_port": 7490,
+  "public_url": "https://relay.example.com",
+  "database_file": "/var/lib/debbie-relay/relay.db",
+  "stop_file": "/var/lib/debbie-relay/relay.stop",
+  "hub_silent_limit_s": 180,
+  "watchdog_tick_s": 60,
+  "apns": {
+    "topic": "com.example.debbie",
+    "team_id": "TEAMID0000",
+    "keys": {
+      "production": { "key_id": "KEYID00001", "key_file": "/etc/debbie-relay/apns-production.p8" },
+      "sandbox": { "key_id": "KEYID00002", "key_file": "/etc/debbie-relay/apns-sandbox.p8" }
+    }
+  }
+}

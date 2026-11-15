@@ -154,8 +154,50 @@ export const PHONE_SEEN_IDS_MAX = 1_000;
 /** The LAN gateway logs a phone's wrong clock at most once in this long (R7). */
 export const STALE_LOG_INTERVAL_MS = 60_000;
 
-/** A fetch's limit above this counts as this (phone-hub.md §4.5). */
+/**
+ * The most messages one page holds, on the LAN route (phone-hub.md §4.5) and the relay's (§5); a
+ * fetch's limit above this counts as this.
+ */
 export const MESSAGES_PAGE_MAX = 50;
 
 /** How often the Pair a phone page reloads while it waits for the phone, in seconds. */
 export const PAIRING_PAGE_RELOAD_SECONDS = 2;
+
+/** How long a message is kept for phones to fetch: 7 days, in the hub's outbox and at the relay. */
+export const MESSAGE_RETENTION_MS = 7 * 24 * 60 * 60_000;
+
+/** Types of which only the newest message per home is kept (phone-hub.md §3): live status. */
+export const LATEST_ONLY_TYPES: readonly string[] = ["heartbeat", "care_status"];
+
+/** How often the hub sends the relay a heartbeat: 20 seconds, the doc's demo value. */
+export const RELAY_HEARTBEAT_INTERVAL_MS = 20_000;
+
+/** The relay's relay.json and the hub's relay-credential.json are at this schema_version. */
+export const RELAY_CONFIG_SCHEMA_VERSION = 1;
+export const RELAY_CREDENTIAL_SCHEMA_VERSION = 1;
+
+/** The relay database's schema version, kept in SQLite's user_version. */
+export const RELAY_DB_SCHEMA_VERSION = 1;
+
+/** How long a relay database statement waits for a lock before it fails. */
+export const RELAY_DB_BUSY_TIMEOUT_MS = 5_000;
+
+/** How often the relay deletes messages past MESSAGE_RETENTION_MS, and how many per statement. */
+export const RELAY_SWEEP_INTERVAL_MS = 60 * 60_000;
+export const RELAY_SWEEP_BATCH = 500;
+
+/** The hub credential the relay issues, in bytes (43 base64url characters). */
+export const HUB_CREDENTIAL_BYTES = 32;
+
+/** The relay's phone API: body and wrapper limit, and header and whole-request time limits. */
+export const RELAY_MAX_BODY_BYTES = 64 * 1024;
+export const RELAY_HEADERS_TIMEOUT_MS = 10_000;
+export const RELAY_REQUEST_TIMEOUT_MS = 15_000;
+
+/** Failed sign-ins from one address within the window that block it, and for how long. */
+export const RELAY_SIGNIN_FAILURES_MAX = 20;
+export const RELAY_SIGNIN_WINDOW_MS = 60_000;
+export const RELAY_SIGNIN_BLOCK_MS = 60_000;
+
+/** The most addresses the sign-in limiter remembers; the least recently seen go first. */
+export const RELAY_LIMITER_ADDRESSES_MAX = 10_000;
