@@ -159,7 +159,7 @@ export async function startBridge(options: BridgeOptions) {
     phoneAccess: () => started,
     homeAlerts: () => alertsReady,
     remoteAccess: () => remoteAccessText(relayLink?.status() ?? remote),
-    keepAwakeProblem: () => keepAwake?.problem(),
+    keepAwake: () => keepAwake,
     liveView: () => liveView,
   });
   const stopFile = path.join(options.stateDir, settings.STATE_NAMES.bridgeStop);

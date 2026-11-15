@@ -41,6 +41,14 @@ import {
   toBase64url,
   tokenSha256,
 } from "./phone-crypto.ts";
+import {
+  checkDevices,
+  type DeviceCheckRead,
+  type DeviceListRead,
+  listDevices,
+  type ProgramRunner,
+  runProgram,
+} from "./sensor-check.ts";
 import * as settings from "./settings.ts";
 import { isUtcTime, utcSeconds } from "./wire.ts";
 
@@ -109,6 +117,8 @@ export interface LaptopOptions {
   readonly linkReportMs?: number;
   readonly checkTimeoutMs?: number;
   readonly launcher?: Partial<Omit<WorkerLauncherOptions, "repoRoot" | "configFile" | "stopFile">>;
+  /** Runs Layer 3's device list and check; tests pass a fake. */
+  readonly runProgram?: ProgramRunner;
 }
 
 /** laptop.json: what this laptop joined (Layer 1 only). */
@@ -558,15 +568,22 @@ export class Laptop {
     this.#view = { step: "none" };
   }
 
+  /** Layer 3's device list, for the Camera and mic page's pickers. */
+  listDevices(): Promise<DeviceListRead> {
+    return listDevices(this.#options.repoRoot, this.#options.runProgram ?? runProgram);
+  }
+
   /**
-   * Saves the camera and mic into worker.json, then restarts the worker so Layer 2 reads them.
-   * Without the resident's consent both are null; an empty name means none.
+   * Saves the camera and mic into worker.json, then, with the worker stopped, runs Layer 3's
+   * device check on them (contracts/README.md: check runs before the worker starts), then starts
+   * the worker again so Layer 2 reads them. Without the resident's consent both are null; an
+   * empty name means none, and with neither named there is no check.
    */
   async saveSensors(
     camera: string,
     mic: string,
     consent: boolean,
-  ): Promise<{ ok: true } | { ok: false; message: string }> {
+  ): Promise<{ ok: true; check?: DeviceCheckRead } | { ok: false; message: string }> {
     const launcher = this.#launcher;
     if (this.view().step !== "joined" || launcher === undefined) {
       return { ok: false, message: "This laptop hasn't finished joining a home." };
@@ -592,8 +609,15 @@ export class Laptop {
     this.#log("L1 laptop: camera and mic saved; restarting the worker");
     await launcher.stop();
     await removePath(this.#files.status);
+    let check: DeviceCheckRead | undefined;
+    if (sensors.camera !== null || sensors.mic !== null) {
+      const run = this.#options.runProgram ?? runProgram;
+      check = await checkDevices(this.#options.repoRoot, this.#files.config, run);
+      const said = check.ok ? (check.allOk ? "passed" : "found a problem") : check.message;
+      this.#log(`L1 laptop: Layer 3's device check ${said}`);
+    }
     if (generation === this.#generation) await launcher.start();
-    return { ok: true };
+    return check === undefined ? { ok: true } : { ok: true, check };
   }
 
   /** Check again, after check found a required item missing. */

@@ -8,6 +8,7 @@ import { keepAwakeCommand } from "../bridge/src/keep-awake.ts";
 import { type BridgeOptions, startBridge } from "../bridge/src/main.ts";
 import * as settings from "../bridge/src/settings.ts";
 import { makeTempDir, waitFor } from "./coordinator-fixtures.ts";
+import { pageClient } from "./page-client.ts";
 
 const STOP_WAIT_MS = 15_000;
 
@@ -136,9 +137,46 @@ test("this platform's real helper runs while the bridge runs and is gone after i
     assert.equal(commandLine(pid), `/usr/bin/caffeinate -dis -w ${process.pid}`);
   }
   assert.ok(processRuns(pid), "the helper is not running");
-  assert.equal((await page(bridge.url)).body.includes("Keep awake:"), false);
+  const shown = (await page(bridge.url)).body;
+  assert.ok(shown.includes("<p>Keep awake: on. "), shown);
+  assert.ok(shown.includes("Keep its lid open and keep it plugged in."), shown);
   await stopThroughFile();
   await waitFor(() => !processRuns(pid), settings.KEEP_AWAKE_STOP_TIMEOUT_MS);
   assert.equal(existsSync(bridge.stopFile), false);
   assert.ok(!lines.some((line) => line.includes("ended (")), "the stop was reported as a problem");
+});
+
+test("the setup page says keep-awake is on, and its Turn off ends the helper for this run", async (t) => {
+  // A helper that runs until it is ended, standing in for caffeinate or PowerShell.
+  const command = { file: process.execPath, args: ["-e", "setInterval(() => {}, 1000)"], env: {} };
+  const { bridge, lines } = await bridgeInProcess(t, { command });
+  const keepAwake = bridge.keepAwake();
+  const pid = keepAwake?.pid();
+  assert.ok(pid !== undefined && processRuns(pid), lines.join("\n"));
+  assert.deepEqual(keepAwake?.status(), { state: "on" });
+  const client = pageClient(bridge.url);
+  const on = (await client.get("/")).page;
+  assert.ok(on.includes("<p>Keep awake: on. This laptop and its screen stay awake"), on);
+  assert.ok(on.includes("Keep its lid open and keep it plugged in."), on);
+  assert.ok(on.includes('action="/keep-awake/off"'), on);
+  assert.ok(on.includes("Create a home"), "the page lost its own content");
+
+  // Without the page's token, nothing changes.
+  const forged = await client.send("POST", "/keep-awake/off", {}, "token=wrong");
+  assert.equal(forged.statusCode, 403);
+  assert.deepEqual(keepAwake?.status(), { state: "on" });
+
+  const turnedOff = await client.post("/keep-awake/off");
+  assert.equal(turnedOff.statusCode, 303);
+  assert.equal(turnedOff.headers.location, "/");
+  await waitFor(() => !processRuns(pid), settings.KEEP_AWAKE_STOP_TIMEOUT_MS);
+  assert.deepEqual(keepAwake?.status(), { state: "off" });
+  const off = (await client.get("/")).page;
+  assert.ok(off.includes("<p>Keep awake: off for this run, so this laptop may sleep"), off);
+  assert.ok(!off.includes('action="/keep-awake/off"'), off);
+  assert.ok(lines.includes("L1 keep-awake: turned off on the setup page for this run"));
+  assert.ok(
+    !lines.some((line) => line.includes("ended (")),
+    "turning off was reported as a problem",
+  );
 });
