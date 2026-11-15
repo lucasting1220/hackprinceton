@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "name": "fall_model",
+  "start_command": [
+    "uv",
+    "run",
+    "--project",
+    "../..",
+    "python",
+    "-m",
+    "layer4.jobs.fall_model",
+    "--model",
+    "pose_landmarker_full.task"
+  ],
+  "kind": "always-on",
+  "memory_gb": 1.0,
+  "sensor": "camera"
+}
