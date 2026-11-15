@@ -19,3 +19,9 @@ Run each command from this folder (`layer1/`). These are the checks that `CLAUDE
 | Tests      | `npm test`             |
 
 `npm run format` rewrites files to the expected format.
+
+## What lint does not catch
+
+Biome's promise rules, `noFloatingPromises` and `noMisusedPromises`, know the types of this project's own code but not Node's. So lint does not report an async callback passed to a Node API, such as a request handler for `http.createServer`, a listener for `.on(...)` or a `setInterval` callback, nor an unawaited promise from a Node API such as `writeFile`. If that promise rejects, nothing handles the error and the process exits. In those places, catch the error inside the callback, for example `setInterval(() => { saveState().catch(reportFailure); }, INTERVAL_MS)`, and check for this in review.
+
+`noMisusedPromises` also reports a truthiness test on an optional promise, such as `if (this.#starting)` where `#starting` is `Promise<void> | undefined`. Write `if (this.#starting !== undefined)` or `this.#starting ??= connect();` instead.
