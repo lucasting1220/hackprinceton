@@ -272,7 +272,11 @@ test("a laptop joins: Join a home, a caregiver's approval over the LAN gateway, 
   const confirm = (await again.page.get("/join/leave")).page;
   assert.match(confirm, /<form method="post" action="\/join\/leave">/);
   assert.match(confirm, /<button>Leave this home<\/button>/);
-  assert.equal((await again.page.post("/join/leave")).statusCode, 303);
+  // Pressed on the confirm page, so with its token: the joined page "/" has no form of its own,
+  // and keep-awake's form, which puts a token there, is only on where keep-awake runs (not Linux).
+  const confirmToken = /name="token" value="([^"]+)"/.exec(confirm)?.[1] ?? "no token on the page";
+  const leave = await again.page.post("/join/leave", { token: confirmToken });
+  assert.equal(leave.statusCode, 303);
   await pageWith(again.page, "/join", 'action="/join/start"');
   for (const file of [files.laptop, files.config, files.token]) {
     await assert.rejects(stat(file), { code: "ENOENT" }, `${file} survived leaving`);
