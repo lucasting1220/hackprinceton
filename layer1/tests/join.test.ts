@@ -166,7 +166,7 @@ test("a laptop joins: Join a home, a caregiver's approval over the LAN gateway, 
   assert.deepEqual(Object.keys(written).sort(), Object.keys(example).sort());
   for (const [field, value] of Object.entries(example)) {
     const sensor = field === "camera" || field === "mic";
-    if (sensor) assert.equal(written[field], null, `${field} is chosen in step 9`);
+    if (sensor) assert.equal(written[field], null, `${field} stays null until the page names it`);
     else assert.equal(typeof written[field], typeof value, field);
     if (field === "python" || field.endsWith("_file") || field.endsWith("_dir")) {
       assert.ok(path.isAbsolute(String(written[field])), `${field} is not absolute`);
