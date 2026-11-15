@@ -64,3 +64,6 @@ export const COORDINATOR_TREE_STOP_TIMEOUT_MS = 5_000;
 
 /** The waits before each restart after a crash; the last one repeats. */
 export const COORDINATOR_RESTART_BACKOFF_MS = [1_000, 2_000, 5_000, 10_000, 30_000] as const;
+
+/** How long the coordinator has to exit once its stop file appears (contracts/README.md). */
+export const COORDINATOR_STOP_DEADLINE_MS = 10_000;
