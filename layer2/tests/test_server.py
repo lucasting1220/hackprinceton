@@ -18,6 +18,7 @@ from layer2.coordinator.server import (
     BAD_HELLO,
     HELLO_TIMEOUT,
     REJECTED,
+    REMOVED,
     REPLACED,
     SERVER_ERROR,
     create_control_app,
@@ -140,6 +141,30 @@ def test_status_updates_the_laptop(
         socket.close()
     [laptop] = dashboard.get("/api/state").json()["laptops"]
     assert laptop["missing"] == missing
+
+
+def test_a_laptop_removed_from_accepted_workers_is_dropped(
+    control: TestClient,
+    dashboard: TestClient,
+    config: CoordinatorConfig,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings, "ACCEPTED_RECHECK_S", 0.05)
+    with control.websocket_connect("/ws") as socket:
+        socket.send_text(json.dumps(HELLO))
+        assert json.loads(socket.receive_text())["accepted"] is True
+        socket.send_text(status_message())
+        Path(config.accepted_workers_file).write_text(
+            json.dumps({"schema_version": 1, "workers": []}), encoding="utf-8"
+        )
+        with pytest.raises(WebSocketDisconnect) as closed:
+            while True:
+                socket.receive_text()
+        assert closed.value.code == REMOVED
+    assert dashboard.get("/api/state").json()["laptops"] == []
+    with control.websocket_connect("/ws") as again:
+        again.send_text(json.dumps(HELLO))
+        assert json.loads(again.receive_text()) == contract("welcome-rejected.json")
 
 
 def test_unreadable_accepted_workers_closes_without_a_welcome(
