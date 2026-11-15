@@ -60,13 +60,22 @@ AUDIO_HOST_INTERFACES: dict[str, str] = {
 AUDIO_INTERFACE_NEEDING_CONVERT_REQUEST: str = "Windows WASAPI"
 
 # How many measured times of each kind of watch reading the receiver remembers, to recognise a
-# reading that is sent again. A reading older than the oldest remembered time counts as a repeat.
+# reading that is sent again. Once it has had to forget some, a reading measured at or before
+# the newest time it forgot counts as a repeat.
 WATCH_SEEN_LIMIT: int = 20_000
 
-# How much of a refused watch value is written to the log, and how many refusals of one batch
-# are logged. The batch's summary line always carries the full count.
+# How many characters of a refused watch value are written to the log, how deep and how wide a
+# nested value is followed before that, and how many refused readings of one batch are logged.
+# The batch's summary line always carries the full count.
 WATCH_LOG_VALUE_LIMIT: int = 60
+WATCH_LOG_NESTING_LIMIT: int = 2
+WATCH_LOG_ITEMS_LIMIT: int = 3
 WATCH_REFUSALS_LOGGED_PER_BATCH: int = 5
+
+# The lowest heart rate, and the lowest of the other counts, that the receiver passes on. The
+# heart-rate one mirrors Layer 4's HeartRateSignal, which takes a whole number above 0.
+WATCH_LOWEST_BPM: int = 1
+WATCH_LOWEST_COUNT: int = 0
 
 # Every time on a watch reading must fall in this range. It mirrors EARLIEST_SIGNAL_TIME and
 # LATEST_SIGNAL_TIME in layer4/src/layer4/settings.py, so Layer 4 accepts each reading.

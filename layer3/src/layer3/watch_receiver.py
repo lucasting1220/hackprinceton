@@ -5,7 +5,6 @@ One batch is the body of Layer 1's `POST /v1/watch-data` (docs/layer1-join-and-c
 Nothing is stored on disk, a gap in data is never an error, and bad watch data never raises.
 """
 
-import heapq
 import logging
 import math
 import reprlib
@@ -18,15 +17,33 @@ from layer3 import settings
 
 logger = logging.getLogger(__name__)
 
-# The one top-level name of a batch, besides the three kinds, that is expected and not read.
-_UNREAD_NAMES: frozenset[str] = frozenset({"device_id"})
+# Top-level names of a batch, besides the three kinds, that are expected and not read.
+_UNREAD_NAMES: frozenset[str] = frozenset(
+    {"device_id", "type", "schema_version", "msg_id", "sent_at"}
+)
 
-# A refused value as it is written to the log: cut short however long or deeply nested it is.
-_short: Callable[[object], str] = reprlib.Repr(
+_CUT_MARK: str = "..."
+_REPR = reprlib.Repr(
+    maxlevel=settings.WATCH_LOG_NESTING_LIMIT,
+    maxlist=settings.WATCH_LOG_ITEMS_LIMIT,
+    maxtuple=settings.WATCH_LOG_ITEMS_LIMIT,
+    maxdict=settings.WATCH_LOG_ITEMS_LIMIT,
     maxstring=settings.WATCH_LOG_VALUE_LIMIT,
     maxlong=settings.WATCH_LOG_VALUE_LIMIT,
     maxother=settings.WATCH_LOG_VALUE_LIMIT,
-).repr
+)
+
+
+def _short(value: object) -> str:
+    """A refused value as it is written to the log: at most WATCH_LOG_VALUE_LIMIT characters,
+    however long, wide or deeply nested the value is."""
+    try:
+        text = _REPR.repr(value)
+    except ValueError:
+        # Python will not write out a whole number of more than a few thousand digits.
+        return f"a {type(value).__name__} too long to write out"
+    limit = settings.WATCH_LOG_VALUE_LIMIT
+    return text if len(text) <= limit else text[: limit - len(_CUT_MARK)] + _CUT_MARK
 
 
 @dataclass(frozen=True)
@@ -86,20 +103,26 @@ def _time(entry: dict[str, object], field: str) -> datetime:
     return moment.astimezone(UTC)
 
 
-def _count(entry: dict[str, object], field: str, minimum: int) -> int:
-    """A whole number of at least `minimum`. A decimal is rounded to the nearest, halves up."""
+def _count(entry: dict[str, object], field: str, lowest: int) -> int:
+    """A whole number of at least `lowest`. A decimal is rounded to the nearest, halves up."""
     value = entry.get(field)
     if isinstance(value, bool) or not isinstance(value, int | float):
         raise ValueError(f"{field} must be a number, got {_short(value)}")
     if isinstance(value, float) and not math.isfinite(value):
         raise ValueError(f"{field} must be a finite number, got {_short(value)}")
-    if value < minimum:
-        raise ValueError(f"{field} must be {minimum} or more, got {_short(value)}")
-    return value if isinstance(value, int) else math.floor(value + 0.5)
+    if value < lowest:
+        raise ValueError(f"{field} must be {lowest} or more, got {_short(value)}")
+    if isinstance(value, int):
+        return value
+    whole = math.floor(value)
+    return whole + (value - whole >= 0.5)
 
 
 def _heart_rate(entry: dict[str, object]) -> HeartRateReading:
-    return HeartRateReading(measured_at=_time(entry, "measured_at"), bpm=_count(entry, "bpm", 1))
+    return HeartRateReading(
+        measured_at=_time(entry, "measured_at"),
+        bpm=_count(entry, "bpm", settings.WATCH_LOWEST_BPM),
+    )
 
 
 def _sleep(entry: dict[str, object]) -> SleepReading:
@@ -115,16 +138,17 @@ def _sleep(entry: dict[str, object]) -> SleepReading:
         raise ValueError(f"night_of is outside the range Layer 4 accepts, got {_short(night)}")
     return SleepReading(
         night_of=night_of,
-        asleep_minutes=_count(entry, "asleep_minutes", 0),
+        asleep_minutes=_count(entry, "asleep_minutes", settings.WATCH_LOWEST_COUNT),
         bedtime_at=_time(entry, "bedtime_at"),
         wake_at=_time(entry, "wake_at"),
-        interruptions=_count(entry, "interruptions", 0),
+        interruptions=_count(entry, "interruptions", settings.WATCH_LOWEST_COUNT),
     )
 
 
 def _steps(entry: dict[str, object]) -> StepsReading:
     return StepsReading(
-        measured_at=_time(entry, "measured_at"), steps_today=_count(entry, "steps_today", 0)
+        measured_at=_time(entry, "measured_at"),
+        steps_today=_count(entry, "steps_today", settings.WATCH_LOWEST_COUNT),
     )
 
 
@@ -143,9 +167,11 @@ def _measured_time(reading: Reading) -> datetime:
 class WatchReceiver:
     """Takes in watch-data batches and returns the readings it has not passed on before.
 
-    It remembers the newest `seen_limit` measured times of each kind. A reading older than the
-    oldest time it remembers counts as passed on already, so nothing is passed on twice while
-    the receiver runs.
+    It remembers the newest `seen_limit` measured times of each kind. Once it has had to forget
+    some, a reading measured at or before the newest time it forgot counts as passed on already,
+    so a reading is not passed on twice while the receiver runs. The one exception is a reading
+    dated later than the moment its batch arrived: once forgotten, it can pass again. Not safe
+    to call from two threads at once.
     """
 
     def __init__(self, seen_limit: int = settings.WATCH_SEEN_LIMIT) -> None:
@@ -153,17 +179,19 @@ class WatchReceiver:
             raise ValueError(f"seen_limit must be 1 or more, got {seen_limit!r}")
         self._seen_limit: int = seen_limit
         self._seen: dict[str, set[datetime]] = {kind: set() for kind in _PARSERS}
-        self._oldest_first: dict[str, list[datetime]] = {kind: [] for kind in _PARSERS}
         self._forgotten_up_to: dict[str, datetime] = {}
         self.last_received_at: datetime | None = None
         """When a batch last passed on a new reading, in UTC. None until one has."""
         self.refused_count: int = 0
-        """How many readings, lists, names and batches have been refused as malformed."""
+        """How many times something malformed was refused: a reading, a list, a whole batch, or
+        a batch for carrying unexpected names."""
 
     def receive(self, batch: object, received_at: datetime) -> list[WatchItem]:
         """Return one item for each reading in the batch that is well formed and new.
 
-        A repeat is the same kind with the same measured time. The caller must deliver every
+        A repeat is the same kind with the same measured time. Items come back kind by kind
+        (heart rate, then sleep, then steps), each kind in the batch's own order, not in order
+        of measured time. The caller must deliver every
         item returned: the receiver counts those readings as passed on and will not return
         them again. Nothing is remembered until the whole batch has been read. Raises
         ValueError only when `received_at` has no time zone, which is a bug in the caller and
@@ -176,7 +204,7 @@ class WatchReceiver:
             logger.warning("L3 watch receiver: batch refused: it is not a JSON object")
             self.refused_count += 1
             return []
-        arrived = refused_readings = refused_others = repeats = 0
+        arrived = refused_readings = refused_others = repeats = older_than_memory = 0
         new: list[Reading] = []
         pending: dict[str, set[datetime]] = {kind: set() for kind in _PARSERS}
         for kind, parse in _PARSERS.items():
@@ -185,6 +213,7 @@ class WatchReceiver:
                 logger.warning("L3 watch receiver: %s refused: it is not a list", kind)
                 refused_others += 1
                 continue
+            forgotten_up_to = self._forgotten_up_to.get(kind)
             for entry in entries:
                 arrived += 1
                 try:
@@ -198,11 +227,14 @@ class WatchReceiver:
                     refused_readings += 1
                     continue
                 moment = _measured_time(reading)
-                if moment in pending[kind] or self._passed_on_before(kind, moment):
+                if moment in pending[kind] or moment in self._seen[kind]:
                     repeats += 1
-                    continue
-                pending[kind].add(moment)
-                new.append(reading)
+                elif forgotten_up_to is not None and moment <= forgotten_up_to:
+                    repeats += 1
+                    older_than_memory += 1
+                else:
+                    pending[kind].add(moment)
+                    new.append(reading)
         unread = [name for name in batch if name not in _PARSERS and name not in _UNREAD_NAMES]
         if unread:
             logger.warning(
@@ -211,6 +243,12 @@ class WatchReceiver:
                 _short(unread[0]),
             )
             refused_others += 1
+        if older_than_memory:
+            logger.warning(
+                "L3 watch receiver: %d readings were measured at or before a time the receiver "
+                "has forgotten, so they were dropped as repeats",
+                older_than_memory,
+            )
         logger.info(
             "L3 watch receiver: %d readings arrived: %d passed on, %d repeats dropped, %d refused",
             arrived,
@@ -222,22 +260,18 @@ class WatchReceiver:
         if not new:
             return []
         for kind, moments in pending.items():
-            self._remember(kind, moments)
+            self._remember(kind, moments, arrived_at)
         self.last_received_at = arrived_at
         return [WatchItem(reading, arrived_at) for reading in new]
 
-    def _passed_on_before(self, kind: str, moment: datetime) -> bool:
-        forgotten_up_to = self._forgotten_up_to.get(kind)
-        if forgotten_up_to is not None and moment <= forgotten_up_to:
-            return True
-        return moment in self._seen[kind]
-
-    def _remember(self, kind: str, moments: set[datetime]) -> None:
-        seen, oldest_first = self._seen[kind], self._oldest_first[kind]
-        for moment in moments:
-            seen.add(moment)
-            heapq.heappush(oldest_first, moment)
-        while len(seen) > self._seen_limit:
-            oldest = heapq.heappop(oldest_first)
-            seen.discard(oldest)
-            self._forgotten_up_to[kind] = oldest
+    def _remember(self, kind: str, moments: set[datetime], arrived_at: datetime) -> None:
+        """Keep the newest `seen_limit` times of this kind and note the newest one forgotten."""
+        if not moments:
+            return
+        newest_first = sorted(self._seen[kind] | moments, reverse=True)
+        self._seen[kind] = set(newest_first[: self._seen_limit])
+        if len(newest_first) > self._seen_limit:
+            # Never later than now, so readings dated in the future cannot block the readings
+            # measured from now on.
+            forgotten = min(newest_first[self._seen_limit], arrived_at)
+            self._forgotten_up_to[kind] = max(forgotten, self._forgotten_up_to.get(kind, forgotten))
