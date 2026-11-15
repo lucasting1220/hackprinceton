@@ -1,8 +1,9 @@
-"""The coordinator's dashboard page (home.html), shown to judges on a projector: a sidebar with
-an Overview and one entry per laptop; the overview has the home's figures, a panel per laptop
-with memory and processor rings and its jobs, and the work not placed; a laptop's view has its
-specs, memory and processor panels (with a dot-matrix load history), jobs and setup. Dark,
-display only: nothing on it changes the home.
+"""The coordinator's dashboard page (home.html), shown to judges on a projector: the sidebar it
+shares with Layer 1's setup page (contracts/sidebar.json: Overview, Set up, Devices, then one
+entry per laptop); the overview has the home's figures, a panel per laptop with memory and
+processor rings and its jobs, and the work not placed; a laptop's view has its specs, memory and
+processor panels (with a dot-matrix load history), jobs and what it is missing. Dark, display
+only: nothing on it changes the home.
 
 It reads /api/state (the Layer 1 contract: status, jobs, dropped work) and /api/hardware
 (Layer 2 only: specs and load) every DASHBOARD_POLL_S, never starting a poll before the last
@@ -14,6 +15,7 @@ it works on a hotspot with no internet.
 from importlib.resources import files
 
 from layer2 import settings
+from layer2.coordinator.sidebar import LAPTOP_ICON_TEMPLATE
 
 _HISTORY_POINTS = 120  # two minutes at one poll a second
 
@@ -24,4 +26,5 @@ PAGE = (
     .replace("__STALE_AFTER_MS__", str(int(settings.STALE_AFTER_S * 1000)))
     .replace("__POLL_MS__", str(int(settings.DASHBOARD_POLL_S * 1000)))
     .replace("__HISTORY_POINTS__", str(_HISTORY_POINTS))
+    .replace("__LAPTOP_ICON_TEMPLATE__", LAPTOP_ICON_TEMPLATE)
 )

@@ -3,7 +3,10 @@ import { rm } from "node:fs/promises";
 import { type TestContext, test } from "node:test";
 import { type AcceptedWorker, createHome } from "../bridge/src/home.ts";
 import { LanGateway } from "../bridge/src/lan-gateway.ts";
-import { LinkHub, sealLinkMessage, sendLinkReport } from "../bridge/src/link.ts";
+import { linkReportInterval } from "../bridge/src/laptop.ts";
+import { type LinkReport, LinkHub, sealLinkMessage, sendLinkReport } from "../bridge/src/link.ts";
+import type { LiveViewOpen } from "../bridge/src/live-view-commands.ts";
+import { LINK_CAMERA_REPORT_MS, LINK_REPORT_MS } from "../bridge/src/settings.ts";
 import { startNetworkSide } from "../bridge/src/network-server.ts";
 import { joinToken, linkKey, tokenSha256 } from "../bridge/src/phone-crypto.ts";
 import { makeTempDir } from "./coordinator-fixtures.ts";
@@ -26,7 +29,14 @@ async function linked(t: TestContext) {
   const log = (line: string) => lines.push(line);
   const phones = { lookup: () => ({ state: "unknown" }) as const, remove: async () => undefined };
   const gateway = new LanGateway({ homeId: home.homeId, phones, log });
-  const hub = new LinkHub({ home, seen: gateway, log, workers: async () => workers });
+  const clock = { now: Date.now() };
+  const hub = new LinkHub({
+    home,
+    seen: gateway,
+    log,
+    workers: async () => workers,
+    now: () => clock.now,
+  });
   const side = await startNetworkSide(home.hubPublicKey, hub.routes(), 0);
   t.after(() => side.close());
   const target = {
@@ -52,12 +62,12 @@ async function linked(t: TestContext) {
       REPORT,
       now,
     );
-  return { hub, target, workers, lines, post, sealed, token };
+  return { hub, target, workers, lines, post, sealed, token, clock };
 }
 
 test("a report opens on the home laptop's side, and its sealed reply on the worker's", async (t) => {
   const l = await linked(t);
-  assert.deepEqual(await sendLinkReport(l.target, REPORT), { ok: true });
+  assert.deepEqual(await sendLinkReport(l.target, REPORT), { ok: true, commands: [], ignored: 0 });
   const seen = l.hub.linked().get("node-1");
   assert.deepEqual([seen?.state, seen?.missing], [REPORT.state, REPORT.missing]);
   // A report sealed with another token's key is refused.
@@ -91,4 +101,90 @@ test("a removed node gets 403 unknown_node; stale, repeated and altered reports 
     reason: "this laptop is no longer part of the home",
   });
   assert.equal(l.hub.linked().has("node-1"), false);
+});
+
+const SESSION = "6f1c2b9e-0c1d-4a55-9a36-9f2b6a4d7e10";
+const OPEN: LiveViewOpen = {
+  type: "live_view_open",
+  session_id: SESSION,
+  sender_token: "T".repeat(43),
+  signaling_url: `wss://relay.example.com/v1/live-view/sessions/${SESSION}/signal`,
+  expires_at: "2999-01-01T00:00:00Z",
+};
+
+test("queued commands ride the laptop's next reply once, and the token is never logged", async (t) => {
+  const l = await linked(t);
+  l.hub.queue("node-1", OPEN);
+  l.hub.queue("node-2", { type: "live_view_close", session_id: "other", reason: "stopped" });
+  assert.deepEqual(await sendLinkReport(l.target, REPORT), {
+    ok: true,
+    commands: [OPEN],
+    ignored: 0,
+  });
+  assert.deepEqual(await sendLinkReport(l.target, REPORT), { ok: true, commands: [], ignored: 0 });
+  assert.ok(l.lines.some((line) => line.includes("sent node node-1 live_view_open")));
+  assert.ok(!l.lines.join("\n").includes(OPEN.sender_token));
+});
+
+test("a close for a session whose open wasn't delivered yet drops both", async (t) => {
+  const l = await linked(t);
+  l.hub.queue("node-1", OPEN);
+  l.hub.queue("node-1", { type: "live_view_close", session_id: SESSION, reason: "stopped" });
+  assert.deepEqual(await sendLinkReport(l.target, REPORT), { ok: true, commands: [], ignored: 0 });
+  l.hub.queue("node-1", { type: "live_view_close", session_id: SESSION, reason: "stopped" });
+  const delivered = await sendLinkReport(l.target, REPORT);
+  assert.deepEqual(delivered.ok && delivered.commands.map((command) => command.type), [
+    "live_view_close",
+  ]);
+});
+
+test("a report's live_view_lost reaches the listeners; a malformed one is refused", async (t) => {
+  const l = await linked(t);
+  const heard: Array<[string, LinkReport]> = [];
+  l.hub.onReport((nodeId, report) => heard.push([nodeId, report]));
+  const lost = { ...REPORT, live_view_lost: SESSION };
+  assert.equal((await sendLinkReport(l.target, lost)).ok, true);
+  assert.deepEqual(heard, [["node-1", lost]]);
+  const bad = sealLinkMessage(
+    linkKey(l.target.tokenSha256, "node-1"),
+    { homeId: l.target.homeId, nodeId: "node-1", type: "link_report" },
+    { ...REPORT, live_view_lost: "has space" },
+    Date.now(),
+  );
+  assert.deepEqual(await l.post(bad), [400, "bad_request"]);
+});
+
+test("a malformed command in a reply is counted and dropped, the rest kept", async (t) => {
+  const l = await linked(t);
+  l.hub.queue("node-1", { ...OPEN, sender_token: "short" });
+  l.hub.queue("node-1", { type: "live_view_close", session_id: "s2", reason: "stopped" });
+  const outcome = await sendLinkReport(l.target, REPORT);
+  assert.deepEqual(outcome, {
+    ok: true,
+    commands: [{ type: "live_view_close", session_id: "s2", reason: "stopped" }],
+    ignored: 1,
+  });
+});
+
+test("a start reaches the camera laptop within about a second: it reports every LINK_CAMERA_REPORT_MS", async (t) => {
+  assert.equal(linkReportInterval({ camera: null, mic: "Mic" }), LINK_REPORT_MS);
+  const interval = linkReportInterval({ camera: "FaceTime HD Camera", mic: null });
+  assert.equal(interval, LINK_CAMERA_REPORT_MS);
+  assert.ok(interval <= 1_000);
+  // On an injected clock: a command queued between two reports rides the next one, at most one
+  // interval (plus the request's own time) after it was queued.
+  const l = await linked(t);
+  const start = l.clock.now;
+  assert.equal((await sendLinkReport(l.target, REPORT, () => l.clock.now)).ok, true);
+  l.clock.now = start + 300;
+  l.hub.queue("node-1", OPEN);
+  const queuedAt = l.clock.now;
+  l.clock.now = start + interval;
+  const next = await sendLinkReport(l.target, REPORT, () => l.clock.now);
+  assert.deepEqual(next.ok && next.commands, [OPEN]);
+  assert.ok(l.clock.now - queuedAt <= interval);
+  assert.equal(
+    l.hub.linked().get("node-1")?.reportedAt,
+    new Date(start + interval).toISOString().replace(/\.\d{3}Z$/, "Z"),
+  );
 });

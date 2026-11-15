@@ -15,9 +15,7 @@ Neither ever logs a token, a whole `hello` or raw text a client chose.
 
 import asyncio
 import contextlib
-import html
 import logging
-import urllib.parse
 from pathlib import Path
 from typing import Annotated
 
@@ -51,6 +49,7 @@ from layer2.coordinator.event_log import EventLog, EventTooLargeError, recent_fe
 from layer2.coordinator.inbox import Subscriptions
 from layer2.coordinator.plan import Placement
 from layer2.coordinator.registry import Registry
+from layer2.coordinator.sidebar import home_group
 from layer2.files import ConfigError, load_json_model
 from layer2.tokens import find_node_id
 
@@ -338,24 +337,6 @@ def _fit(events: list[LoggedEvent]) -> tuple[list[LoggedEvent], bool]:
     return kept, len(kept) < len(events)
 
 
-def setup_link(bridge_url: str | None) -> str:
-    """The sidebar's link back to Layer 1's setup page, served by the bridge at `bridge_url`
-    on this laptop (pairing phones, approving laptops). Empty unless `bridge_url` is a plain
-    http(s) address on 127.0.0.1 or localhost."""
-    if bridge_url is None:
-        return ""
-    try:
-        parts = urllib.parse.urlsplit(bridge_url)
-        port = parts.port
-    except ValueError:
-        return ""
-    if parts.scheme not in ("http", "https") or parts.hostname not in ("127.0.0.1", "localhost"):
-        return ""
-    netloc = parts.hostname if port is None else f"{parts.hostname}:{port}"
-    url = urllib.parse.urlunsplit((parts.scheme, netloc, "/", "", ""))
-    return f'  <a href="{html.escape(url, quote=True)}" id="nav-setup">Set up</a>'
-
-
 def create_dashboard_app(
     registry: Registry[WebSocket],
     placement: Placement | None = None,
@@ -363,7 +344,7 @@ def create_dashboard_app(
     bridge_url: str | None = None,
 ) -> FastAPI:
     app = FastAPI(openapi_url=None, docs_url=None, redoc_url=None)
-    page_html = PAGE.replace("__SETUP_LINK__", setup_link(bridge_url))
+    page_html = PAGE.replace("__SIDEBAR_HOME__", home_group(bridge_url))
     # Only this machine may read it, by name: a web page using DNS rebinding cannot.
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=list(settings.DASHBOARD_HOST_NAMES))
 

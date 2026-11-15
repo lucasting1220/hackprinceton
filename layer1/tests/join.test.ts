@@ -5,8 +5,11 @@ import path from "node:path";
 import { test } from "node:test";
 import { acceptedWorkers, createHome } from "../bridge/src/home.ts";
 import { readWorkerStatus, workerFiles } from "../bridge/src/laptop.ts";
+import type { LinkReport } from "../bridge/src/link.ts";
+import type { BrowserProcess } from "../bridge/src/live-sender.ts";
 import { startBridge } from "../bridge/src/main.ts";
 import { tokenSha256 } from "../bridge/src/phone-crypto.ts";
+import { utcSeconds } from "../bridge/src/wire.ts";
 import * as settings from "../bridge/src/settings.ts";
 import { freePort, makeTempDir, STUB, waitFor } from "./coordinator-fixtures.ts";
 import { phoneWrapper } from "./fake-phone.ts";
@@ -112,8 +115,24 @@ test("a laptop joins: Join a home, a caregiver's approval over the LAN gateway, 
   assert.ok(homePage.page.includes(`127.0.0.1:${state.port}`), "the address isn't on the page");
   assert.ok(homePage.page.includes(`Home code: <strong>${homeCode}</strong>`));
 
-  // The new laptop: Join a home with the address the home laptop's page shows.
-  const laptop = await bridgeIn(laptopDir, repoRoot);
+  // The new laptop: Join a home with the address the home laptop's page shows. Its sender window
+  // is a fake browser that records its start and kill, and can close by itself.
+  const browsers: Array<{ args: readonly string[]; killed: boolean; exit: () => void }> = [];
+  const spawn = (_file: string, args: readonly string[]): BrowserProcess => {
+    let exit: (how: string) => void = () => undefined;
+    const exited = new Promise<string>((resolve) => {
+      exit = resolve;
+    });
+    const browser = { args, killed: false, exit: () => exit("it ended with 0") };
+    browsers.push(browser);
+    const kill = () => {
+      browser.killed = true;
+      exit("killed");
+    };
+    return { kill, exited };
+  };
+  const liveSender = { spawn, findBrowser: () => "/fake/chrome" };
+  const laptop = await bridgeIn(laptopDir, repoRoot, { liveSender });
   assert.match((await laptop.page.get("/")).page, /<a href="\/join">Join a home<\/a>/);
   const address = `127.0.0.1:${state.port}`;
   const started = await laptop.page.post("/join/start", { address, name: "Kitchen laptop" });
@@ -195,6 +214,47 @@ test("a laptop joins: Join a home, a caregiver's approval over the LAN gateway, 
     !laptopDevices.includes('id="nav-overview"') && !laptopDevices.includes(">Laptops</div>"),
     "a joined laptop links a dashboard it lacks",
   );
+
+  // Live view over the link: the hub's queued live_view_open reaches this laptop on its next
+  // report, which serves the sender page and opens the window; live_view_close kills it.
+  const session = "6f1c2b9e-0c1d-4a55-9a36-9f2b6a4d7e10";
+  const senderToken = randomBytes(32).toString("base64url");
+  state.link.queue(nodeId, {
+    type: "live_view_open",
+    session_id: session,
+    sender_token: senderToken,
+    signaling_url: `wss://relay.example.com${settings.LIVE_VIEW_PATH}/${session}/signal`,
+    expires_at: utcSeconds(new Date(Date.now() + 300_000)),
+  });
+  await waitFor(() => browsers.length === 1, 5_000);
+  const senderUrl = new URL(settings.LIVE_SENDER_PATH, laptop.bridge.url).href;
+  assert.equal(browsers[0]?.args[0], `--app=${senderUrl}`);
+  const served = await fetch(senderUrl, { signal: AbortSignal.timeout(5_000) });
+  assert.equal(served.status, 200);
+  assert.match(await served.text(), new RegExp(session));
+  state.link.queue(nodeId, { type: "live_view_close", session_id: session, reason: "stopped" });
+  await waitFor(() => browsers[0]?.killed === true, 5_000);
+  const gone = await fetch(senderUrl, { signal: AbortSignal.timeout(5_000) });
+  await gone.body?.cancel();
+  assert.equal(gone.status, 404);
+  // A window that closes by itself reaches the hub as live_view_lost in the next report.
+  const heard: LinkReport[] = [];
+  state.link.onReport((reporter, report) => {
+    if (reporter === nodeId && report.live_view_lost !== undefined) heard.push(report);
+  });
+  const second = "0b7a3c52-41d4-4a6e-9a6c-2f0e5d1c8b21";
+  state.link.queue(nodeId, {
+    type: "live_view_open",
+    session_id: second,
+    sender_token: senderToken,
+    signaling_url: `wss://relay.example.com${settings.LIVE_VIEW_PATH}/${second}/signal`,
+    expires_at: utcSeconds(new Date(Date.now() + 300_000)),
+  });
+  await waitFor(() => browsers.length === 2, 5_000);
+  browsers[1]?.exit();
+  await waitFor(() => heard.length === 1, 5_000);
+  assert.equal(heard[0]?.live_view_lost, second);
+  for (const line of [...hub.lines, ...laptop.lines]) assert.ok(!line.includes(senderToken), line);
 
   // A restarted bridge starts the worker again with the same node ID and token.
   await laptop.stopThroughFile();

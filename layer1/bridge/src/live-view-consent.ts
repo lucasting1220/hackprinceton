@@ -12,9 +12,13 @@ import { errorMessage, JsonFileError, readJsonFile, writeFileWhole } from "./jso
 import * as settings from "./settings.ts";
 import { utcSeconds } from "./wire.ts";
 
-/** What changed the setting: the setup page's switch, or a resident phone by its device ID. */
+/**
+ * What changed the setting: the setup page's switch, a resident phone by its device ID, or the
+ * sender window's button (the relay ends the session with resident_turned_off).
+ */
 export type ConsentChanger =
   | Readonly<{ by: "setup_page" }>
+  | Readonly<{ by: "sender_window" }>
   | Readonly<{ by: "phone"; deviceId: string }>;
 
 /** The refusals of phone-hub.md §4.4 for `live_view_setting`. */
@@ -34,6 +38,7 @@ export class LiveViewConsent {
   #problem: string | undefined;
   /** Writes run one at a time, so the file always ends with the last change made. */
   #writes: Promise<unknown> = Promise.resolve();
+  readonly #listeners = new Set<(enabled: boolean) => void>();
 
   private constructor(
     file: string,
@@ -72,6 +77,12 @@ export class LiveViewConsent {
   /** Whether the resident lets caregivers start live view now. */
   enabled(): boolean {
     return this.#enabled;
+  }
+
+  /** Calls `listener` with the setting after each saved change; returns what stops it. */
+  onChange(listener: (enabled: boolean) => void): () => void {
+    this.#listeners.add(listener);
+    return () => this.#listeners.delete(listener);
   }
 
   /** Why the saved setting couldn't be read or written, for the setup page; undefined when fine. */
@@ -119,8 +130,14 @@ export class LiveViewConsent {
     }
     this.#enabled = enabled;
     this.#problem = undefined;
-    const who = changer.by === "phone" ? `phone ${changer.deviceId}` : "the setup page";
+    const who =
+      changer.by === "phone"
+        ? `phone ${changer.deviceId}`
+        : changer.by === "setup_page"
+          ? "the setup page"
+          : "the sender window";
     this.#log(`L1 live-view: live view turned ${enabled ? "on" : "off"} by ${who}`);
+    for (const listener of this.#listeners) listener(enabled);
   }
 }
 
