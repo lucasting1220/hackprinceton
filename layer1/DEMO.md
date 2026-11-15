@@ -104,39 +104,39 @@ Pair after step 3, so the pairing carries the relay's address. A phone paired be
 
 On the coordinator's page, **Remote access**:
 
-| Status | Meaning |
-|---|---|
-| `not set up` | There is no `relay-credential.json`. Do step 3 |
-| `connecting to the relay` | The bridge is opening its link to the relay |
-| `connected to the relay since <time>` | The link is up; phones away from home reach the home |
-| `can't reach the relay (<reason>); retrying in <n> s` | The relay or the internet can't be reached. The bridge retries by itself |
-| `the relay rejected this home's credential` | The credential was replaced or the home is unknown. Do step 3 again with `--replace` |
-| `the credential file ... can't be used (...); import it again` | The file is damaged or doesn't match this home. Do step 3 again |
-| `stopped` | The bridge is stopping |
+| Status                                                         | Meaning                                                                              |
+| -------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
+| `not set up`                                                   | There is no `relay-credential.json`. Do step 3                                       |
+| `connecting to the relay`                                      | The bridge is opening its link to the relay                                          |
+| `connected to the relay since <time>`                          | The link is up; phones away from home reach the home                                 |
+| `can't reach the relay (<reason>); retrying in <n> s`          | The relay or the internet can't be reached. The bridge retries by itself             |
+| `the relay rejected this home's credential`                    | The credential was replaced or the home is unknown. Do step 3 again with `--replace` |
+| `the credential file ... can't be used (...); import it again` | The file is damaged or doesn't match this home. Do step 3 again                      |
+| `stopped`                                                      | The bridge is stopping                                                               |
 
 On the coordinator's page, **Coordinator**:
 
-| Status | Meaning |
-|---|---|
-| `running` | Layer 2's coordinator is running |
-| `STUB (Layer 2's coordinator isn't built yet), running` | A labelled stub runs instead of Layer 2's coordinator |
-| `restarting after a crash` | It exited with an error; the bridge restarts it. The last error follows |
-| `bad config` | It refused `coordinator.json`. The last error says why |
-| `not started; restart the bridge to start it` | Restart the bridge |
+| Status                                                  | Meaning                                                                 |
+| ------------------------------------------------------- | ----------------------------------------------------------------------- |
+| `running`                                               | Layer 2's coordinator is running                                        |
+| `STUB (Layer 2's coordinator isn't built yet), running` | A labelled stub runs instead of Layer 2's coordinator                   |
+| `restarting after a crash`                              | It exited with an error; the bridge restarts it. The last error follows |
+| `bad config`                                            | It refused `coordinator.json`. The last error says why                  |
+| `not started; restart the bridge to start it`           | Restart the bridge                                                      |
 
 On the camera laptop's page:
 
-| Status | Meaning |
-|---|---|
-| `Contacting the home laptop at <address>…` | It is reaching the coordinator's bridge on port 7480 |
-| The QR code and Home code | Waiting for a caregiver to approve in the app |
-| `This laptop is missing something the worker needs.` | Layer 2's check found something missing; it is listed. Fix it and press **Check again** |
-| `Joined` | The coordinator accepted the worker |
-| `Connecting to the home at <address>…` | The worker isn't connected yet. After a while the page says to check that the coordinator's bridge runs and both laptops are on the same network |
-| `Restarting the worker after a crash: <error>` | The worker exited with an error; the bridge restarts it |
-| `The worker isn't running: <error>` | The worker stopped. Restart the bridge |
-| `The home rejected this laptop's token.` | The coordinator doesn't know this laptop. Press **Join again** |
-| `Link to the home laptop: not connected: <reason>` | The camera laptop's bridge can't reach the coordinator's bridge |
+| Status                                               | Meaning                                                                                                                                          |
+| ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `Contacting the home laptop at <address>…`           | It is reaching the coordinator's bridge on port 7480                                                                                             |
+| The QR code and Home code                            | Waiting for a caregiver to approve in the app                                                                                                    |
+| `This laptop is missing something the worker needs.` | Layer 2's check found something missing; it is listed. Fix it and press **Check again**                                                          |
+| `Joined`                                             | The coordinator accepted the worker                                                                                                              |
+| `Connecting to the home at <address>…`               | The worker isn't connected yet. After a while the page says to check that the coordinator's bridge runs and both laptops are on the same network |
+| `Restarting the worker after a crash: <error>`       | The worker exited with an error; the bridge restarts it                                                                                          |
+| `The worker isn't running: <error>`                  | The worker stopped. Restart the bridge                                                                                                           |
+| `The home rejected this laptop's token.`             | The coordinator doesn't know this laptop. Press **Join again**                                                                                   |
+| `Link to the home laptop: not connected: <reason>`   | The camera laptop's bridge can't reach the coordinator's bridge                                                                                  |
 
 ## 8. Stopping everything
 
