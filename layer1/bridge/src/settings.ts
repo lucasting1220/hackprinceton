@@ -366,3 +366,6 @@ export const KEEP_AWAKE_WINDOWS_FILE = "powershell.exe";
 /** How long the keep-awake helper may take to start, and to end once the bridge stops it. */
 export const KEEP_AWAKE_START_TIMEOUT_MS = 5_000;
 export const KEEP_AWAKE_STOP_TIMEOUT_MS = 5_000;
+
+/** The pairing and join QR codes' size on the page, in CSS pixels, small enough to fit a phone camera. */
+export const QR_DISPLAY_PX = 320;

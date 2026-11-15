@@ -1,5 +1,5 @@
 import { renderSVG } from "uqr";
-import { QR_BORDER_MODULES, QR_ERROR_CORRECTION } from "./settings.ts";
+import { QR_BORDER_MODULES, QR_DISPLAY_PX, QR_ERROR_CORRECTION } from "./settings.ts";
 
 /**
  * Draws `payload` as a QR code in inline SVG, as contracts/phone-hub.md §2.1 has it: its UTF-8
@@ -10,8 +10,11 @@ import { QR_BORDER_MODULES, QR_ERROR_CORRECTION } from "./settings.ts";
  */
 export function qrSvg(payload: string): string {
   // uqr keeps an array of bytes in byte mode, but may draw a string in a smaller mode.
-  return renderSVG([...Buffer.from(payload, "utf8")], {
+  const svg = renderSVG([...Buffer.from(payload, "utf8")], {
     ecc: QR_ERROR_CORRECTION,
     border: QR_BORDER_MODULES,
   });
+  // uqr's SVG has only a viewBox, so a page would stretch it to its full width, too big for a phone
+  // camera to frame. Plain width and height attributes size it; the page's CSP allows no style.
+  return svg.replace("<svg ", `<svg width="${QR_DISPLAY_PX}" height="${QR_DISPLAY_PX}" `);
 }

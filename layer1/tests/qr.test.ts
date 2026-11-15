@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { encode } from "uqr";
 import { qrSvg } from "../bridge/src/qr.ts";
+import { QR_DISPLAY_PX } from "../bridge/src/settings.ts";
 
 // A pairing code's payload as contracts/phone-hub.md §2.1 lays it out: compact JSON, five fields.
 const secret = Buffer.alloc(16, 0xa5).toString("base64url");
@@ -73,5 +74,12 @@ describe("qrSvg", () => {
       new Set(["xmlns", "viewBox", "fill", "width", "height", "d"]),
     );
     assert.ok(!svg.includes(secret), "the QR secret appears as text");
+  });
+
+  test("has a fixed display size, so a page doesn't stretch it past a phone camera's view", () => {
+    const opening = qrSvg(payload).slice(0, qrSvg(payload).indexOf(">") + 1);
+    assert.match(opening, new RegExp(` width="${QR_DISPLAY_PX}"`));
+    assert.match(opening, new RegExp(` height="${QR_DISPLAY_PX}"`));
+    assert.match(opening, / viewBox="0 0 \d+ \d+"/);
   });
 });
