@@ -17,11 +17,13 @@ from fastapi import FastAPI, WebSocket
 
 from layer2 import settings
 from layer2.contracts import CoordinatorConfig
+from layer2.coordinator.ai_plan import choose_plan
 from layer2.coordinator.event_log import EventLog
-from layer2.coordinator.plan import JobNeed, Placement
+from layer2.coordinator.plan import JobNeed, LaptopView, Placement, Plan
 from layer2.coordinator.registry import Registry
 from layer2.coordinator.server import create_control_app, create_dashboard_app
 from layer2.files import ConfigError, load_config, wait_for_stop_file
+from layer2.job_files import job_needs
 from layer2.stopping import consume_stop_file, stop_requested, stop_signals
 
 log = logging.getLogger(__name__)
@@ -81,14 +83,21 @@ async def _log_when_ready(servers: list[_Server], config: CoordinatorConfig) -> 
 
 
 def _job_needs() -> list[JobNeed]:
-    """Every job Layers 3 and 4 ask for. Empty until the job description contract exists and
-    the job folders are read."""
-    return []
+    """Every always-on job Layers 3 and 4 provide, read again at each re-plan."""
+    return job_needs()
 
 
 async def _serve(config: CoordinatorConfig) -> int:
     registry: Registry[WebSocket] = Registry()
-    placement = Placement(_job_needs)
+    planner_log = Path(config.state_dir) / "planner.log"
+
+    def planner(
+        needs: list[JobNeed], connected: list[LaptopView], known: set[str], previous: Plan
+    ) -> Plan:
+        plan, _ = choose_plan(config.ollama_url, needs, connected, known, previous, planner_log)
+        return plan
+
+    placement = Placement(_job_needs, planner=planner)
     events = EventLog(Path(config.state_dir) / "events")
     control = create_control_app(config, registry, placement, events)
     servers = [

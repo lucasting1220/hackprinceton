@@ -127,11 +127,6 @@ Catalog = Callable[[str], JobSpec | None]
 """Finds a job by name in this laptop's job folders; None if there is no such job. May block."""
 
 
-def no_jobs(name: str) -> JobSpec | None:
-    """The catalog until the job description contract exists: every job is unknown."""
-    return None
-
-
 class JobControl:
     """What the coordinator's `start` and `stop` messages act on: the runner plus the catalog
     that turns a job's name into the program to run."""

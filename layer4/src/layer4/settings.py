@@ -20,6 +20,22 @@ MONITORING_STOPPED_AFTER = timedelta(seconds=30)
 EARLIEST_SIGNAL_TIME = datetime(1970, 1, 2, tzinfo=UTC)
 LATEST_SIGNAL_TIME = datetime(2999, 12, 31, tzinfo=UTC)
 
+# Fall detection: one signal per window carries the window's highest confidence; frames older
+# than the age limit are skipped; no reading for the gap means fall detection has stopped.
+FALL_SIGNAL_WINDOW = timedelta(seconds=1)
+FALL_FRAME_MAX_AGE = timedelta(seconds=2)
+FALL_DETECTION_GAP = timedelta(seconds=5)
+
+# Alert rewrite: how much of the event log the quick model sees (proposed in the Layer 4 doc),
+# and the longest rewrite the phone is sent; a longer one is dropped and the template stands.
+REWRITE_CONTEXT = timedelta(minutes=10)
+REWRITE_MAX_CHARS = 300
+
+# Help check: the longest transcript tail the quick model reads, and how long the check may
+# keep failing before it counts as stopped.
+HELP_TRANSCRIPT_MAX_CHARS = 2000
+HELP_CHECK_GAP = timedelta(seconds=5)
+
 
 @dataclass(frozen=True)
 class RuleThresholds:

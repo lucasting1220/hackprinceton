@@ -1,0 +1,266 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Debbie: this home's laptops</title>
+<style>
+  :root {
+    --text: #111827; --muted: #4b5563; --faint: #9ca3af; --line: #e5e7eb; --page: #f8fafc;
+    --card: #ffffff; --ok: #047857; --ok-bg: #d1fae5; --warn: #b45309; --warn-bg: #fef3c7;
+    --bad: #b91c1c; --bad-bg: #fee2e2; --ram: #2563eb; --cpu: #ea580c; --track: #eef2f7;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 2rem 2.5rem; font: 20px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif;
+         color: var(--text); background: var(--page); }
+  header { display: flex; justify-content: space-between; align-items: baseline; flex-wrap: wrap; gap: 1rem; }
+  h1 { margin: 0; font-size: 2.2rem; letter-spacing: -0.02em; }
+  #clock { color: var(--muted); font-variant-numeric: tabular-nums; }
+  #error { color: var(--bad); min-height: 1.4em; margin: 0.4rem 0; font-weight: 600; }
+  #tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1rem; margin: 1rem 0 1.5rem; }
+  .tile { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 1rem 1.25rem; }
+  .tile .value { font-size: 2.6rem; font-weight: 700; line-height: 1.1; font-variant-numeric: tabular-nums; }
+  .tile .label { color: var(--muted); }
+  .tile.bad .value { color: var(--bad); }
+  #cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(420px, 1fr)); gap: 1.25rem; }
+  .card { background: var(--card); border: 2px solid var(--line); border-radius: 16px; padding: 1.25rem 1.4rem; }
+  .card.quiet { border-color: var(--bad); }
+  .head { display: flex; justify-content: space-between; align-items: center; gap: 0.75rem; }
+  .name { font-weight: 700; font-size: 1.5rem; }
+  .pill { font-size: 0.85rem; font-weight: 600; padding: 0.2rem 0.75rem; border-radius: 999px;
+          background: var(--ok-bg); color: var(--ok); white-space: nowrap; }
+  .quiet .pill { background: var(--bad-bg); color: var(--bad); }
+  .specs { color: var(--muted); font-size: 0.9rem; margin: 0.35rem 0 0.9rem; }
+  .meter { margin: 0.55rem 0; }
+  .meter .row { display: flex; justify-content: space-between; font-size: 0.95rem; }
+  .meter .row b { font-variant-numeric: tabular-nums; }
+  .bar { height: 14px; background: var(--track); border-radius: 7px; overflow: hidden; margin-top: 0.2rem; }
+  .fill { height: 100%; border-radius: 7px; transition: width 0.4s ease; }
+  .ram .fill { background: var(--ram); }
+  .cpu .fill { background: var(--cpu); }
+  svg { width: 100%; height: 70px; display: block; margin-top: 0.6rem; background: var(--track); border-radius: 8px; }
+  .legend { font-size: 0.8rem; color: var(--faint); }
+  .legend i { display: inline-block; width: 0.8rem; height: 0.25rem; vertical-align: middle; margin: 0 0.3rem 0 0.6rem; }
+  .jobs { margin-top: 1rem; display: flex; flex-wrap: wrap; gap: 0.5rem; }
+  .job { font-size: 0.95rem; padding: 0.3rem 0.8rem; border-radius: 999px; background: var(--ok-bg); color: var(--ok); }
+  .job.starting { background: var(--track); color: var(--muted); }
+  .job.restarting { background: var(--warn-bg); color: var(--warn); }
+  .none { color: var(--faint); }
+  .missing { margin-top: 0.8rem; font-size: 0.9rem; color: var(--warn); }
+  #dropped-section { margin-top: 1.75rem; }
+  #dropped-section h2 { font-size: 1.3rem; margin: 0 0 0.5rem; }
+  #dropped li { margin: 0.25rem 0; }
+  @media (max-width: 600px) {
+    body { padding: 1rem; font-size: 17px; }
+    #cards { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>This home's laptops</h1>
+  <span id="clock"></span>
+</header>
+<p id="error"></p>
+<div id="tiles"></div>
+<div id="cards"></div>
+<section id="dropped-section">
+  <h2>Work not placed</h2>
+  <ul id="dropped"></ul>
+</section>
+<script>
+const STALE_AFTER_MS = __STALE_AFTER_MS__;
+const POLL_MS = __POLL_MS__;
+const HISTORY_POINTS = __HISTORY_POINTS__;
+const SVG = "http://www.w3.org/2000/svg";
+const history = new Map();  // node_id -> [{ram: 0..1, cpu: 0..1}]
+
+function el(tag, className, text) {
+  const node = document.createElement(tag);
+  if (className) node.className = className;
+  if (text !== undefined) node.textContent = text;
+  return node;
+}
+
+async function getJson(url) {
+  const response = await fetch(url, { cache: "no-store", signal: AbortSignal.timeout(POLL_MS * 2) });
+  if (!response.ok) throw new Error(url + " answered " + response.status);
+  return response.json();
+}
+
+function meter(kind, label, value, fraction) {
+  const box = el("div", "meter " + kind);
+  const row = el("div", "row");
+  row.appendChild(el("span", "", label));
+  row.appendChild(el("b", "", value));
+  box.appendChild(row);
+  const bar = el("div", "bar");
+  const fill = el("div", "fill");
+  fill.style.width = Math.max(0, Math.min(1, fraction)) * 100 + "%";
+  bar.appendChild(fill);
+  box.appendChild(bar);
+  return box;
+}
+
+function line(points, key, color) {
+  const path = document.createElementNS(SVG, "polyline");
+  const step = 100 / (HISTORY_POINTS - 1);
+  const start = HISTORY_POINTS - points.length;
+  path.setAttribute("points", points.map((p, i) => ((start + i) * step) + "," + (30 - p[key] * 28)).join(" "));
+  path.setAttribute("fill", "none");
+  path.setAttribute("stroke", color);
+  path.setAttribute("stroke-width", "2");
+  path.setAttribute("vector-effect", "non-scaling-stroke");
+  return path;
+}
+
+function chart(points) {
+  const svg = document.createElementNS(SVG, "svg");
+  svg.setAttribute("viewBox", "0 0 100 30");
+  svg.setAttribute("preserveAspectRatio", "none");
+  svg.setAttribute("role", "img");
+  svg.setAttribute("aria-label", "Memory and processor use over the last two minutes");
+  svg.appendChild(line(points, "ram", "var(--ram)"));
+  svg.appendChild(line(points, "cpu", "var(--cpu)"));
+  return svg;
+}
+
+function legend() {
+  const box = el("div", "legend", "Last two minutes:");
+  for (const [name, color] of [["Memory", "var(--ram)"], ["Processor", "var(--cpu)"]]) {
+    const swatch = el("i");
+    swatch.style.background = color;
+    box.appendChild(swatch);
+    box.appendChild(document.createTextNode(name));
+  }
+  return box;
+}
+
+function remember(nodeId, ram, cpu) {
+  const points = history.get(nodeId) || [];
+  points.push({ ram: ram, cpu: cpu });
+  while (points.length > HISTORY_POINTS) points.shift();
+  history.set(nodeId, points);
+  return points;
+}
+
+function card(laptop, hardware, jobs, now) {
+  const age = now - Date.parse(laptop.last_status_at);
+  const quiet = age > STALE_AFTER_MS;
+  const box = el("div", quiet ? "card quiet" : "card");
+  const head = el("div", "head");
+  head.appendChild(el("span", "name", laptop.display_name));
+  head.appendChild(el("span", "pill", quiet ? "Not reporting" : "Online"));
+  box.appendChild(head);
+  if (hardware) {
+    const s = hardware.specs;
+    const gpu = s.gpu === "none" ? "no GPU" : s.gpu === "apple-silicon" ? "Apple silicon" : "NVIDIA GPU";
+    const os = s.os === "macos" ? "macOS" : "Windows";
+    box.appendChild(el("div", "specs",
+      os + " " + s.os_version + " · " + s.cpu + " · " + s.cores + " cores · " + gpu +
+      (hardware.tools.ollama ? " · Ollama ready" : " · no Ollama")));
+    const live = !quiet && hardware.memory_free_gb !== null && hardware.cpu_percent !== null;
+    if (live) {
+      const used = Math.max(0, s.memory_gb - hardware.memory_free_gb);
+      const ram = s.memory_gb > 0 ? used / s.memory_gb : 0;
+      const cpu = hardware.cpu_percent / 100;
+      box.appendChild(meter("ram", "Memory", used.toFixed(1) + " / " + s.memory_gb + " GB", ram));
+      box.appendChild(meter("cpu", "Processor", Math.round(hardware.cpu_percent) + "%", cpu));
+      box.appendChild(chart(remember(laptop.node_id, ram, cpu)));
+      box.appendChild(legend());
+    } else {
+      box.appendChild(el("div", "meter none", quiet
+        ? "Last report " + Math.round(age / 1000) + " s ago"
+        : "Waiting for the first report"));
+    }
+  }
+  const jobBox = el("div", "jobs");
+  if (jobs.length === 0) jobBox.appendChild(el("span", "none", "No jobs on this laptop"));
+  for (const job of jobs) {
+    const label = job.state === "running" ? job.job : job.job + " · " + job.state;
+    jobBox.appendChild(el("span", "job " + job.state, label));
+  }
+  box.appendChild(jobBox);
+  if (laptop.missing.length > 0) {
+    box.appendChild(el("div", "missing", "Missing: " + laptop.missing.map((m) => m.id).join(", ")));
+  }
+  return box;
+}
+
+function tiles(state, hardwareById, now) {
+  let online = 0, used = 0, total = 0;
+  for (const laptop of state.laptops) {
+    const quiet = now - Date.parse(laptop.last_status_at) > STALE_AFTER_MS;
+    if (!quiet) online += 1;
+    const hw = hardwareById.get(laptop.node_id);
+    if (hw && !quiet) {
+      total += hw.specs.memory_gb;
+      if (hw.memory_free_gb !== null) used += Math.max(0, hw.specs.memory_gb - hw.memory_free_gb);
+    }
+  }
+  const running = state.jobs.filter((job) => job.state === "running").length;
+  const box = document.getElementById("tiles");
+  box.replaceChildren();
+  const tile = (value, label, bad) => {
+    const t = el("div", bad ? "tile bad" : "tile");
+    t.appendChild(el("div", "value", value));
+    t.appendChild(el("div", "label", label));
+    box.appendChild(t);
+  };
+  tile(online + " / " + state.laptops.length, "laptops online", online < state.laptops.length);
+  tile(total + " GB", "memory pooled across the home (" + used.toFixed(0) + " GB in use)", false);
+  tile(String(running), running === 1 ? "job running" : "jobs running", false);
+  tile(String(state.dropped.length), "work not placed", state.dropped.length > 0);
+}
+
+function markAllUnknown(message) {
+  for (const box of document.getElementById("cards").children) {
+    box.className = "card quiet";
+    const pill = box.querySelector(".pill");
+    if (pill) pill.textContent = "Unknown";
+  }
+  document.getElementById("error").textContent = message;
+}
+
+async function refresh() {
+  let state;
+  try {
+    state = await getJson("/api/state");
+  } catch (problem) {
+    markAllUnknown("Cannot reach the coordinator. Laptop status is unknown.");
+    return;
+  }
+  let hardwareById = new Map();
+  let hardwareError = "";
+  try {
+    const hardware = await getJson("/api/hardware");
+    hardwareById = new Map(hardware.laptops.map((h) => [h.node_id, h]));
+  } catch (problem) {
+    hardwareError = "Hardware details are unavailable right now.";
+  }
+  const now = Date.parse(state.updated_at);
+  document.getElementById("clock").textContent = "Updated " + new Date(now).toLocaleTimeString();
+  const cards = document.getElementById("cards");
+  cards.replaceChildren();
+  for (const laptop of state.laptops) {
+    const jobs = state.jobs.filter((job) => job.node_id === laptop.node_id);
+    cards.appendChild(card(laptop, hardwareById.get(laptop.node_id), jobs, now));
+  }
+  if (state.laptops.length === 0) cards.appendChild(el("p", "none", "No laptops have joined yet."));
+  tiles(state, hardwareById, now);
+  const dropped = document.getElementById("dropped");
+  dropped.replaceChildren();
+  for (const item of state.dropped) dropped.appendChild(el("li", "", item.work + ": " + item.reason));
+  if (state.dropped.length === 0) dropped.appendChild(el("li", "none", "Everything is placed"));
+  document.getElementById("error").textContent = hardwareError;
+}
+
+async function loop() {
+  await refresh();
+  setTimeout(loop, POLL_MS);
+}
+
+loop();
+</script>
+</body>
+</html>

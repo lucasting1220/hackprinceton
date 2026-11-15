@@ -3,8 +3,10 @@
 Control app (WebSocket /ws on 0.0.0.0:listen_port): workers join with `hello` and report with
 `status`; a connection's first status re-plans, and each status is answered with the `start`
 and `stop` orders that worker needs (coordinator/plan.py). Jobs reach the event log through
-their worker with `log_append` and `log_read`, each answered with a `reply`. Dashboard app
-(127.0.0.1:dashboard_port): the dashboard page and GET /api/state.
+their worker with `log_append` and `log_read`, and read the home's state with `state_read`,
+each answered with a `reply`. Dashboard app
+(127.0.0.1:dashboard_port): the dashboard page, GET /api/state (the
+Layer 1 contract) and GET /api/hardware (Layer 2 only: specs and load, for the page).
 Neither ever logs a token, a whole `hello` or raw text a client chose.
 """
 
@@ -28,6 +30,7 @@ from layer2.contracts import (
     LoggedEvent,
     LogRead,
     Reply,
+    StateRead,
     StatusMessage,
     WelcomeAccepted,
     WelcomeRejected,
@@ -161,8 +164,8 @@ def create_control_app(
     return app
 
 
-_FromWorker = TypeAdapter[StatusMessage | LogAppend | LogRead](
-    Annotated[StatusMessage | LogAppend | LogRead, Field(discriminator="type")]
+_FromWorker = TypeAdapter[StatusMessage | LogAppend | LogRead | StateRead](
+    Annotated[StatusMessage | LogAppend | LogRead | StateRead, Field(discriminator="type")]
 )
 
 
@@ -198,6 +201,11 @@ async def _receive(
                 continue
             if not registry.is_current(node_id, socket):
                 continue
+            if isinstance(message, StateRead):
+                state = registry.api_state(placement.plan.dropped)
+                reply = Reply(type="reply", schema_version=1, id=message.id, ok=True, state=state)
+                await socket.send_text(reply.model_dump_json(exclude_none=True))
+                continue
             if not isinstance(message, StatusMessage):
                 reply = await _answer(message, events)
                 await socket.send_text(reply.model_dump_json(exclude_none=True))
@@ -205,7 +213,7 @@ async def _receive(
             registry.status(node_id, socket, message)
             if not planned:
                 planned = True  # its memory is known now, so the plan can use this laptop
-                placement.replan(registry.connected(), registry.known())
+                placement.request_replan(lambda: (registry.connected(), registry.known()))
             for order in placement.orders(node_id, registry.job_reports()):
                 log.info("L2 coordinator: %s job %s on %s", order.type, order.job, node_id)
                 await socket.send_text(order.model_dump_json())
@@ -263,6 +271,10 @@ def create_dashboard_app(
     async def api_state() -> JSONResponse:
         dropped = placement.plan.dropped if placement is not None else ()
         return JSONResponse(registry.api_state(dropped).model_dump(mode="json"))
+
+    @app.get("/api/hardware")
+    async def hardware() -> JSONResponse:
+        return JSONResponse(registry.hardware().model_dump(mode="json"))
 
     @app.get("/")
     async def page() -> HTMLResponse:

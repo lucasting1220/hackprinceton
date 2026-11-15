@@ -15,6 +15,7 @@ reports it, so it is stopped first and started second. An order not acted on is 
 after ORDER_RESEND_S.
 """
 
+import asyncio
 import time
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
@@ -91,21 +92,51 @@ def _can_hold(laptop: LaptopView | None, need: JobNeed) -> bool:
     return laptop is None or need.sensor is None or need.sensor in laptop.sensors
 
 
+Planner = Callable[[list[JobNeed], list[LaptopView], set[str], Plan], Plan]
+"""Makes a plan; may block for a long time (the AI planner), so it runs in a thread."""
+Snapshot = Callable[[], tuple[list[LaptopView], set[str]]]
+"""The connected laptops and every known laptop, read when a plan starts."""
+
+
 class Placement:
-    """The current plan, and which orders each worker needs to match it."""
+    """The current plan, and which orders each worker needs to match it.
+
+    Without a `planner`, re-planning is the rule-based plan, made at once. With one (the AI
+    planner), each re-plan runs in a thread, one at a time, reading the laptops when it
+    starts; the current plan keeps answering orders until the new one is ready.
+    """
 
     def __init__(
         self,
         needs: Callable[[], list[JobNeed]],
         monotonic: Callable[[], float] = time.monotonic,
+        planner: Planner | None = None,
     ) -> None:
         self._needs = needs
         self._monotonic = monotonic
+        self._planner = planner
         self.plan = Plan()
         self._sent: dict[tuple[str, str, str], float] = {}
+        self._planning = asyncio.Lock()
+        self._tasks: set[asyncio.Task[None]] = set()
 
     def replan(self, connected: list[LaptopView], known: set[str]) -> None:
         self.plan = rule_plan(self._needs(), connected, known, self.plan)
+
+    def request_replan(self, snapshot: Snapshot) -> None:
+        """Re-plan now (rules) or in the background (a planner). Call from the event loop."""
+        if self._planner is None:
+            self.replan(*snapshot())
+            return
+        task = asyncio.create_task(self._replan_in_background(self._planner, snapshot))
+        self._tasks.add(task)
+        task.add_done_callback(self._tasks.discard)
+
+    async def _replan_in_background(self, planner: Planner, snapshot: Snapshot) -> None:
+        async with self._planning:
+            connected, known = snapshot()
+            needs = self._needs()
+            self.plan = await asyncio.to_thread(planner, needs, connected, known, self.plan)
 
     def orders(self, node_id: str, reports: dict[str, list[JobStatus]]) -> list[Order]:
         """The orders for `node_id`, given the latest job reports of every connected laptop.
