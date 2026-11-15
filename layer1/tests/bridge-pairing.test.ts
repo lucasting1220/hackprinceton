@@ -137,6 +137,10 @@ test("a phone pairs through both sides, stays paired across a restart, and Remov
   // Remove on the page, and the gateway refuses the phone as removed.
   const secondPage = pageClient(second.url);
   assert.match((await secondPage.get("/")).page, /Caregiver&#39;s iPhone, caregiver, paired/);
+  const devices = (await secondPage.get("/devices")).page;
+  assert.match(devices, /<a href="\/devices" class="on">/, "the Devices tab isn't the one shown");
+  assert.match(devices, /<div>Caregiver&#39;s iPhone<\/div><div class="muted">caregiver, paired /);
+  assert.match(devices, /1 phone and 0 laptops connected/);
   const removed = await secondPage.post("/phones/remove", { device_id: deviceId });
   assert.equal(removed.statusCode, 303);
   const refused = await fetchPage(port);
