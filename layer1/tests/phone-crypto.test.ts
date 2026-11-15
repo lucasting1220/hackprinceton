@@ -341,4 +341,22 @@ describe("envelopes", () => {
     const short = createSecretKey(Buffer.alloc(16));
     assert.throws(() => open(v.envelope, short, labelOf(v)), { code: "ERR_CRYPTO_INVALID_KEYLEN" });
   });
+
+  test("open refuses a tag that doesn't verify, however OpenSSL reports it", () => {
+    // OpenSSL 3, which Node's own builds for Linux and Windows carry, throws a plain "Unsupported
+    // state or unable to authenticate data" with no code; OpenSSL 4 adds ERR_OSSL_BAD_DECRYPT.
+    const v = first(vectors.envelopes);
+    const key = createSecretKey(raw(v.key));
+    const probe = crypto.createDecipheriv("chacha20-poly1305", Buffer.alloc(32), Buffer.alloc(12), {
+      authTagLength: 16,
+    });
+    const final = mock.method(Object.getPrototypeOf(probe), "final", () => {
+      throw new Error("Unsupported state or unable to authenticate data");
+    });
+    try {
+      assert.throws(() => open(v.envelope, key, labelOf(v)), refused("not_authentic"));
+    } finally {
+      final.mock.restore();
+    }
+  });
 });

@@ -227,13 +227,17 @@ export function open(envelope: Envelope, key: KeyObject, label: Label): Buffer {
   decipher.setAAD(associatedData(envelope.kid, label), { plaintextLength: tagAt });
   decipher.setAuthTag(sealed.subarray(tagAt));
   const unverified = decipher.update(sealed.subarray(0, tagAt));
+  let verified: Buffer;
   try {
-    return Buffer.concat([unverified, decipher.final()]);
-  } catch (error) {
+    // With the tag set, final() fails only when the tag doesn't verify. OpenSSL 4 reports that as
+    // ERR_OSSL_BAD_DECRYPT, but OpenSSL 3, which Node's own builds for Linux and Windows carry,
+    // throws a plain "Unsupported state or unable to authenticate data" with no code.
+    verified = decipher.final();
+  } catch {
     unverified.fill(0);
-    if (codeOf(error) === "ERR_OSSL_BAD_DECRYPT") throw new PhoneCryptoRefusal("not_authentic");
-    throw error;
+    throw new PhoneCryptoRefusal("not_authentic");
   }
+  return Buffer.concat([unverified, verified]);
 }
 
 /** A join token's length in bytes (contracts/README.md: 64 lowercase hex characters). */

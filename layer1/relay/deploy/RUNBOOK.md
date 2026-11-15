@@ -39,11 +39,11 @@ Check: `ssh "$RELAY" 'id debbie-relay; sudo stat -c "%a %U %G %n" /opt/debbie /e
 
 ## 2. Run the tests on Linux (first deploy, and after a change to the relay)
 
-The relay runs only on Linux, so its tests must pass there once. This uses a scratch copy in the `debbie` user's home with the development dependencies, then deletes it.
+The relay runs only on Linux, so its tests must pass there once. The copy includes the top-level `contracts/` folder, which the contract tests read. This uses a scratch copy in the `debbie` user's home with the development dependencies, then deletes it.
 
 ```sh
 COMMIT=$(git rev-parse --verify HEAD)
-git archive --format=tar.gz "$COMMIT" .gitignore layer1 | ssh "$RELAY" 'rm -rf ~/relay-test && mkdir ~/relay-test && tar -xz -C ~/relay-test && cd ~/relay-test && git init -q && cd layer1 && npm ci --ignore-scripts && npm test; status=$?; rm -rf ~/relay-test; exit $status'
+git archive --format=tar.gz "$COMMIT" .gitignore contracts layer1 | ssh "$RELAY" 'rm -rf ~/relay-test && mkdir ~/relay-test && tar -xz -C ~/relay-test && cd ~/relay-test && git init -q && cd layer1 && npm ci --ignore-scripts && npm test; status=$?; rm -rf ~/relay-test; exit $status'
 ```
 
 Check: the last lines show `fail 0`, and the command exits 0.
