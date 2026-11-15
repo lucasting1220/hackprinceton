@@ -15,7 +15,7 @@ import logging
 import sys
 import time
 from datetime import UTC, date, datetime
-from typing import Literal, Protocol, runtime_checkable
+from typing import Literal, Protocol
 
 from layer2.job_client import Layer2, Layer2Error
 from layer3 import settings
@@ -24,12 +24,10 @@ from layer3.watch_receiver import WatchItem, WatchReceiver
 logger = logging.getLogger(__name__)
 
 EXIT_NO_LAYER2 = 2
-EXIT_NO_PASS_ON = 1
 
 
-@runtime_checkable
 class WatchClient(Protocol):
-    """The two Layer 2 job client calls this job makes."""
+    """The two Layer 2 job client calls this job makes: Layer2 in the job, a stub in tests."""
 
     def receive(self, kind: Literal["watch-data"], wait_s: float = ...) -> object: ...
 
@@ -123,12 +121,6 @@ def main() -> int:
     except Layer2Error as error:
         logger.error("L3 watch data: %s; start me through Layer 2", error)
         return EXIT_NO_LAYER2
-    if not isinstance(layer2, WatchClient):
-        logger.error(
-            "L3 watch data: Layer 2's job client has no pass_on, so readings cannot reach "
-            "Layer 4; not taking watch-data"
-        )
-        return EXIT_NO_PASS_ON
     run(layer2)
     return 0
 

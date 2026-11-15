@@ -2,6 +2,8 @@
 
 import json
 import logging
+import socket
+import threading
 from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Literal
@@ -9,7 +11,7 @@ from typing import Literal
 import pytest
 from fake_layer2_client import FakeLayer2
 
-from layer2.job_client import Layer2Error
+from layer2.job_client import Layer2, Layer2Error
 from layer3 import settings, watch_job
 from layer3.watch_job import pass_on_batch, receive_once, watch_reading_message
 from layer3.watch_receiver import HeartRateReading, WatchItem, WatchReceiver
@@ -214,25 +216,35 @@ def test_main_needs_layer2(monkeypatch: pytest.MonkeyPatch) -> None:
     assert watch_job.main() == watch_job.EXIT_NO_LAYER2
 
 
-def test_main_does_not_take_watch_data_when_layer2_has_no_pass_on(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    received: list[str] = []
+def test_layer2s_real_client_carries_the_contract_message_unchanged() -> None:
+    """The real Layer2.pass_on, against a stand-in for the worker's gateway on 127.0.0.1."""
+    requests: list[dict[str, object]] = []
+    with socket.create_server(("127.0.0.1", 0)) as server:
+        server.settimeout(5.0)
 
-    class ReceiveOnly:
-        def receive(self, kind: str, wait_s: float = 25.0) -> object:
-            received.append(kind)
-            return None
+        def answer_one() -> None:
+            connection, _ = server.accept()
+            with connection, connection.makefile("rwb") as stream:
+                requests.append(json.loads(stream.readline()))
+                stream.write(b'{"ok": true}\n')
 
-    class NoPassOn:
-        @classmethod
-        def from_env(cls) -> ReceiveOnly:
-            return ReceiveOnly()
+        gateway = threading.Thread(target=answer_one)
+        gateway.start()
+        example = contract("watch-reading.json")
+        batch = {"heart_rate": [{"measured_at": example["measured_at"], "bpm": example["bpm"]}]}
+        last_received_at = example["last_received_at"]
+        assert isinstance(last_received_at, str)
+        layer2 = Layer2(f"127.0.0.1:{server.getsockname()[1]}", "test-token")
 
-    monkeypatch.setattr(watch_job, "Layer2", NoPassOn)
+        taken = pass_on_batch(
+            layer2, WatchReceiver(), batch, datetime.fromisoformat(last_received_at)
+        )
+        gateway.join(5.0)
 
-    assert watch_job.main() == watch_job.EXIT_NO_PASS_ON
-    assert received == []
+    assert taken == 1
+    [request] = requests
+    assert request["type"] == "pass_on" and request["kind"] == "watch-readings"
+    assert request["body"] == example
 
 
 def test_main_runs_the_job_on_layer2s_client(monkeypatch: pytest.MonkeyPatch) -> None:

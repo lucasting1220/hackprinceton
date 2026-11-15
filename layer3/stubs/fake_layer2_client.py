@@ -1,11 +1,10 @@
 """STUB: stands in for Layer 2's job client so the watch_data job can run with no coordinator.
 
 `receive` has the shape of the real `Layer2.receive("watch-data")` in layer2/job_client.py and
-hands over prepared batches from memory. `pass_on` stands in for Layer 2's
-`pass_on("watch-readings", message)`, which is not in layer2/job_client.py yet
-(contracts/README.md, "Layer 3 to Layer 4: watch readings"): it keeps each message, or raises
-Layer2Error as the real call does when no job takes watch-readings. Everything stays in memory
-and this never counts as an integration test.
+hands over prepared batches from memory. `pass_on` has the shape of the real
+`Layer2.pass_on("watch-readings", message)`: it keeps each message, or raises Layer2Error as the
+real call does when no job takes watch-readings. Everything stays in memory and this never
+counts as an integration test.
 """
 
 import logging
