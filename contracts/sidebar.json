@@ -1,0 +1,62 @@
+{
+  "schema_version": 1,
+  "brand": "Debbie",
+  "groups": [
+    {
+      "title": "Home",
+      "items": [
+        {
+          "id": "overview",
+          "label": "Overview",
+          "page": "dashboard",
+          "path": "/#overview",
+          "icon": "overview",
+          "home_laptop_only": true
+        },
+        {
+          "id": "setup",
+          "label": "Set up",
+          "page": "setup",
+          "path": "/",
+          "icon": "setup",
+          "home_laptop_only": false
+        },
+        {
+          "id": "devices",
+          "label": "Devices",
+          "page": "setup",
+          "path": "/devices",
+          "icon": "devices",
+          "home_laptop_only": false
+        }
+      ]
+    },
+    {
+      "title": "Laptops",
+      "one_item_per": "laptop",
+      "id": "<node_id>",
+      "label": "<display_name>",
+      "page": "dashboard",
+      "path": "/#<node_id>",
+      "icon": "laptop",
+      "home_laptop_only": true
+    }
+  ],
+  "pages": {
+    "dashboard": {
+      "served_by": "Layer 2 coordinator",
+      "port_from": "coordinator.json dashboard_port"
+    },
+    "setup": {
+      "served_by": "Layer 1 bridge",
+      "port_from": "coordinator.json bridge_url"
+    }
+  },
+  "icon_svg_attributes": "viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.8\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"",
+  "icons": {
+    "overview": "<rect x=\"3\" y=\"3\" width=\"8\" height=\"8\" rx=\"2\"/><rect x=\"13\" y=\"3\" width=\"8\" height=\"8\" rx=\"2\"/><rect x=\"3\" y=\"13\" width=\"8\" height=\"8\" rx=\"2\"/><rect x=\"13\" y=\"13\" width=\"8\" height=\"8\" rx=\"2\"/>",
+    "setup": "<circle cx=\"12\" cy=\"12\" r=\"9\"/><path d=\"M12 8 V16 M8 12 H16\"/>",
+    "devices": "<rect x=\"7\" y=\"3\" width=\"10\" height=\"18\" rx=\"2.5\"/><path d=\"M11 17.5 H13\"/>",
+    "laptop": "<rect x=\"4\" y=\"5\" width=\"16\" height=\"11\" rx=\"1.5\"/><path d=\"M2 19 H22\"/>"
+  }
+}

@@ -199,3 +199,20 @@ Added Nov 15 from what Layer 1's bridge already sends and accepts (Layer 1 doc "
   - `no_heart_data`: `true` when no heart-rate reading has arrived in the last 30 minutes, or none ever.
 - **Times** are ISO 8601 in UTC with `Z`. `type` and `schema_version` are allowed in replies and live status, and the bridge does not pass them on.
 - **Privacy:** a request's text, a reply's body and readings are never logged by Layer 2 or Layer 4.
+
+## Layer 1 and Layer 2: the sidebar
+
+Added Nov 15. The setup page (Layer 1's bridge) and the dashboard (Layer 2's coordinator) are two programs on two ports, but a person moves between them as one site, so both draw the same sidebar.
+
+| File | Written by | Read by | What it is |
+|---|---|---|---|
+| `sidebar.json` | Layer 1 and Layer 2 jointly | Layer 1 setup page, Layer 2 dashboard | The sidebar's groups, items, order, names, links and icons |
+
+### Rules that go with this file
+
+- **Same on both pages:** the brand, groups, items, labels, order and icons are exactly those in the file. Only which item is highlighted differs: the item whose page and path is showing.
+- **Home laptop only:** items and groups with `home_laptop_only: true` (Overview and the Laptops group) are drawn only on the home laptop, where the dashboard runs. A laptop that joined a home, or one with no home yet, shows Set up and Devices only.
+- **Links:** an item on the page that is showing links by its path; an item on the other page links to that page's port, from `coordinator.json` (`dashboard_port` for the dashboard, the port of `bridge_url` for the setup page), on the host name the current page was opened with (`127.0.0.1`, `localhost` or `home.debbie.health`, all of which both pages accept).
+- **Laptops group:** one item per laptop that has joined the home, sorted by `display_name` and then `node_id` (plain code-point order), labelled with its `display_name` and linking to `/#<node_id>` on the dashboard, with the node ID URL-encoded. The setup page takes them from the laptops the bridge has joined; the dashboard from `/api/state`.
+- **Icons:** each is an `<svg>` with `icon_svg_attributes`, holding the markup under its name in `icons`.
+- **Words:** "Set up" is the only sidebar item or heading on either page with "setup" or "set up" in its name, so it never looks like a second setup page.
