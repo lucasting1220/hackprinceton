@@ -229,3 +229,34 @@ export const RELAY_HUB_SILENT_CLOSE_MS = 40_000;
 
 /** How long a phone's command waits at the relay for the hub's answer before 504 hub_timeout. */
 export const RELAY_COMMAND_TIMEOUT_MS = 5_000;
+
+/** Apple's push service for each APNs environment (phone-hub.md §8). */
+export const APNS_ORIGINS = {
+  production: "https://api.push.apple.com",
+  sandbox: "https://api.sandbox.push.apple.com",
+} as const;
+
+/** How long one APNs request may take, connection included, before it counts as failed. */
+export const APNS_REQUEST_TIMEOUT_MS = 10_000;
+
+/** An APNs connection idle this long is closed, and opened again on the next push. */
+export const APNS_SESSION_IDLE_MS = 30 * 60_000;
+
+/** A provider token is renewed after 40 minutes: Apple refuses one older than 60, or a renewal within 20. */
+export const APNS_TOKEN_RENEW_MS = 40 * 60_000;
+
+/** The waits before each retry of a push Apple answered 429 or 5xx, or never answered; then it gives up. */
+export const APNS_RETRY_DELAYS_MS: readonly number[] = [1_000, 5_000, 15_000];
+
+/** The most bytes of an APNs answer's body the relay reads; Apple's are a few dozen. */
+export const APNS_ANSWER_MAX_BYTES = 4_096;
+
+/** Apple's limit on a push payload; a larger alert is pushed in its truncated form (phone-hub.md §8.1). */
+export const APNS_PAYLOAD_MAX_BYTES = 4_096;
+
+/** How long Apple keeps trying to deliver an alert push, and a hub offline or back online push. */
+export const PUSH_ALERT_EXPIRY_MS = 24 * 60 * 60_000;
+export const PUSH_HUB_STATUS_EXPIRY_MS = 60 * 60_000;
+
+/** At start, the relay pushes alerts it stored this recently but never pushed (R13). */
+export const RELAY_REPUSH_WINDOW_MS = 10 * 60_000;
