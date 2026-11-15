@@ -59,8 +59,14 @@ AUDIO_HOST_INTERFACES: dict[str, str] = {
 # The host interface that converts a mic's own rate only when it is asked to.
 AUDIO_INTERFACE_NEEDING_CONVERT_REQUEST: str = "Windows WASAPI"
 
-# How many watch readings the receiver remembers, to recognise one that is sent again.
+# How many measured times of each kind of watch reading the receiver remembers, to recognise a
+# reading that is sent again. A reading older than the oldest remembered time counts as a repeat.
 WATCH_SEEN_LIMIT: int = 20_000
+
+# How much of a refused watch value is written to the log, and how many refusals of one batch
+# are logged. The batch's summary line always carries the full count.
+WATCH_LOG_VALUE_LIMIT: int = 60
+WATCH_REFUSALS_LOGGED_PER_BATCH: int = 5
 
 # Every time on a watch reading must fall in this range. It mirrors EARLIEST_SIGNAL_TIME and
 # LATEST_SIGNAL_TIME in layer4/src/layer4/settings.py, so Layer 4 accepts each reading.

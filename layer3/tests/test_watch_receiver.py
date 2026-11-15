@@ -5,6 +5,7 @@ from datetime import UTC, date, datetime, timedelta, timezone
 
 import pytest
 
+from layer3 import settings
 from layer3.watch_receiver import (
     HeartRateReading,
     SleepReading,
@@ -37,7 +38,8 @@ BAD_READINGS: list[tuple[str, object]] = [
     ("heart_rate", {**HEART, "measured_at": 1794000000}),
     ("heart_rate", {**HEART, "measured_at": "yesterday"}),
     ("heart_rate", {**HEART, "measured_at": "2026-11-14T03:12:45"}),
-    ("heart_rate", {**HEART, "measured_at": "1969-12-31T23:59:59Z"}),
+    ("heart_rate", {**HEART, "measured_at": "1970-01-01T23:59:59Z"}),
+    ("heart_rate", {**HEART, "measured_at": "2999-12-31T00:00:01Z"}),
     ("heart_rate", {**HEART, "measured_at": "0001-01-01T00:00:00+05:00"}),
     ("heart_rate", {**HEART, "measured_at": "9999-12-31T23:59:59-05:00"}),
     ("heart_rate", {**HEART, "bpm": "72"}),
@@ -45,10 +47,14 @@ BAD_READINGS: list[tuple[str, object]] = [
     ("heart_rate", {**HEART, "bpm": float("nan")}),
     ("heart_rate", {**HEART, "bpm": float("inf")}),
     ("heart_rate", {**HEART, "bpm": 0}),
-    ("heart_rate", {**HEART, "bpm": 0.3}),
+    ("heart_rate", {**HEART, "bpm": 0.51}),
     ("steps", {**STEPS, "steps_today": -1}),
+    ("steps", {**STEPS, "steps_today": -0.4}),
+    ("sleep", {**SLEEP, "asleep_minutes": -1}),
+    ("sleep", {**SLEEP, "interruptions": -1}),
     ("sleep", {**SLEEP, "night_of": "last night"}),
     ("sleep", {**SLEEP, "night_of": 20261113}),
+    ("sleep", {**SLEEP, "night_of": "0001-01-01"}),
 ]
 
 
@@ -117,6 +123,90 @@ def test_only_a_new_reading_moves_last_received_at() -> None:
     assert kept.utcoffset() == timedelta(0)
 
 
+def test_a_later_new_reading_moves_last_received_at_forward() -> None:
+    receiver = WatchReceiver()
+    receiver.receive({"heart_rate": [HEART]}, ARRIVED)
+    later = ARRIVED + timedelta(hours=1)
+
+    [item] = receiver.receive({"steps": [STEPS]}, later)
+
+    assert item.last_received_at == later
+    assert receiver.last_received_at == later
+
+
+@pytest.mark.parametrize(
+    ("measured_at", "passed_on"),
+    [("1970-01-02T00:00:00Z", 1), ("2999-12-31T00:00:00Z", 1)],
+)
+def test_the_time_limits_themselves_are_accepted_as_layer_4_accepts_them(
+    measured_at: str, passed_on: int
+) -> None:
+    batch = {"heart_rate": [{**HEART, "measured_at": measured_at}]}
+
+    assert len(WatchReceiver().receive(batch, ARRIVED)) == passed_on
+
+
+def test_counts_of_zero_pass() -> None:
+    quiet_night = {**SLEEP, "asleep_minutes": 0, "interruptions": 0}
+    batch = {"sleep": [quiet_night], "steps": [{**STEPS, "steps_today": 0}]}
+
+    assert len(WatchReceiver().receive(batch, ARRIVED)) == 2
+
+
+def test_a_deeply_nested_entry_is_refused_without_raising() -> None:
+    nested: object = "x"
+    for _ in range(20_000):
+        nested = [nested]
+    receiver = WatchReceiver()
+
+    items = receiver.receive({"heart_rate": [HEART, nested]}, ARRIVED)
+
+    assert len(items) == 1
+    assert receiver.refused_count == 1
+
+
+def test_wrong_shaped_list_keeps_the_kinds_beside_it(caplog: pytest.LogCaptureFixture) -> None:
+    receiver = WatchReceiver()
+
+    with caplog.at_level(logging.INFO):
+        items = receiver.receive({"heart_rate": "many", "steps": [STEPS]}, ARRIVED)
+
+    assert [item.kind for item in items] == ["steps"]
+    assert receiver.refused_count == 1
+    summary = caplog.records[-1].getMessage()
+    assert "1 readings arrived: 1 passed on, 0 repeats dropped, 0 refused" in summary
+
+
+def test_an_unexpected_top_level_name_is_warned_about_once(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    receiver = WatchReceiver()
+    batch = {"device_id": "phone-1", "heartRate": [HEART], "activity": [], "steps": [STEPS]}
+
+    with caplog.at_level(logging.WARNING):
+        items = receiver.receive(batch, ARRIVED)
+
+    assert [item.kind for item in items] == ["steps"]
+    assert receiver.refused_count == 1
+    assert len(caplog.records) == 1
+    assert "heartRate" in caplog.records[0].getMessage()
+
+
+def test_refusal_logging_is_bounded(caplog: pytest.LogCaptureFixture) -> None:
+    receiver = WatchReceiver()
+    very_long_time = {**HEART, "measured_at": "A" * 100_000}
+    batch = {"heart_rate": [very_long_time] + [0] * 1000, "heartRate": []}
+
+    with caplog.at_level(logging.WARNING):
+        receiver.receive(batch, ARRIVED)
+
+    assert receiver.refused_count == 1002
+    messages = [record.getMessage() for record in caplog.records]
+    assert len(messages) == settings.WATCH_REFUSALS_LOGGED_PER_BATCH + 1
+    assert max(len(message) for message in messages) < 300
+    assert "heartRate" in messages[-1]
+
+
 @pytest.mark.parametrize(("kind", "bad"), ONE_FIELD_MISSING + BAD_READINGS)
 def test_malformed_reading_is_refused_and_the_good_one_beside_it_passes(
     kind: str, bad: object, caplog: pytest.LogCaptureFixture
@@ -141,7 +231,8 @@ def test_wrong_shaped_batch_or_list_is_refused_without_raising(batch: object) ->
 
 
 @pytest.mark.parametrize(
-    ("sent", "passed_on"), [(72.4, 72), (72.6, 73), (72.0, 72), (10**400, 10**400)]
+    ("sent", "passed_on"),
+    [(72.4, 72), (72.5, 73), (72.6, 73), (130.5, 131), (72.0, 72), (10**400, 10**400)],
 )
 def test_a_count_is_passed_on_as_a_whole_number(sent: float, passed_on: int) -> None:
     [item] = WatchReceiver().receive({"heart_rate": [{**HEART, "bpm": sent}]}, ARRIVED)
@@ -152,15 +243,30 @@ def test_a_count_is_passed_on_as_a_whole_number(sent: float, passed_on: int) -> 
     assert type(reading.bpm) is int
 
 
-def test_the_oldest_reading_is_forgotten_past_the_seen_limit() -> None:
+def test_a_reading_older_than_the_memory_is_never_passed_on_again() -> None:
     receiver = WatchReceiver(seen_limit=2)
-    first, second, third = (
-        {"measured_at": f"2026-11-14T03:1{minute}:00Z", "bpm": 70} for minute in range(3)
-    )
-    receiver.receive({"heart_rate": [first, second, third]}, ARRIVED)
+    history = [{"measured_at": f"2026-11-14T03:1{minute}:00Z", "bpm": 70} for minute in range(3)]
+    assert len(receiver.receive({"heart_rate": history}, ARRIVED)) == 3
 
-    assert receiver.receive({"heart_rate": [second, third]}, ARRIVED) == []
-    assert len(receiver.receive({"heart_rate": [first]}, ARRIVED)) == 1
+    assert receiver.receive({"heart_rate": history}, ARRIVED) == []
+    older_and_never_sent = {"measured_at": "2026-11-14T03:00:00Z", "bpm": 70}
+    assert receiver.receive({"heart_rate": [older_and_never_sent]}, ARRIVED) == []
+
+
+def test_each_kind_has_its_own_memory() -> None:
+    receiver = WatchReceiver(seen_limit=1)
+    steps = [
+        {"measured_at": f"2026-11-14T11:2{minute}:00Z", "steps_today": 230} for minute in range(3)
+    ]
+    receiver.receive({"heart_rate": [HEART], "steps": steps}, ARRIVED)
+
+    assert receiver.receive({"heart_rate": [HEART]}, ARRIVED) == []
+
+
+@pytest.mark.parametrize("seen_limit", [0, -3])
+def test_a_memory_limit_below_one_is_the_callers_bug(seen_limit: int) -> None:
+    with pytest.raises(ValueError, match="seen_limit"):
+        WatchReceiver(seen_limit=seen_limit)
 
 
 def test_a_batch_of_repeats_logs_one_summary_not_one_line_each(
