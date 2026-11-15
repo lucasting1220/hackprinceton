@@ -3,7 +3,12 @@ name = "layer4"
 version = "0.1.0"
 description = "Debbie Layer 4: the care layer"
 requires-python = "==3.12.*"
-dependencies = []
+dependencies = [
+    "layer2",
+]
+
+[tool.uv.sources]
+layer2 = { path = "../layer2", editable = true }
 
 [dependency-groups]
 dev = [

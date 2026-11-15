@@ -14,12 +14,13 @@ from pathlib import Path
 
 from layer2.contracts import WorkerConfig
 from layer2.files import ConfigError, load_config, wait_for_stop_file
+from layer2.job_files import JobCatalog
 from layer2.stopping import consume_stop_file, stop_requested, stop_signals
 from layer2.tokens import TokenError, read_token_file
 from layer2.worker.check import run_check
 from layer2.worker.client import run_worker
 from layer2.worker.gateway import Gateway, Relay
-from layer2.worker.jobs import JobControl, JobRunner, no_jobs
+from layer2.worker.jobs import JobControl, JobRunner
 from layer2.worker.status_file import status_writer
 
 log = logging.getLogger(__name__)
@@ -41,7 +42,7 @@ async def _work(config_path: Path, config: WorkerConfig, token: str) -> int:
     await gateway.start()
     env = {"LAYER2_NODE_ID": config.node_id, **gateway.env()}
     runner = JobRunner(Path(config.state_dir) / "jobs", env)
-    jobs = JobControl(runner, no_jobs)  # job folders are read once their contract exists
+    jobs = JobControl(runner, JobCatalog())
     with stop_signals(asyncio.get_running_loop(), stop):
         watcher = asyncio.create_task(wait_for_stop_file(stop_file))
         watcher.add_done_callback(lambda _: stop.set())

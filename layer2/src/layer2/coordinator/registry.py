@@ -15,12 +15,16 @@ from layer2 import settings
 from layer2.contracts import (
     ApiState,
     DroppedWork,
+    HardwareState,
     Hello,
     JobEntry,
     JobStatus,
     Laptop,
+    LaptopHardware,
     MissingItem,
+    Specs,
     StatusMessage,
+    Tools,
 )
 from layer2.coordinator.plan import LaptopView
 
@@ -37,10 +41,13 @@ def _utc_now() -> datetime:
 class _Entry[C]:
     display_name: str
     sensors: list[Sensor]
+    specs: Specs
+    tools: Tools
     last_status_at: datetime
+    memory_free_gb: float | None = None
+    cpu_percent: float | None = None
     missing: list[MissingItem] = field(default_factory=list)
     jobs: list[JobStatus] = field(default_factory=list)
-    memory_free_gb: float = 0.0
     connection: C | None = None
     replacements: deque[float] = field(default_factory=deque)
     warned_at: float | None = None
@@ -79,6 +86,8 @@ class Registry[C]:
             self._laptops[node_id] = _Entry(
                 display_name=hello.display_name,
                 sensors=_sensor_kinds(hello),
+                specs=hello.specs,
+                tools=hello.tools,
                 last_status_at=self._now(),
                 connection=connection,
             )
@@ -86,7 +95,11 @@ class Registry[C]:
         previous = entry.connection
         entry.display_name = hello.display_name
         entry.sensors = _sensor_kinds(hello)
+        entry.specs = hello.specs
+        entry.tools = hello.tools
         entry.missing = []
+        entry.memory_free_gb = None
+        entry.cpu_percent = None
         entry.jobs = []
         entry.connection = connection
         if previous is not None:
@@ -126,6 +139,7 @@ class Registry[C]:
         entry.missing = list(message.missing)
         entry.jobs = list(message.jobs)
         entry.memory_free_gb = message.memory_free_gb
+        entry.cpu_percent = message.cpu_percent
 
     def leave(self, node_id: str, connection: C) -> None:
         """The connection closed. The laptop stays listed with its last status time."""
@@ -139,7 +153,7 @@ class Registry[C]:
             LaptopView(
                 node_id=node_id,
                 sensors=frozenset(entry.sensors),
-                memory_free_gb=entry.memory_free_gb,
+                memory_free_gb=entry.memory_free_gb or 0.0,
             )
             for node_id, entry in self._laptops.items()
             if entry.connection is not None
@@ -176,4 +190,24 @@ class Registry[C]:
                 for job in entry.jobs
             ],
             dropped=list(dropped),
+        )
+
+    def hardware(self) -> HardwareState:
+        """What each laptop has (from its hello) and its latest load (from its last status;
+        None until the current connection reports)."""
+        return HardwareState(
+            schema_version=1,
+            updated_at=self._now(),
+            laptops=[
+                LaptopHardware(
+                    node_id=node_id,
+                    display_name=entry.display_name,
+                    last_status_at=entry.last_status_at,
+                    specs=entry.specs,
+                    tools=entry.tools,
+                    memory_free_gb=entry.memory_free_gb,
+                    cpu_percent=entry.cpu_percent,
+                )
+                for node_id, entry in self._laptops.items()
+            ],
         )

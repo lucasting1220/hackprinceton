@@ -278,3 +278,35 @@ class Reply(Strict):
     events: list[LoggedEvent] | None = None
     truncated: StrictBool = False
     state: ApiState | None = None
+
+
+class JobDescription(Strict):
+    """contracts/job.json: written by Layers 3 and 4, one per job folder."""
+
+    schema_version: Literal[1]
+    name: JobName
+    start_command: Annotated[list[Annotated[str, Field(min_length=1)]], Field(min_length=1)]
+    kind: Literal["always-on", "per-item"]
+    memory_gb: Annotated[float, Field(ge=0, allow_inf_nan=False)]
+    sensor: Literal["camera", "mic"] | None
+
+
+class LaptopHardware(Strict):
+    """One laptop on the dashboard's hardware table. Internal to Layer 2: no contract file."""
+
+    node_id: str
+    display_name: str
+    last_status_at: UtcDatetime
+    specs: Specs
+    tools: Tools
+    memory_free_gb: float | None
+    cpu_percent: float | None
+
+
+class HardwareState(Strict):
+    """GET /api/hardware on the dashboard port. Internal to Layer 2: Layer 1 reads only
+    /api/state."""
+
+    schema_version: Literal[1]
+    updated_at: UtcDatetime
+    laptops: list[LaptopHardware]
