@@ -96,9 +96,8 @@ async def _serve(config: CoordinatorConfig) -> int:
 
     def planner(
         needs: list[JobNeed], connected: list[LaptopView], known: set[str], previous: Plan
-    ) -> Plan:
-        plan, _ = choose_plan(config.ollama_url, needs, connected, known, previous, planner_log)
-        return plan
+    ) -> tuple[Plan, str, str]:
+        return choose_plan(config.ollama_url, needs, connected, known, previous, planner_log)
 
     placement = Placement(_job_needs, planner=planner)
     events = EventLog(Path(config.state_dir) / "events")
