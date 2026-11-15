@@ -99,3 +99,9 @@ export const BRIDGE_STOP_POLL_MS = 250;
 
 /** The length in bytes of each phone's own key, which pairing derives and phones.json keeps. */
 export const PHONE_KEY_BYTES = 32;
+
+/** The error correction level of every QR code the bridge draws (contracts/phone-hub.md §2.1). */
+export const QR_ERROR_CORRECTION = "M";
+
+/** The light border around every QR code the bridge draws, in modules (phone-hub.md §2.1). */
+export const QR_BORDER_MODULES = 4;
