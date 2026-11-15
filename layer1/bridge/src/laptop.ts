@@ -564,7 +564,7 @@ export class Laptop {
     return { ok: true };
   }
 
-  /** Show a new code, Join again, or Cancel: drops the join and, once joined, its files. */
+  /** Show a new code, Join again, Cancel or Leave this home: drops the join and its files. */
   async reset(): Promise<void> {
     this.#generation += 1;
     this.#session = undefined;

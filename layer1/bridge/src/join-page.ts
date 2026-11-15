@@ -26,6 +26,7 @@ const TITLE = "Join a home";
 const RELOAD_SECONDS = settings.JOIN_POLL_MS / 1000;
 const SENSORS_TITLE = "Camera and mic";
 const CHECK_TITLE = "Check sensors";
+const LEAVE_TITLE = "Leave this home";
 
 /** A form that posts the page's token, `fields` and nothing else to `action`. */
 function button(action: string, token: string, label: string): Html {
@@ -189,7 +190,8 @@ ${again("Cancel")}`;
       const body = html`<p>${view.connection}</p>
 <p>Name: ${view.name}. Node ID: <code>${view.nodeId}</code>. Home laptop: ${view.homeAddress}.</p>
 <p>Link to the home laptop: ${view.link}.</p>
-<p>Camera: ${view.sensors.camera ?? "none"}. Mic: ${view.sensors.mic ?? "none"}. <a href="/join/sensors">Change the camera and mic</a></p>`;
+<p>Camera: ${view.sensors.camera ?? "none"}. Mic: ${view.sensors.mic ?? "none"}. <a href="/join/sensors">Change the camera and mic</a></p>
+<p><a href="/join/leave">Leave this home</a></p>`;
       return { body, reload: RELOAD_SECONDS };
     }
   }
@@ -237,8 +239,19 @@ export class JoinPage {
         guard: "form",
         handle: (fields) => this.#saveSensors(fields),
       },
+      { method: "GET", path: "/join/leave", guard: "view", handle: async () => this.#leave() },
       { method: "POST", path: "/join/reset", guard: "form", handle: () => this.#reset() },
     ];
+  }
+
+  /** Leave this home's confirm page, once joined; it doesn't reload, so it waits for an answer. */
+  #leave(): PageReply {
+    if (this.#laptop.view().step !== "joined") return { redirect: "/join" };
+    const body = html`<p>Leaving stops the worker on this laptop and deletes its join token and files. The home stops hearing from it.</p>
+<p>To join again, choose Join a home, and a caregiver approves this laptop again in the Debbie app.</p>
+${button("/join/reset", this.#token, "Leave this home")}
+<p><a href="/join">Back</a></p>`;
+    return { status: 200, body: page(LEAVE_TITLE, body) };
   }
 
   #show(): { status: number; body: string } {
