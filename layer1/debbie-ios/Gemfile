@@ -1,0 +1,4 @@
+source "https://rubygems.org"
+
+# Pinned per brief §7 and research note 12 R3. Install with: bundle config set --local path vendor/bundle && bundle install
+gem "fastlane", "2.241.2"
