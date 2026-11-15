@@ -7,10 +7,17 @@ import type { AddressInfo } from "node:net";
 import { text } from "node:stream/consumers";
 import { AlertIntake, type HomeAlerts } from "./alert-intake.ts";
 import type { CreateHomeOptions, Home } from "./home.ts";
-import { createHome, HomeError, HomeExistsError, loadHome } from "./home.ts";
+import {
+  AcceptedWorkersError,
+  acceptedWorkers,
+  createHome,
+  HomeError,
+  HomeExistsError,
+  loadHome,
+} from "./home.ts";
 import { HandoffIntake } from "./handoff-intake.ts";
 import { devicesPage } from "./devices-page.ts";
-import { type Html, html, page, STYLE_PATH, withDashboardLink } from "./html.ts";
+import { type Html, html, page, type SidebarLaptop, STYLE_PATH, withHomeSidebar } from "./html.ts";
 import { JoinPage, laptopsSection } from "./join-page.ts";
 import { errorMessage } from "./json-file.ts";
 import type { KeepAwakeStatus } from "./keep-awake.ts";
@@ -337,12 +344,33 @@ export async function startSetupServer(options: SetupServerOptions) {
     return { status: 200, body: devicesPage(shown) };
   }
 
-  /** `body` with the sidebar's Dashboard link once a home exists; unchanged if it can't be read. */
-  async function withSidebar(body: string): Promise<string> {
+  /** The joined laptops for the sidebar; none, with the reason logged, if the file is broken. */
+  async function sidebarLaptops(home: Home): Promise<SidebarLaptop[]> {
+    try {
+      const workers = await acceptedWorkers(home);
+      return workers.map((worker) => ({
+        nodeId: worker.node_id,
+        displayName: worker.display_name,
+      }));
+    } catch (error) {
+      if (!(error instanceof AcceptedWorkersError)) throw error;
+      log(`L1 setup: the sidebar lists no laptops: ${error.message}`);
+      return [];
+    }
+  }
+
+  /**
+   * `body` with the home laptop's sidebar (Overview and the laptops, linking to the dashboard on
+   * the host name the page was opened with) once a home exists; unchanged if it can't be read.
+   */
+  async function withSidebar(body: string, host: string | undefined): Promise<string> {
     try {
       const home = await loadHome(stateDir);
       if (home === undefined) return body;
-      return withDashboardLink(body, `http://${settings.HOME_HOST_NAME}:${home.dashboardPort}/`);
+      const name =
+        settings.SETUP_HOST_NAMES.find((n) => `${n}:${bound}` === host) ?? settings.LOCAL_HOST;
+      const dashboard = `http://${name}:${home.dashboardPort}`;
+      return withHomeSidebar(body, { dashboard, laptops: await sidebarLaptops(home) });
     } catch (error) {
       if (!(error instanceof HomeError)) throw error;
       return body;
@@ -396,7 +424,9 @@ export async function startSetupServer(options: SetupServerOptions) {
     let reply: PageReply;
     try {
       reply = await respond(request);
-      if ("body" in reply) reply = { status: reply.status, body: await withSidebar(reply.body) };
+      if ("body" in reply) {
+        reply = { status: reply.status, body: await withSidebar(reply.body, request.headers.host) };
+      }
     } catch (error) {
       log(`L1 setup: could not answer a request: ${errorMessage(error)}`);
       reply = { status: 500, body: problemPage("The bridge could not answer; its log says why.") };

@@ -12,6 +12,9 @@ import { freePort, makeTempDir, STUB, waitFor } from "./coordinator-fixtures.ts"
 import { phoneWrapper } from "./fake-phone.ts";
 import { pageClient } from "./page-client.ts";
 
+/** The QR code's own SVG; the sidebar's icons are SVGs too. */
+const QR_SVG = `<svg width="${settings.QR_DISPLAY_PX}"`;
+
 const WORKER_STUB = path.join(import.meta.dirname, "..", "..", ...settings.WORKER_STUB_PATH);
 const STOP_WAIT_MS = 15_000;
 const contract = (name: string) => path.join(import.meta.dirname, "..", "..", "contracts", name);
@@ -115,7 +118,7 @@ test("a laptop joins: Join a home, a caregiver's approval over the LAN gateway, 
   const address = `127.0.0.1:${state.port}`;
   const started = await laptop.page.post("/join/start", { address, name: "Kitchen laptop" });
   assert.equal(started.statusCode, 303);
-  const waiting = await pageWith(laptop.page, "/join", "<svg");
+  const waiting = await pageWith(laptop.page, "/join", QR_SVG);
   assert.ok(waiting.includes(`Home code: <strong>${homeCode}</strong>`), waiting);
   const text = /<pre>([^<]+)<\/pre>/.exec(waiting)?.[1] ?? "{}";
   const qr = JSON.parse(unescaped(text)) as Record<string, unknown>;
@@ -189,7 +192,7 @@ test("a laptop joins: Join a home, a caregiver's approval over the LAN gateway, 
     laptopDevices.includes(`<div>${address}</div><div class="muted">link: connected</div>`),
   );
   assert.ok(
-    !laptopDevices.includes("Dashboard</span>"),
+    !laptopDevices.includes('id="nav-overview"') && !laptopDevices.includes(">Laptops</div>"),
     "a joined laptop links a dashboard it lacks",
   );
 
