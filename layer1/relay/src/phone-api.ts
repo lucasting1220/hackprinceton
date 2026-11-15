@@ -1,8 +1,8 @@
 /**
  * The phones' HTTP API at the relay (phone-hub.md §5), on 127.0.0.1 behind Caddy: sign-in with
  * X-Debbie-Device and a Bearer device credential, the failed sign-in limiter, GET /healthz,
- * GET /v1/home, GET /v1/messages, POST /v1/push-tokens and POST /v1/unpair. It never logs a
- * credential, a push token or a body.
+ * GET /v1/home, GET /v1/messages, POST /v1/commands (forwarded to the hub socket),
+ * POST /v1/push-tokens and POST /v1/unpair. It never logs a credential, a push token or a body.
  */
 import { timingSafeEqual } from "node:crypto";
 import * as http from "node:http";
@@ -18,8 +18,9 @@ import {
   RELAY_SIGNIN_FAILURES_MAX,
   RELAY_SIGNIN_WINDOW_MS,
 } from "../../bridge/src/settings.ts";
-import { utcSeconds } from "../../bridge/src/wire.ts";
+import { parseWrapper, utcSeconds } from "../../bridge/src/wire.ts";
 import { pushConfigured, type RelayConfig } from "./config.ts";
+import type { CommandForwarder, CommandOutcome } from "./hub-socket.ts";
 import {
   type DeviceRecord,
   ENVIRONMENTS,
@@ -36,6 +37,8 @@ export interface PhoneApiOptions {
   readonly log?: (line: string) => void;
   /** Called once a phone has unpaired itself, so the hub socket can tell a connected hub. */
   readonly onUnpair?: (homeId: string, deviceId: string) => void;
+  /** Where POST /v1/commands goes: the hub socket. Without one, every hub is offline. */
+  readonly commands?: CommandForwarder;
   readonly limiter?: SignInLimiter;
 }
 
@@ -64,7 +67,22 @@ export const REFUSED = {
   forbidden: errorReply(403, "forbidden", "This device may not do that."),
   tooMany: errorReply(429, "too_many_attempts", "Too many failed sign-ins. Try again later."),
   internal: errorReply(500, "internal", "Something went wrong in the relay."),
+  lanOnly: errorReply(400, "lan_only", "This command travels on the home network only."),
+  unsupportedType: errorReply(400, "unsupported_type", "The relay never forwards this type."),
+  hubOffline: errorReply(503, "hub_offline", "The home laptop isn't connected to the relay."),
+  hubTimeout: errorReply(504, "hub_timeout", "The home laptop didn't answer in time."),
 } as const;
+
+/** Commands the relay never carries (§5.5): watch readings stay on the home network. */
+const LAN_ONLY_TYPES: readonly string[] = ["heart_rate", "fetch"];
+/** The commands the relay forwards to the hub, and those of them a resident may send (R14). */
+const RELAYED_TYPES: readonly string[] = [
+  "request",
+  "laptop_approval",
+  "live_view_setting",
+  "unpair",
+];
+const RESIDENT_TYPES: readonly string[] = ["live_view_setting", "unpair"];
 
 const ID = /^[A-Za-z0-9._-]{1,64}$/;
 const BEARER = /^Bearer ([A-Za-z0-9_-]{1,256})$/;
@@ -247,6 +265,29 @@ export function createPhoneApi(options: PhoneApiOptions): http.Server {
     },
     {
       method: "POST",
+      path: "/v1/commands",
+      resident: true,
+      handle: async ({ device, home, request }) => {
+        const read = await readJsonBody(request);
+        if (!read.ok) return read.reply;
+        const parsed = parseWrapper(read.value);
+        if (!parsed.ok) {
+          return parsed.code === "unsupported_version" ? REFUSED.version : REFUSED.badRequest;
+        }
+        const { wrapper } = parsed;
+        if (wrapper.envelope.kid !== device.deviceId) return REFUSED.forbidden;
+        if (LAN_ONLY_TYPES.includes(wrapper.type)) return REFUSED.lanOnly;
+        if (device.role === "resident" && !RESIDENT_TYPES.includes(wrapper.type)) {
+          return REFUSED.forbidden;
+        }
+        if (!RELAYED_TYPES.includes(wrapper.type)) return REFUSED.unsupportedType;
+        if (options.commands === undefined) return REFUSED.hubOffline;
+        const outcome = await options.commands.forward(home.homeId, device.deviceId, wrapper);
+        return commandReply(outcome, device);
+      },
+    },
+    {
+      method: "POST",
       path: "/v1/push-tokens",
       resident: false,
       handle: async ({ device, request }) => {
@@ -282,6 +323,29 @@ export function createPhoneApi(options: PhoneApiOptions): http.Server {
       },
     },
   ];
+
+  /**
+   * The phone's answer to its command: the relay's 503 and 504, or the hub's answer passed through,
+   * except a hub 403, which is the relay's 401 (and revokes the device for device_removed).
+   */
+  const commandReply = (outcome: CommandOutcome, device: DeviceRecord): Reply => {
+    switch (outcome.kind) {
+      case "offline":
+        return REFUSED.hubOffline;
+      case "timeout":
+        return REFUSED.hubTimeout;
+      case "accepted":
+        return { status: 202, body: { v: 1, accepted: true } };
+      case "refused":
+        if (outcome.status !== 403) {
+          return errorReply(outcome.status, outcome.code, "The home laptop refused this command.");
+        }
+        if (outcome.code !== "device_removed") return REFUSED.unauthorized;
+        store.revokeDevice(device.deviceId, now());
+        log(`L1 relay: the hub says device ${device.deviceId} was removed; revoked it`);
+        return REFUSED.removed;
+    }
+  };
 
   const answer = async (request: http.IncomingMessage): Promise<Reply> => {
     const url = new URL(request.url ?? "/", "http://relay.invalid");
