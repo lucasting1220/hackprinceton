@@ -15,9 +15,10 @@ import pytest
 from websockets.asyncio.client import connect
 from websockets.exceptions import ConnectionClosed
 
-from layer3 import capture_job, settings
+from layer3 import capture_job, devices, settings
 from layer3.camera import CameraReadFailed, Frame
 from layer3.capture_job import Latest, frame_feed_port, keep_capturing, serve_feeds, stamp
+from layer3.device_check import Outcome
 from layer3.mic import AudioChunk
 from layer3.worker_config import ConfigError
 
@@ -202,3 +203,84 @@ def test_a_device_that_fails_is_reopened_and_stops_on_request(
     keep_capturing("camera", device, latest, stop, (CameraReadFailed,))
     assert len(opened) == 3
     assert latest.item == 2
+
+
+def worker_json(tmp_path: Path, camera: str | None, mic: str | None) -> Path:
+    config = json.loads((REPO / "contracts" / "worker.json").read_text("utf-8"))
+    config.update(camera=camera, mic=mic)
+    path = tmp_path / "worker.json"
+    path.write_text(json.dumps(config), encoding="utf-8")
+    return path
+
+
+def printed(capsys: pytest.CaptureFixture[str]) -> dict[str, object]:
+    out = capsys.readouterr().out
+    assert out.endswith("\n") and out.count("\n") == 1
+    result: dict[str, object] = json.loads(out)
+    return result
+
+
+def test_list_mode_prints_one_device_list(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    listed = devices.Listed(cameras=["j5 WebCam JVCU100"], mics=["Audio Streaming"], problems=[])
+    monkeypatch.setattr(devices, "list_names", lambda: listed)
+    monkeypatch.setattr(devices, "read_kinds", lambda problems: {"camera": {}, "mic": {}})
+
+    assert capture_job.main(["list", "--json"]) == capture_job.EXIT_OK
+
+    written = printed(capsys)
+    example = json.loads((REPO / "contracts" / "device-list.json").read_text("utf-8"))
+    assert set(written) == set(example)
+    assert written["cameras"] == [
+        {"name": "j5 WebCam JVCU100", "kind": "unknown", "same_name": False}
+    ]
+
+
+def test_check_mode_with_no_devices_named_is_ok(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    assert (
+        capture_job.main(["check", "--config", str(worker_json(tmp_path, None, None)), "--json"])
+        == capture_job.EXIT_OK
+    )
+
+    written = printed(capsys)
+    assert written["ok"] is True
+    assert written["type"] == "device_check"
+
+
+def test_check_mode_exits_4_when_a_device_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    checked: list[str | None] = []
+
+    def failing_camera(name: str | None) -> Outcome:
+        checked.append(name)
+        return Outcome(name, "open_failed", "The camera would not open")
+
+    monkeypatch.setattr(capture_job, "check_camera", failing_camera)
+    config = worker_json(tmp_path, "j5 WebCam JVCU100", None)
+
+    assert capture_job.main(["check", "--config", str(config), "--json"]) == 4
+
+    assert checked == ["j5 WebCam JVCU100"]
+    assert printed(capsys)["ok"] is False
+
+
+def test_check_mode_with_a_config_it_cannot_read_exits_2_and_prints_nothing(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    missing = tmp_path / "missing.json"
+
+    assert capture_job.main(["check", "--config", str(missing), "--json"]) == 2
+
+    assert capsys.readouterr().out == ""
+
+
+def test_a_mode_without_json_is_a_bad_command_line(capsys: pytest.CaptureFixture[str]) -> None:
+    with pytest.raises(SystemExit) as stopped:
+        capture_job.main(["list"])
+
+    assert stopped.value.code == 2
+    assert capsys.readouterr().out == ""

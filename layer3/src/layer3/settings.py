@@ -100,3 +100,63 @@ WATCH_RECEIVE_WAIT_SECONDS: float = 25.0
 WATCH_RECEIVE_RETRY_SECONDS: float = 1.0
 WATCH_READING_SCHEMA_VERSION: int = 1
 WATCH_PASS_ON_FAILURES_LOGGED_PER_BATCH: int = 5
+
+# The device list and device check (contracts/device-list.json, contracts/device-check.json).
+DEVICE_LIST_SCHEMA_VERSION: int = 1
+DEVICE_CHECK_SCHEMA_VERSION: int = 1
+# How long the check waits for a device to open and give its first frame or sound, and how much
+# sound it reads. Kept short so the whole check prints within the contract's 15 seconds.
+DEVICE_CHECK_OPEN_SECONDS: float = 8.0
+DEVICE_CHECK_AUDIO_SECONDS: float = 1.0
+
+# On macOS, a device's kind from how the system says it is connected (AVFoundation's transport
+# type, as its four characters) and from its device type. Anything not here is "unknown".
+MAC_TRANSPORT_KINDS: dict[str, str] = {
+    "bltn": "built_in",
+    "virt": "virtual",
+    "grup": "virtual",
+    "usb ": "external",
+    "pci ": "external",
+    "1394": "external",
+    "blue": "external",
+    "blea": "external",
+    "hdmi": "external",
+    "dprt": "external",
+    "eavb": "external",
+    "thun": "external",
+    "ccwd": "continuity",
+    "ccwl": "continuity",
+    "cntc": "continuity",
+}
+MAC_CONTINUITY_DEVICE_TYPES: frozenset[str] = frozenset(
+    {"AVCaptureDeviceTypeContinuityCamera", "AVCaptureDeviceTypeDeskViewCamera"}
+)
+# What macOS's camera and mic permission numbers mean (AVAuthorizationStatus).
+MAC_PERMISSION_STATES: dict[int, str] = {
+    0: "not_asked",
+    1: "refused",
+    2: "refused",
+    3: "allowed",
+}
+
+# On Windows, which no system record tells, words in a device's name that mark it built in or
+# virtual, compared without regard to case. Any other device is "unknown".
+WINDOWS_BUILT_IN_NAME_HINTS: tuple[str, ...] = (
+    "integrated",
+    "built-in",
+    "internal",
+    "user facing",
+    "world facing",
+    "front camera",
+    "rear camera",
+    "ir camera",
+    "microphone array",
+)
+WINDOWS_VIRTUAL_NAME_HINTS: tuple[str, ...] = (
+    "virtual",
+    "snap camera",
+    "manycam",
+    "xsplit",
+    "nvidia broadcast",
+    "stereo mix",
+)

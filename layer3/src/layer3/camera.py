@@ -76,6 +76,10 @@ class CameraOpenFailed(CaptureError):
     """The camera refused to open, failed while opening, or did not open in time."""
 
 
+class CameraNoFirstFrame(CameraOpenFailed):
+    """The camera opened but delivered no first frame in time."""
+
+
 class CameraReadFailed(CaptureError):
     """Reading a frame from the camera raised an error."""
 
@@ -271,7 +275,7 @@ class _Reader:
             return self._next(timeout)
         except queue.Empty:
             self._time_limit_ran_out = True
-            raise CameraOpenFailed(
+            raise CameraNoFirstFrame(
                 f"the camera opened but delivered no first frame within {open_timeout:g} seconds"
             ) from None
 

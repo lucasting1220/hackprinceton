@@ -4,7 +4,7 @@
 
 ## What is built
 
-As of Nov 15, on `main`, with the pull request numbers. Layer 3's checks pass on `main` on macOS (format, lint, types and 262 tests), and CI runs them on Windows and macOS for every pull request.
+As of Nov 15, on `main`, with the pull request numbers. Layer 3's checks pass on `main` on macOS (format, lint, types and 296 tests), and CI runs them on Windows and macOS for every pull request.
 
 | Build step | State | Pull requests |
 |---|---|---|
@@ -16,13 +16,14 @@ As of Nov 15, on `main`, with the pull request numbers. Layer 3's checks pass on
 | 6. Watch data receiver | In part. `layer3/src/layer3/watch_receiver.py` takes a batch shaped as `contracts/watch-data.json`, removes repeats, refuses malformed readings, and returns each new reading with `last_received_at`. `layer3/jobs/watch_data/job.json` starts `python -m layer3.watch_job`, which takes each batch from `receive("watch-data")`, keeps one receiver for its life, and passes each new reading on with `pass_on("watch-readings", ...)` as `contracts/watch-reading.json`. Tested with fake readings, a stub of Layer 2, and Layer 2's real job client against a stand-in gateway; not yet run under a real coordinator. Not built: passing `last_received_at` on while no reading arrives | #104, #111, #113, #117 |
 | 7. Forwarding frames and audio to a model on another laptop | Not started | |
 
+**Device list and device check** for Layer 1's setup page (ask T6), as `contracts/device-list.json` and `contracts/device-check.json` describe: `python -m layer3.capture_job list --json` and `python -m layer3.capture_job check --config <worker.json> --json`. On macOS each device's kind comes from AVFoundation; on Windows only from words in its name, else `unknown`. Run on the demo Mac with the j5 webcam: the list labels `j5 WebCam JVCU100` and `Audio Streaming` external and the MacBook Air's own camera and mic built in, and the check gives Camera OK and Mic OK in about 3 seconds. Not run on Windows; CI runs the tests there with fakes. Layer 1's setup page does not call them yet.
+
 **To see the watch receiver work:** from `layer3/`, run `uv run python stubs/watch_demo.py`. It sends 7 sample readings through the `watch_data` job's receiving and passing on, on a stub of Layer 2 (`layer3/stubs/fake_layer2_client.py`) and passes on 6; the seventh is a repeat.
 
 **Not yet built:**
 
 - Reporting device state (up, down, declined) to Layer 2. Layer 2's job client has no call for a job's state yet.
 - Passing `last_received_at` on while no reading arrives. Today it travels only with a new reading.
-- The device list and device check for Layer 1's setup page ("Camera OK", "Mic OK"). Until then the setup page takes typed device names.
 - Step 7, forwarding to another laptop.
 
 ## Summary
@@ -117,6 +118,8 @@ Watch readings:
 **Layer 3 to Layer 1.** The local video feed on the camera laptop. Layer 1's doc proposes it as a WebSocket on `127.0.0.1` port 7460, one JPEG per message, up to 15 frames per second at 640 by 480, encoded only while a client is connected. As built, it is the `/live` path of the capture job's server, on the laptop's `frame_feed_port` (`contracts/frame-feed.json`).
 
 **Layer 1 to Layer 3.** Watch readings from the app, carried by Layer 1's bridge and Layer 2's coordinator. The Layer 1 doc defines this as `POST /v1/watch-data`, with the same fields as the table above. Every time must carry a time zone. The example file is `contracts/watch-data.json`, and a Layer 3 job gets each batch from `layer2.receive("watch-data")`.
+
+**Layer 3 to Layer 1: the setup page.** The capture program's `list` and `check` modes print `contracts/device-list.json` and `contracts/device-check.json` for the Check sensors step. Only the capture program opens the camera and mic (ask T4), and `check` runs before the worker starts.
 
 ## Proposed, not yet confirmed
 

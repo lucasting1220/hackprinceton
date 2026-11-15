@@ -216,6 +216,7 @@ dependencies = [
     { name = "layer2" },
     { name = "numpy" },
     { name = "opencv-python-headless" },
+    { name = "pyobjc-framework-avfoundation", marker = "sys_platform == 'darwin'" },
     { name = "sounddevice" },
     { name = "websockets" },
 ]
@@ -233,6 +234,7 @@ requires-dist = [
     { name = "layer2", editable = "../layer2" },
     { name = "numpy", specifier = ">=2.0,<3" },
     { name = "opencv-python-headless", specifier = ">=5.0,<6" },
+    { name = "pyobjc-framework-avfoundation", marker = "sys_platform == 'darwin'", specifier = ">=13,<14" },
     { name = "sounddevice", specifier = ">=0.5,<0.6" },
     { name = "websockets", specifier = ">=14" },
 ]
