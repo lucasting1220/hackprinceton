@@ -279,6 +279,8 @@ def test_dashboard_page_shows_each_laptop_as_one_card(dashboard: TestClient) -> 
         "Load, last minute",
         "Job restarts",
         "Jobs placed by the AI planner",
+        "Recent events",
+        "ALERT SENT",
         "Jobs placed by the rules",
         "keeps crashing",
         "createElementNS(SVG",

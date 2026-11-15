@@ -43,7 +43,7 @@ from layer2.contracts import (
 )
 from layer2.coordinator import bridge
 from layer2.coordinator.dashboard import PAGE
-from layer2.coordinator.event_log import EventLog, EventTooLargeError
+from layer2.coordinator.event_log import EventLog, EventTooLargeError, recent_feed
 from layer2.coordinator.inbox import Subscriptions
 from layer2.coordinator.plan import Placement
 from layer2.coordinator.registry import Registry
@@ -320,7 +320,9 @@ def _fit(events: list[LoggedEvent]) -> tuple[list[LoggedEvent], bool]:
 
 
 def create_dashboard_app(
-    registry: Registry[WebSocket], placement: Placement | None = None
+    registry: Registry[WebSocket],
+    placement: Placement | None = None,
+    events: EventLog | None = None,
 ) -> FastAPI:
     app = FastAPI(openapi_url=None, docs_url=None, redoc_url=None)
     # Only this machine may read it, by address: a web page using DNS rebinding cannot.
@@ -347,6 +349,15 @@ def create_dashboard_app(
                 moved=list(decision.moved),
             )
             found = found.model_copy(update={"planner": planner})
+        if events is not None:
+            try:
+                feed = await asyncio.to_thread(recent_feed, events)
+            except OSError as error:
+                log.warning(
+                    "L2 coordinator: cannot read the event log for the dashboard: %s", error
+                )
+                feed = []
+            found = found.model_copy(update={"events": feed})
         return JSONResponse(found.model_dump(mode="json"))
 
     @app.get("/")
