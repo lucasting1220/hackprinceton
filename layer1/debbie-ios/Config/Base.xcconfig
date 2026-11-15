@@ -1,0 +1,10 @@
+// Shared build settings. Identifiers come from Config/Local.xcconfig (generated from
+// ~/.config/debbie-ios/asc.env by tools/ci/make-local-config.sh, gitignored; D-002).
+DEBBIE_BUNDLE_ID = com.example.debbie
+DEBBIE_TEAM_ID =
+DEBBIE_TRANSPORT_MODE = auto
+// Debbie's Gemini key and model (D-031). The key is set only in the gitignored Local.xcconfig, from
+// ~/.config/debbie-ios/gemini.env. Without it, Debbie answers with on-device wording.
+DEBBIE_GEMINI_KEY =
+DEBBIE_GEMINI_MODEL = gemini-3.5-flash-lite
+#include? "Local.xcconfig"

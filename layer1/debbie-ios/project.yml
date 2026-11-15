@@ -1,0 +1,132 @@
+# Xcode project spec (XcodeGen 2.46.0, D-007). Generate with: xcodegen generate
+# Identifiers are placeholders until Config/Local.xcconfig exists (D-002); nothing here is a secret.
+name: Debbie
+options:
+  bundleIdPrefix: com.example
+  deploymentTarget:
+    iOS: "26.0"
+  xcodeVersion: "26.6"
+  projectFormat: xcode16_0
+  createIntermediateGroups: true
+configs:
+  Debug: debug
+  Release: release
+configFiles:
+  Debug: Config/Debug.xcconfig
+  Release: Config/Release.xcconfig
+packages:
+  DebbieKit:
+    path: Packages/DebbieKit
+settings:
+  base:
+    SWIFT_VERSION: "6"
+    IPHONEOS_DEPLOYMENT_TARGET: "26.0"
+    TARGETED_DEVICE_FAMILY: "1"
+    DEVELOPMENT_TEAM: $(DEBBIE_TEAM_ID)
+    ENABLE_USER_SCRIPT_SANDBOXING: YES
+    SWIFT_APPROACHABLE_CONCURRENCY: YES
+    SWIFT_UPCOMING_FEATURE_NONISOLATED_NONSENDING_BY_DEFAULT: YES
+    SWIFT_UPCOMING_FEATURE_INFER_ISOLATED_CONFORMANCES: YES
+    GENERATE_INFOPLIST_FILE: YES
+    CURRENT_PROJECT_VERSION: "1"
+    MARKETING_VERSION: "0.1.0"
+    LOCALIZATION_PREFERS_STRING_CATALOGS: YES
+    DEAD_CODE_STRIPPING: YES
+targets:
+  Debbie:
+    type: application
+    platform: iOS
+    sources:
+      - path: App
+        excludes: ["Info.plist"]
+    dependencies:
+      - package: DebbieKit
+        products: [DebbieCore, DebbieCrypto, DebbieSecureStore, DebbieNetworking, DebbieDesignSystem, DebbieCareScreens, DebbieFeatures]
+      - target: DebbieNotificationService
+        embed: true
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: $(DEBBIE_BUNDLE_ID)
+        PRODUCT_NAME: Debbie
+        SWIFT_DEFAULT_ACTOR_ISOLATION: MainActor
+        CODE_SIGN_ENTITLEMENTS: App/Debbie.entitlements
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS: NO
+        INFOPLIST_KEY_CFBundleDisplayName: Debbie
+        INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.lifestyle
+        INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
+        INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents: YES
+        INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone: UIInterfaceOrientationPortrait
+        INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad: "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight"
+        INFOPLIST_KEY_NSCameraUsageDescription: "Debbie uses the camera only to scan the pairing code on your home laptop."
+        INFOPLIST_KEY_NSLocalNetworkUsageDescription: "Debbie finds and talks to your home laptop on this Wi-Fi network to pair and get updates."
+        INFOPLIST_KEY_NSHealthShareUsageDescription: "Debbie reads your heart rate from Health and sends it to your home laptop over your Wi-Fi."
+        INFOPLIST_KEY_NSHealthUpdateUsageDescription: "Debbie only reads your heart rate. It never writes anything to Health."
+        INFOPLIST_KEY_ITSAppUsesNonExemptEncryption: NO
+        TARGETED_DEVICE_FAMILY: "1"
+    info:
+      path: App/Info.plist
+      properties:
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        UILaunchScreen:
+          UIColorName: LaunchBackground
+        NSBonjourServices: ["_debbie._tcp"]
+        NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true
+        DebbieKeychainAccessGroup: $(AppIdentifierPrefix)$(DEBBIE_BUNDLE_ID).shared
+        DebbieTransportMode: $(DEBBIE_TRANSPORT_MODE)
+        DebbieGeminiKey: $(DEBBIE_GEMINI_KEY)
+        # Owner direction 17:24: always the white, light look, whatever the phone's appearance (D-032).
+        UIUserInterfaceStyle: Light
+        DebbieGeminiModel: $(DEBBIE_GEMINI_MODEL)
+  DebbieNotificationService:
+    type: app-extension
+    platform: iOS
+    sources:
+      - path: NotificationService
+        excludes: ["Info.plist"]
+    dependencies:
+      - package: DebbieKit
+        products: [DebbieCore, DebbieCrypto, DebbieSecureStore]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: $(DEBBIE_BUNDLE_ID).NotificationService
+        PRODUCT_NAME: DebbieNotificationService
+        SWIFT_DEFAULT_ACTOR_ISOLATION: nonisolated
+        CODE_SIGN_ENTITLEMENTS: NotificationService/NotificationService.entitlements
+        INFOPLIST_KEY_CFBundleDisplayName: Debbie Alerts
+        SKIP_INSTALL: YES
+        TARGETED_DEVICE_FAMILY: "1"
+    info:
+      path: NotificationService/Info.plist
+      properties:
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.usernotifications.service
+          NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).NotificationService
+        DebbieKeychainAccessGroup: $(AppIdentifierPrefix)$(DEBBIE_BUNDLE_ID).shared
+  DebbieUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources: [UITests]
+    dependencies: [{target: Debbie}]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: $(DEBBIE_BUNDLE_ID).UITests
+        TEST_TARGET_NAME: Debbie
+        GENERATE_INFOPLIST_FILE: YES
+        TARGETED_DEVICE_FAMILY: "1"
+schemes:
+  Debbie:
+    build:
+      targets:
+        Debbie: all
+        DebbieUITests: [test]
+    test:
+      config: Debug
+      targets: [DebbieUITests]
+      gatherCoverageData: false
+    archive:
+      config: Release

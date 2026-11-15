@@ -5,6 +5,9 @@ import path from "node:path";
 /** The layer1/ folder, where the checks run. */
 export const layer1 = path.join(import.meta.dirname, "..");
 
+/** The copy of the iPhone app, a Swift project with its own checks (README.md, "The iPhone app"). */
+export const appCopy = "debbie-ios";
+
 /** How long git may take to list Layer 1's files. */
 const GIT_LIST_TIMEOUT_MS = 10_000;
 

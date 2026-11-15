@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+# Runs a fastlane lane unattended (research note 12 R3–R5): the pinned bundle only, stdin closed,
+# no usage tracking or update checks, credentials loaded inside this process from asc.env (never
+# printed), and every output line redacted into logs/fastlane-<lane>-<timestamp>.log.
+#   tools/ci/fl <lane> [key:value ...]
+set -uo pipefail
+cd "$(dirname "$0")/../.."
+lane="${1:?usage: tools/ci/fl <lane> [options]}"
+mkdir -p logs
+log="logs/fastlane-$lane-$(date +%Y%m%d-%H%M%S).log"
+ENV_FILE="$HOME/.config/debbie-ios/asc.env"
+if [[ -f "$ENV_FILE" ]]; then set -a; . "$ENV_FILE"; set +a; fi
+# The Gemini key is loaded only so redact.pl can mask it; the build reads it from Config/Local.xcconfig (D-031).
+GEMINI_FILE="$HOME/.config/debbie-ios/gemini.env"
+if [[ -f "$GEMINI_FILE" ]]; then set -a; . "$GEMINI_FILE"; set +a; fi
+export CI=1 FASTLANE_OPT_OUT_USAGE=YES FASTLANE_SKIP_UPDATE_CHECK=1 FASTLANE_HIDE_CHANGELOG=1 \
+       FASTLANE_DISABLE_COLORS=1 FASTLANE_SKIP_DOCS=1 FASTLANE_XCODEBUILD_SETTINGS_TIMEOUT=60 \
+       FASTLANE_XCODEBUILD_SETTINGS_RETRIES=3 LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8
+# Every lane has a time limit (brief §7: nothing may hang). Override with DEBBIE_LANE_TIMEOUT=<seconds>.
+limit="${DEBBIE_LANE_TIMEOUT:-3600}"
+perl -e 'alarm shift; exec @ARGV' "$limit" bundle exec fastlane "$@" < /dev/null 2>&1 | perl tools/ci/redact.pl | tee "$log"
+status=${PIPESTATUS[0]}
+tools/ci/check-logs.sh >/dev/null || { echo "✗ a credential value reached logs/ or build/ — see tools/ci/check-logs.sh"; status=1; }
+echo "lane '$lane' exit $status — log: $log"
+exit "$status"
