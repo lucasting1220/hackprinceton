@@ -26,6 +26,11 @@ FALL_SIGNAL_WINDOW = timedelta(seconds=1)
 FALL_FRAME_MAX_AGE = timedelta(seconds=2)
 FALL_DETECTION_GAP = timedelta(seconds=5)
 
+# Alert rewrite: how much of the event log the quick model sees (proposed in the Layer 4 doc),
+# and the longest rewrite the phone is sent; a longer one is dropped and the template stands.
+REWRITE_CONTEXT = timedelta(minutes=10)
+REWRITE_MAX_CHARS = 300
+
 
 @dataclass(frozen=True)
 class RuleThresholds:
