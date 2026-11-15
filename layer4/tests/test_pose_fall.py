@@ -154,6 +154,34 @@ def test_bowing_is_not_a_fall(bow: Pose) -> None:
     assert max(peaks(hold(STANDING, 0, 1000) + hold(bow, 1000, 3000)), default=0.0) < 0.2
 
 
+CROUCH = pose(hip_y=0.85, angle_deg=20.0, knee_below_hip=0.02)
+
+
+def test_a_fall_that_starts_with_a_crouch_is_measured_from_standing() -> None:
+    """Knees buckle first: the torso is still upright while the hips are already low."""
+    frames = hold(STANDING, 0, 1000) + hold(CROUCH, 1000, 1300) + hold(FLOOR, 1300, 2800)
+    assert max(peaks(frames), default=0.0) >= 0.8
+
+
+def test_a_fast_fall_after_standing_and_sagging_is_timed_from_the_last_standing_moment() -> None:
+    """Hips highest at the start and sinking slightly: the descent starts at the end, not 0 ms."""
+    sag: Frames = [(ms, pose(hip_y=0.55 + 0.02 * ms / 3000)) for ms in range(0, 3000, STEP_MS)]
+    frames = sag + hold(BENDING, 3000, 3350) + hold(FLOOR, 3350, 4850)
+    assert max(peaks(frames), default=0.0) >= 0.8
+
+
+def test_standing_somewhere_else_earlier_does_not_set_the_standing_height() -> None:
+    elsewhere = pose(hip_y=0.45)
+    frames = hold(elsewhere, 0, 1000) + hold(pose(hip_y=0.6), 1000, 5000)
+    frames += hold(BENDING, 5000, 5350) + hold(FLOOR, 5350, 6850)
+    assert max(peaks(frames), default=0.0) >= 0.8
+
+
+def test_getting_down_slowly_through_a_long_crouch_is_not_a_fall() -> None:
+    frames = hold(STANDING, 0, 1000) + hold(CROUCH, 1000, 5000) + hold(FLOOR, 5000, 6500)
+    assert max(peaks(frames), default=0.0) < 0.8
+
+
 def test_lying_for_less_than_the_settle_time_is_not_a_fall() -> None:
     stumble = hold(STANDING, 0, 1000) + hold(FLOOR, 1000, 1400) + hold(STANDING, 1400, 3000)
     assert peaks(stumble) == []
@@ -228,6 +256,7 @@ def test_point_rejects_bad_values(bad: dict[str, float]) -> None:
         lambda: PoseFallScorer(hip_drop_full=-1.0),
         lambda: PoseFallScorer(settle=timedelta(0)),
         lambda: PoseFallScorer(descent_fast=timedelta(seconds=3)),
+        lambda: PoseFallScorer(standing_tolerance=-0.1),
     ],
 )
 def test_scorer_rejects_bad_settings(make: Callable[[], PoseFallScorer]) -> None:
