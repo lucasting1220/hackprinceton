@@ -135,3 +135,42 @@ Added Nov 15. One watch reading that Layer 3's watch data receiver has checked a
   - `steps`: `measured_at` and `steps_today`, a whole number not below 0.
 - **Times** are ISO 8601 in UTC, written with `Z`, between 1970-01-02 and 2999-12-31. Counts are already whole numbers: Layer 3 rounds them (see "Layer 1 to Layer 3: watch data", Counts).
 - **Privacy:** readings are passed on and judged, never sent anywhere else by Layer 3.
+
+## Layer 3 to Layer 1: device list and device check
+
+Added Nov 15 from Layer 1's ask T6. The setup page's Check sensors step: the device list gives the names to pick the camera and the mic from, and the device check says **Camera OK** and **Mic OK**, or what to change.
+
+| File | Written by | Read by | What it is |
+|---|---|---|---|
+| `device-list.json` | Layer 3's capture program, `list` mode | Layer 1 bridge (setup page) | Every camera and mic the laptop reports, with its kind |
+| `device-check.json` | Layer 3's capture program, `check` mode | Layer 1 bridge (setup page) | Whether the camera and mic named in `worker.json` deliver a frame and sound |
+
+### Rules that go with these files
+
+- **Commands** (run without a shell; `<repo>` is the absolute path of this repository):
+  - `uv run --project <repo>/layer3 python -m layer3.capture_job list --json`
+  - `uv run --project <repo>/layer3 python -m layer3.capture_job check --config <worker.json> --json`
+- **Output:** exactly one JSON object on standard output, then a newline. Log lines go to standard error.
+- **Both are modes of the capture program,** so only the capture program ever opens the camera and mic (Layer 1's ask T4). `list` opens no device. `check` opens only the two devices named in `worker.json`.
+- **Run `check` before the worker starts,** or with the worker stopped: on Windows a camera the capture job holds cannot be opened a second time.
+- **Names** are exactly as the operating system reports them, the same names `camera` and `mic` in `worker.json` take. A device is always chosen by its name, never by an index.
+- **`kind`:** `built_in`, `external`, `continuity` (an iPhone used as a camera, or its Desk View), `virtual` (a program posing as a device) or `unknown`. On macOS it is read from the system's own record of how each device is connected. On Windows it is `built_in` or `virtual` only when the name says so, and `unknown` otherwise. The setup page offers `external` and `unknown` devices, never `built_in`, `continuity` or `virtual` ones, and never preselects one.
+- **`same_name`:** `true` when another camera (for a camera) or another mic (for a mic) has exactly the same name. Capture refuses to choose between two devices with one name, so the page flags them rather than offering them.
+- **`problems`:** plain-text lines, empty when all went well. A list that could not be read (for example the cameras) is empty and its problem is named here; `list` still prints and exits 0.
+- **`list` exit codes:** 0 printed, 2 bad command line. It finishes within 10 seconds.
+- **`check`:** reads `camera` and `mic` from the file given. A device that is `null` there is not opened and its `result` is `none`. The camera and mic are checked at the same time: one frame from the camera, about one second of audio from the mic. No frame or sound is kept or printed.
+- **`result`:**
+  - `ok`: the camera gave a 640 by 480 frame, or the mic gave sound that is not all zeros
+  - `none`: no device is named (none on this laptop, or the resident declined it)
+  - `not_found`: no device has this name
+  - `same_name`: two or more devices have this name
+  - `no_permission`: the operating system has not let the program that started the check use the device
+  - `open_failed`: the device is listed but would not open
+  - `no_data`: it opened but gave no frame or sound in time
+  - `silent`: the mic gave only zeros, which on macOS is what a mic without permission records
+  - `wrong_format`: it gave frames or sound in another format than the frame feed's
+- **`message`** is a plain sentence for the page. **`fix`** names the setting or step to change, or is `null` when there is nothing to change.
+- **`similar`:** with `not_found`, the listed names that match once case and a Windows port number such as `2- ` are ignored, because Windows renames a device moved to another USB port. The page offers them for the person to pick; `check` never picks one itself. Empty otherwise.
+- **`ok`** is `true` when each of `camera` and `mic` is `ok` or `none`.
+- **`check` exit codes:** 0 when `ok` is `true`, 4 when it is `false`, 2 when the config file cannot be read (nothing is printed on standard output then, and standard error says why). It prints within 15 seconds; a caller allows 20 before giving up.
+- **Times** are ISO 8601 in UTC, written with `Z`.

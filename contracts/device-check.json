@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "type": "device_check",
+  "checked_at": "2026-11-15T03:13:02Z",
+  "ok": false,
+  "camera": {
+    "name": "j5 WebCam JVCU100",
+    "result": "ok",
+    "message": "Camera OK",
+    "fix": null,
+    "similar": []
+  },
+  "mic": {
+    "name": "Audio Streaming",
+    "result": "silent",
+    "message": "The mic 'Audio Streaming' opened but recorded only silence",
+    "fix": "On this Mac, open System Settings > Privacy & Security > Microphone, allow the app that started the bridge, then start the bridge again",
+    "similar": []
+  }
+}

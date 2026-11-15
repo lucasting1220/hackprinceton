@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "type": "device_list",
+  "listed_at": "2026-11-15T03:12:45Z",
+  "cameras": [
+    {
+      "name": "j5 WebCam JVCU100",
+      "kind": "external",
+      "same_name": false
+    },
+    {
+      "name": "MacBook Air Camera",
+      "kind": "built_in",
+      "same_name": false
+    }
+  ],
+  "mics": [
+    {
+      "name": "Audio Streaming",
+      "kind": "external",
+      "same_name": false
+    },
+    {
+      "name": "MacBook Air Microphone",
+      "kind": "built_in",
+      "same_name": false
+    }
+  ],
+  "problems": []
+}
