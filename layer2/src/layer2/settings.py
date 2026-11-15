@@ -6,6 +6,9 @@ STATUS_INTERVAL_S: Final = 2.0
 RETRY_DELAY_S: Final = 3.0
 STALE_AFTER_S: Final = 6.0
 HELLO_TIMEOUT_S: Final = 10.0
+# How often each worker connection rereads accepted-workers.json, so a laptop removed there
+# (Leave this home, or Remove on the home laptop's page) is dropped within this long.
+ACCEPTED_RECHECK_S: Final = 2.0
 CONNECT_TIMEOUT_S: Final = 5.0
 OLLAMA_CHECK_TIMEOUT_S: Final = 2.0
 STOP_POLL_S: Final = 1.0

@@ -246,3 +246,15 @@ def test_rejoin_refreshes_specs_and_clears_the_old_load(registry: Registry[str])
     [laptop] = registry.hardware().laptops
     assert laptop.specs.memory_gb == 64
     assert laptop.memory_free_gb is None and laptop.cpu_percent is None
+
+
+def test_forget_except_drops_removed_laptops_and_returns_their_connections(
+    registry: Registry[str],
+) -> None:
+    registry.join("node-1", HELLO, "conn-a")
+    registry.join("node-2", HELLO, "conn-b")
+    registry.join("node-3", HELLO, "conn-c")
+    registry.leave("node-3", "conn-c")
+    assert registry.forget_except({"node-1"}) == (["node-2", "node-3"], ["conn-b"])
+    assert registry.known() == {"node-1"}
+    assert registry.forget_except({"node-1"}) == ([], [])

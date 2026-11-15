@@ -62,6 +62,7 @@ BAD_HELLO = 4002  # the first message was not a valid hello
 HELLO_TIMEOUT = 4003  # no hello within HELLO_TIMEOUT_S
 REJECTED = 4004  # sent after welcome-rejected
 SERVER_ERROR = 4005  # accepted-workers.json could not be read
+REMOVED = 4006  # the laptop was taken out of accepted-workers.json
 
 _MAX_LOGGED_PARTS = 3
 _MAX_LOGGED_PART = 40
@@ -167,15 +168,44 @@ def create_control_app(
             )
             await socket.send_text(welcome.model_dump_json())
             log.info("L2 coordinator: laptop %s joined", node_id)
-            await _receive(
-                socket, node_id, registry, plan, events, config.bridge_url, subscriptions
-            )
+            watching = asyncio.create_task(_drop_removed(accepted_file, registry, plan))
+            try:
+                await _receive(
+                    socket, node_id, registry, plan, events, config.bridge_url, subscriptions
+                )
+            finally:
+                watching.cancel()
         finally:
             if registry.is_current(node_id, socket):
                 registry.leave(node_id, socket)
                 log.info("L2 coordinator: laptop %s disconnected", node_id)
 
     return app
+
+
+async def _drop_removed(
+    accepted_file: Path, registry: Registry[WebSocket], placement: Placement
+) -> None:
+    """While a worker is connected: every ACCEPTED_RECHECK_S, reread accepted-workers.json and
+    drop each laptop no longer in it, closing its connection, so a removed laptop's token stops
+    working at once and it leaves the dashboard and the plan."""
+    while True:
+        await asyncio.sleep(settings.ACCEPTED_RECHECK_S)
+        try:
+            accepted = await asyncio.to_thread(load_json_model, accepted_file, AcceptedWorkers)
+        except ConfigError as error:
+            log.warning("L2 coordinator: cannot recheck the accepted laptops: %s", error)
+            continue
+        gone, connections = registry.forget_except({w.node_id for w in accepted.workers})
+        if not gone:
+            continue
+        for node_id in gone:
+            log.info("L2 coordinator: laptop %s was removed from the home", node_id)
+        placement.request_replan(lambda: (registry.connected(), registry.known()))
+        # Shielded: this watcher's own connection may be among them, and closing it cancels
+        # the watcher, which must not leave the others open.
+        closing = (_close_quietly(c, REMOVED, "removed from the home") for c in connections)
+        await asyncio.shield(asyncio.gather(*closing))
 
 
 _Message = StatusMessage | LogAppend | LogRead | StateRead | PhoneSend | PassOn | Subscribe

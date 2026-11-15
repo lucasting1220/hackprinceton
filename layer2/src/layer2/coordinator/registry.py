@@ -148,6 +148,17 @@ class Registry[C]:
         if self.is_current(node_id, connection):
             self._laptops[node_id].connection = None
 
+    def forget_except(self, accepted: set[str]) -> tuple[list[str], list[C]]:
+        """Forget every laptop not in `accepted` (taken out of accepted-workers.json). Returns
+        the forgotten node IDs, and their open connections, to be closed."""
+        gone = [node_id for node_id in self._laptops if node_id not in accepted]
+        connections = []
+        for node_id in gone:
+            connection = self._laptops.pop(node_id).connection
+            if connection is not None:
+                connections.append(connection)
+        return gone, connections
+
     def connected(self) -> list[LaptopView]:
         """Laptops with a current connection, for the planner. Memory is 0 until the first
         status arrives."""
