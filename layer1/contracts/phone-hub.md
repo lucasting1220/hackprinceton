@@ -207,6 +207,129 @@ On `/v1/lan/messages` and `/v1/lan/commands`, 403 means only that the phone is u
 | 500    | `internal`               | any                | Something unexpected. The hub logs the error's class, never the request                                   |
 | 501    | `not_supported`          | `/v1/lan/commands` | `request`, `laptop_approval` or `live_view_setting`, before the step that builds it                       |
 
+## 5. Relay API
+
+The relay is a server the team runs on Vultr, at the bundle's `relay_url` (`https://relay.<domain>`), not AWS. Caddy terminates TLS and passes requests to the relay on the server's 127.0.0.1. The relay stores and passes on wrappers (§3) unopened: it never holds the home key or a phone key, and it keeps only SHA-256 hashes of device and hub credentials. Pushes go straight to APNs (§8), and live view uses the relay's own signaling and the team's TURN server (§7, step 7).
+
+The hub connects to the relay over a WebSocket at `/v1/hub`, signing in with its hub credential. Phones never use that path, and its frames are Layer 1's own (`layer1/contracts/hub-relay-messages.json`). The relay learns the home's phones from the hub's full phone list, sent on every connection and after every pairing or removal; a phone the hub removed is never let back in.
+
+### 5.1 Sign-in and HTTP rules
+
+Every call except `GET /healthz` carries two headers: `X-Debbie-Device: <device_id>` and `Authorization: Bearer <device_credential>`. The relay hashes the credential as the hub does (SHA-256 of its UTF-8 bytes, in lowercase hex, §4.3) and compares the digests in constant time.
+
+- A missing header, an unknown device or a wrong credential gets `401 unauthorized`. A device the hub removed, or that unpaired itself, gets `401 device_removed`, but only when its credential is right.
+- After 20 failed sign-ins from one address within a minute, that address gets `429 too_many_attempts` for a minute on every call but `GET /healthz`, whatever it sends.
+- An unknown path gets `404 not_found` and a wrong method `405 method_not_allowed`. A POST body must be `application/json` (else `415 unsupported_media_type`), at most 64 KiB (else `413 too_large`) and valid JSON (else `400 bad_json`). Headers must arrive within 10 seconds and the whole request within 15.
+- Every answer is JSON with `Cache-Control: no-store`, and every error carries the §1 error body.
+
+### 5.2 Calls
+
+| Method and path                                  | Who may call                               | Answer                                                  |
+| ------------------------------------------------ | ------------------------------------------ | ------------------------------------------------------- |
+| `GET /healthz`                                   | anyone, with no sign-in                    | `200 {"v":1,"ok":true}`                                 |
+| `GET /v1/home`                                   | every phone                                | `200 {"v":1,"home_id":"…","hub":{…},"push":{…}}` (§5.4) |
+| `GET /v1/messages?after=<cursor>&limit=<number>` | every phone                                | the page (§5.3)                                         |
+| `POST /v1/commands`                              | caregivers; residents for two types (§5.5) | `202 {"v":1,"accepted":true}`, or an error (§5.5)       |
+| `POST /v1/push-tokens`                           | caregivers                                 | `204` (§5.6)                                            |
+| `POST /v1/unpair`                                | every phone                                | `204` (§5.7)                                            |
+
+A resident phone's route is the home network (§4.1). At the relay it may read its home and its own messages, unpair, and send the two commands §5.5 names; anything else gets `403 forbidden`. The live-view session calls are §7's, with step 7.
+
+### 5.3 Message page
+
+`GET /v1/messages` answers `200 {"v":1,"messages":[…],"next":"r.<seq>","hub":{"online":true,"last_contact_at":"2026-11-14T15:12:05Z"}}`, with `hub` as in §5.4, so a page tells the app whether home is reachable just as a LAN page does (§4.5).
+
+- `limit` is a whole number of at least 1, 50 when absent. A `limit` above 50 counts as 50. Anything else gets `400 bad_request`.
+- `messages` holds the wrappers the hub delivered, exactly as §3 shapes them, oldest first, at most `limit`. A caregiver phone gets the home-key wrappers and those whose `to` is its device ID. A resident phone gets only those whose `to` is its device ID. The relay keeps a message for 7 days.
+- A cursor is `r.<seq>`, opaque to phones. `r.` marks the relay's route, and `<seq>` never repeats.
+- An `after` that is absent, lacks `r.` (such as the LAN's `l.` cursors), can't be read or is past any cursor the relay has issued starts at the oldest kept message. It is never refused, because the app keeps one cursor for both routes and drops repeats by `msg_id`.
+- `next` is the cursor of the last message returned. With none returned, it is the cursor given when that is the relay's, else the home's newest cursor, or `null` when the relay holds no message for the home. A phone keeps its cursor when `next` is `null`.
+- For `heartbeat` and `care_status`, the relay keeps only the newest message of each type per home. A `msg_id` the hub delivers twice is kept once.
+
+### 5.4 Home state
+
+`GET /v1/home` answers `200 {"v":1,"home_id":"…","hub":{"online":false,"last_contact_at":"2026-11-14T15:12:05Z"},"push":{"state":"ok","since":"2026-11-14T15:10:00Z"}}`.
+
+- `hub.online` is true only while the hub's connection to the relay is open, so a reconnect can show a few seconds of "can't reach home" but never an all-clear the relay can't confirm. `last_contact_at` is the last time the relay heard from the hub, or `null` if it never has.
+- `push` describes pushes in the caller's APNs environment: that of the push token it registered most recently, or `production` when it has none. `state` is `not_configured` when the relay has no APNs key for that environment, `failing` when Apple's latest answer for that environment was a refusal, and `ok` otherwise. `since` is the time of the latest push Apple accepted (`ok`) or refused (`failing`), or `null`. The app tells the caregiver that notifications aren't working when `state` isn't `ok`, because alerts then reach the phone only when the app is opened.
+
+### 5.5 Commands
+
+`POST /v1/commands` takes one wrapper (§3) whose envelope the phone sealed with its own key, as `POST /v1/lan/commands` does. The relay checks the shape (§3) and its own rules, forwards the wrapper unopened to the hub, and waits up to 5 seconds for the hub's answer. It answers `202 {"v":1,"accepted":true}` when the hub accepted the command.
+
+The relay's own refusals:
+
+- `envelope.kid` isn't the caller's `X-Debbie-Device`: `403 forbidden`.
+- `heart_rate` and `fetch`, which travel on the LAN only: `400 lan_only`. Watch readings never reach the relay.
+- A resident sending anything but `live_view_setting` and `unpair`, which includes `laptop_approval`: `403 forbidden`.
+- Any type but `request`, `laptop_approval`, `live_view_setting` and `unpair`: `400 unsupported_type`.
+- The hub isn't connected: `503 hub_offline`. Commands are never queued for an offline hub.
+- The hub doesn't answer within 5 seconds: `504 hub_timeout`.
+
+Any other answer is the hub's, passed through with its status and code unchanged, so a command gets the same answer on either route: §4.4's checks 2 to 7, such as `400 stale`, `400 bad_envelope`, `409 duplicate` and `501 not_supported`, and step 3's approval refusals. The one exception is the hub's `403`, which becomes the relay's `401`: `device_removed`, after which the relay also refuses that device, or `unauthorized` for the hub's `unknown_device`.
+
+### 5.6 Push tokens
+
+`POST /v1/push-tokens` takes `{"v":1,"token":"<hex>","environment":"production","bundle_id":"<the app's bundle ID>"}` and answers `204`.
+
+- `token` is the APNs device token in hex, 64 to 200 characters; the relay keeps it in lower case. `environment` is `production` or `sandbox`, the APNs environment of the app's build. A bad or missing field gets `400 bad_request`, and a `v` above 1 `400 unsupported_version`.
+- `bundle_id` must equal the app ID the relay pushes to, else `400 wrong_app`.
+- A phone has at most one token per environment, and a token belongs to the phone that registered it last. Resident phones get no alert pushes, so they get `403 forbidden`.
+- The relay never logs a push token.
+
+### 5.7 Unpair
+
+`POST /v1/unpair` takes no body (any body is ignored) and answers `204`. The relay refuses the device from then on with `401 device_removed`, deletes its push tokens and, when the hub is connected, tells the hub, which marks the phone removed as for its `unpair` command (§4.4).
+
+### 5.8 Statuses and error codes
+
+The relay's codes follow §4.6's rules, except that 401 means the device can't sign in, and 403 that a signed-in device may not do what it asked.
+
+| Status | Code                     | Where                   | Meaning                                                                              |
+| ------ | ------------------------ | ----------------------- | ------------------------------------------------------------------------------------ |
+| 400    | `bad_json`               | any POST                | The body isn't valid JSON                                                            |
+| 400    | `bad_request`            | any call                | A missing or malformed field, a bad wrapper, or a bad `limit`                        |
+| 400    | `unsupported_version`    | any POST                | `v` is above 1                                                                       |
+| 400    | `wrong_app`              | `/v1/push-tokens`       | `bundle_id` isn't the app the relay pushes to                                        |
+| 400    | `lan_only`               | `/v1/commands`          | `heart_rate` or `fetch`, which travel on the LAN only                                |
+| 400    | `unsupported_type`       | `/v1/commands`          | A type the relay never forwards                                                      |
+| 401    | `unauthorized`           | any call but `/healthz` | A missing header, an unknown device or a wrong credential                            |
+| 401    | `device_removed`         | any call but `/healthz` | The phone was removed or unpaired itself; sent only with its own credential          |
+| 403    | `forbidden`              | any call but `/healthz` | A resident's call that §5.2 doesn't allow, or a command whose `kid` isn't the caller |
+| 404    | `not_found`              | any                     | No such path                                                                         |
+| 405    | `method_not_allowed`     | any                     | The path exists, but not for this method                                             |
+| 413    | `too_large`              | any POST                | The body is over 64 KiB                                                              |
+| 415    | `unsupported_media_type` | any POST                | The body isn't `application/json`                                                    |
+| 429    | `too_many_attempts`      | any call but `/healthz` | 20 failed sign-ins from this address in a minute; try again after a minute           |
+| 500    | `internal`               | any                     | Something unexpected. The relay logs the error's class, never the request            |
+| 503    | `hub_offline`            | `/v1/commands`          | The hub isn't connected to the relay                                                 |
+| 504    | `hub_timeout`            | `/v1/commands`          | The hub didn't answer within 5 seconds                                               |
+
+`/v1/commands` also passes on the hub's own answers (§5.5).
+
+## 8. Push
+
+The relay sends pushes straight to APNs over HTTP/2, each through its token's environment: `production` (TestFlight and App Store builds) or `sandbox` (builds run from Xcode). A token Apple refuses as `Unregistered`, `BadDeviceToken` or `DeviceTokenNotForTopic` is deleted and never retried, until the app registers again. Every push carries `apns-topic`, the app's bundle ID.
+
+### 8.1 Alert
+
+When the relay stores a new `alert` wrapper (not a repeat), it pushes it to every caregiver phone of the home that has a push token: `{"aps":{"alert":{"title":"Debbie","body":"New alert from Debbie"},"mutable-content":1,"interruption-level":"time-sensitive","sound":"default","thread-id":"alerts"},"debbie":{"v":1,"home_id":"…","w":<the §3 wrapper, unchanged>}}`.
+
+- Headers: `apns-push-type: alert`, `apns-priority: 10`, `apns-expiration` 24 hours ahead, and `apns-collapse-id` set to the wrapper's `collapse_id`, the `alert_id`, so an update replaces the first notification.
+- The notification extension opens `w` with the home key, checks its `msg_id` and `type` against the plaintext's (§3), and replaces the placeholder title and body. If it can't, the placeholder stays.
+- A payload over 4,096 bytes carries only `"debbie":{"v":1,"home_id":"…","msg_id":"…","truncated":true}`, and the app fetches the message when opened (§5.3).
+- The relay acknowledges the message to the hub before it pushes, so a slow APNs never holds up the hub. An alert the relay stored in the last 10 minutes but never pushed, because it restarted in between, is pushed when it starts.
+- When Apple keeps failing, the alert is still kept and fetchable, and `GET /v1/home` reports the failure (§5.4).
+
+### 8.2 Hub offline and back online
+
+The relay writes these two pushes itself, with nothing private in them. Both carry `apns-collapse-id: hub-status-<home_id>`, so "back online" replaces "hub offline", and expire after an hour.
+
+- **Hub offline.** When the relay hasn't heard from a hub that was connected for the configured limit (the doc's 180 seconds; 60 for the demo), it pushes once to the home's caregiver phones: title "Can't Reach Home", `"interruption-level":"active"`, `"thread-id":"home-status"`, `"mutable-content":1`, and `"debbie":{"v":1,"type":"hub_offline","last_contact":1794669525,"last_contact_at":"2026-11-14T15:18:45Z"}`. `last_contact` is the same time in whole Unix seconds, which the app's built extension reads, and stays until the app reads `last_contact_at`.
+- **Back online.** The next contact from that hub pushes title "Home Is Back Online", `"interruption-level":"passive"`, no sound, `apns-priority: 5`, and `"debbie":{"v":1,"type":"back_online","last_contact":…,"last_contact_at":"…"}`. It goes out before the alerts the hub queued meanwhile arrive.
+- The relay keeps this state in its database, so a restart neither repeats nor loses either push. A home whose hub has never connected is not watched.
+- The exact payloads of §8.1 and §8.2, built from `vectors.json`, are `layer1/contracts/push-alert.json`, `push-hub-offline.json` and `push-back-online.json`, which come with the relay's push code.
+
 ## 9. What each side does with unknowns
 
 | Situation                             | Hub                                                                         | App                                                                                                                                       |
@@ -255,3 +378,9 @@ The bridge builds this file. These points differ from the app's `docs/CONTRACTS.
 - **`v` in a plaintext.** CONTRACTS.md §1 puts `"v": 1` on every top-level object. This file: a plaintext inside a wrapper has none (§1), as the app and its vectors already do.
 - **Checks on hub messages.** The app opens a hub message without comparing the plaintext's `msg_id` and `type` with the wrapper's, and its base64url decoder takes `+`, `/` and stray `=`. This file: a mismatch drops the message (§3); without that check the relay could resend an old message under a new wrapper `msg_id`, because the associated data doesn't cover `msg_id`. Base64url is decoded strictly, with each length checked (§1).
 - **No answer from either route.** The app shows "Can't connect to Debbie" and "Trying again every 30 seconds.", with no time. This file: "can't reach home" with the last contact time (§9), as the doc's "When things fail" asks.
+- **Relay host.** CONTRACTS.md §5 and §8 describe API Gateway and SNS. This file: the team's own relay on Vultr, pushing straight to APNs in each token's environment (§5, §8).
+- **Relay pages.** CONTRACTS.md's `GET /v1/messages` has no `hub`, and its cursors are plain. This file: every page carries `hub`, as a LAN page does, and the relay's cursors start with `r.`; a cursor from the other route starts at the oldest kept message (§5.3). The app keeps one cursor per route.
+- **Push state.** `GET /v1/home` also carries `push` for the caller's environment (§5.4), and the app tells the caregiver when pushes aren't working.
+- **Relay commands.** CONTRACTS.md answers only `202`. This file: the relay's own `403 forbidden`, `400 lan_only`, `400 unsupported_type`, `503 hub_offline` and `504 hub_timeout`, the hub's answers passed through, and a hub `403` turned into `401` (§5.5). A resident may send only `live_view_setting` and `unpair` through the relay.
+- **Relay sign-in.** The relay answers `401` for a device it can't sign in (`device_removed` only with the right credential) and `429 too_many_attempts` after repeated failures (§5.1), and has an unsigned `GET /healthz`.
+- **Hub-status pushes.** The hub-offline push carries `last_contact` in Unix seconds, and the app's monitoring notice comes from a `monitoring` message. This file: both pushes also carry `last_contact_at` in ISO 8601, and "monitoring degraded" is an ordinary alert (§3, §8.2).
