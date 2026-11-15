@@ -1,0 +1,8 @@
+{
+  "schema_version": 1,
+  "name": "health_check",
+  "start_command": ["uv", "run", "--project", "../..", "python", "-m", "layer4.jobs.health_check"],
+  "kind": "always-on",
+  "memory_gb": 0.2,
+  "sensor": null
+}
