@@ -5,7 +5,8 @@ Control app (WebSocket /ws on 0.0.0.0:listen_port): workers join with `hello` an
 and `stop` orders that worker needs (coordinator/plan.py). Jobs reach the event log through
 their worker with `log_append` and `log_read`, and read the home's state with `state_read`,
 each answered with a `reply`. Dashboard app
-(127.0.0.1:dashboard_port): the dashboard page and GET /api/state.
+(127.0.0.1:dashboard_port): the dashboard page, GET /api/state (the
+Layer 1 contract) and GET /api/hardware (Layer 2 only: specs and load, for the page).
 Neither ever logs a token, a whole `hello` or raw text a client chose.
 """
 
@@ -270,6 +271,10 @@ def create_dashboard_app(
     async def api_state() -> JSONResponse:
         dropped = placement.plan.dropped if placement is not None else ()
         return JSONResponse(registry.api_state(dropped).model_dump(mode="json"))
+
+    @app.get("/api/hardware")
+    async def hardware() -> JSONResponse:
+        return JSONResponse(registry.hardware().model_dump(mode="json"))
 
     @app.get("/")
     async def page() -> HTMLResponse:

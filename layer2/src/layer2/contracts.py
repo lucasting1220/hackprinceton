@@ -289,3 +289,24 @@ class JobDescription(Strict):
     kind: Literal["always-on", "per-item"]
     memory_gb: Annotated[float, Field(ge=0, allow_inf_nan=False)]
     sensor: Literal["camera", "mic"] | None
+
+
+class LaptopHardware(Strict):
+    """One laptop on the dashboard's hardware table. Internal to Layer 2: no contract file."""
+
+    node_id: str
+    display_name: str
+    last_status_at: UtcDatetime
+    specs: Specs
+    tools: Tools
+    memory_free_gb: float | None
+    cpu_percent: float | None
+
+
+class HardwareState(Strict):
+    """GET /api/hardware on the dashboard port. Internal to Layer 2: Layer 1 reads only
+    /api/state."""
+
+    schema_version: Literal[1]
+    updated_at: UtcDatetime
+    laptops: list[LaptopHardware]
