@@ -66,6 +66,16 @@ describe("relay store: messages", () => {
     assert.deepEqual(types, ["heartbeat", "care_status", "alert", "alert"]);
   });
 
+  test("the relay keeps only the newest monitoring snapshot per home", (t) => {
+    const { store, carer } = fixture(t);
+    const snapshots = [1, 2, 3].map(() => hubWrapper({ homeId: HOME, type: "monitoring", key }));
+    store.storeMessage(HOME, alert(), T0);
+    for (const snapshot of snapshots) store.storeMessage(HOME, snapshot, T0);
+    const ids = page(store, carer, null).messages.map((message) => [message.type, message.msg_id]);
+    assert.deepEqual(ids.slice(1), [["monitoring", snapshots[2]?.msg_id]]);
+    assert.equal(ids[0]?.[0], "alert");
+  });
+
   test("a caregiver gets home-key messages and its own; a resident only its own", (t) => {
     const { store, carer, resident } = fixture(t);
     const other = new TestPhone();

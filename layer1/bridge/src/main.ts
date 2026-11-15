@@ -6,6 +6,14 @@ import { type Home, HomeError, loadHome, resolveStateDir } from "./home.ts";
 import { errorMessage, removePath } from "./json-file.ts";
 import { KeepAwake, type KeepAwakeOptions } from "./keep-awake.ts";
 import { LiveViewConsent } from "./live-view-consent.ts";
+import { readApiState } from "./live-view-hub.ts";
+import { sealMonitoring } from "./home-messages.ts";
+import {
+  MonitoringSnapshots,
+  type MonitoringOptions,
+  ollamaAnswers,
+} from "./monitoring-snapshot.ts";
+import { OutboxError } from "./outbox.ts";
 import { PhoneAccess, type PhoneAccessOptions } from "./phone-access.ts";
 import { readRelayCredential } from "./relay-credential.ts";
 import {
@@ -41,6 +49,8 @@ export interface BridgeOptions
   readonly relayTiming?: Partial<RelayLinkTiming>;
   /** The keep-awake helper's platform or command; tests pass an unsupported or missing one. */
   readonly keepAwake?: Omit<KeepAwakeOptions, "log">;
+  /** The monitoring snapshot's sources and times; tests pass their own. */
+  readonly monitoring?: Partial<Omit<MonitoringOptions, "send" | "log">>;
 }
 
 let outputGuarded = false;
@@ -79,6 +89,7 @@ export async function startBridge(options: BridgeOptions) {
   let relayLink: RelayLink | undefined;
   let keepAwake: KeepAwake | undefined;
   let liveView: LiveViewConsent | undefined;
+  let monitoring: MonitoringSnapshots | undefined;
 
   /**
    * The home-ready hook, after a home loads at start and after Create a home: starts the phone
@@ -89,6 +100,7 @@ export async function startBridge(options: BridgeOptions) {
     const relayUrl = credential.state === "ok" ? credential.credential.relayUrl : "";
     const alertsOpened = await openAlerts(home);
     const { outbox, handoff } = alertsOpened ?? {};
+    if (alertsOpened !== undefined && stopping === undefined) startMonitoring(home, alertsOpened);
     liveView ??= await LiveViewConsent.load(home.stateDir, { log });
     const network = {
       ...options.network,
@@ -142,6 +154,30 @@ export async function startBridge(options: BridgeOptions) {
     });
   }
 
+  /** The monitoring snapshot for caregivers' phones, from Layer 2's /api/state (phone-hub.md §3). */
+  function startMonitoring(home: Home, homeAlerts: HomeAlerts): void {
+    if (monitoring !== undefined) return;
+    const { dashboardPort } = home;
+    const seal = { homeId: homeAlerts.homeId, homeKey: homeAlerts.homeKey };
+    monitoring = new MonitoringSnapshots({
+      readState: () => readApiState(dashboardPort, settings.MONITORING_API_STATE_TIMEOUT_MS),
+      languageModel: () => ollamaAnswers(),
+      ...options.monitoring,
+      send: async (fields) => {
+        try {
+          await homeAlerts.outbox.append(sealMonitoring(fields, seal));
+          return true;
+        } catch (error) {
+          if (!(error instanceof OutboxError)) throw error;
+          log(`L1 monitoring: the snapshot was not queued: ${error.message}`);
+          return false;
+        }
+      },
+      log,
+    });
+    monitoring.start();
+  }
+
   /** Step 4: the home key and the outbox, for the alert intake and the LAN gateway's fetch. */
   async function openAlerts(home: Home): Promise<HomeAlerts | undefined> {
     alerts ??= openHomeAlerts(home, log).catch((error: unknown) => {
@@ -176,6 +212,7 @@ export async function startBridge(options: BridgeOptions) {
     clearInterval(stopFilePoll);
     for (const [signal, handler] of signalHandlers) process.off(signal, handler);
     log(`L1 bridge: ${reason}; stopping`);
+    await monitoring?.stop();
     await relayLink?.close();
     await (await phones)?.close().catch((error: unknown) => {
       log(`L1 bridge: could not stop the network side: ${errorMessage(error)}`);

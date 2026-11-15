@@ -100,19 +100,25 @@ export function parseCameraLaptops(state: unknown): string[] | undefined {
   return cameras.map((camera) => camera.nodeId);
 }
 
-/** Asks Layer 2's dashboard on this laptop for its camera laptops, within a time limit. */
-export async function cameraLaptopsFrom(dashboardPort: number): Promise<CameraLaptops> {
+/** Layer 2's /api/state body as JSON, or why it couldn't be read. */
+export type ApiStateRead =
+  | Readonly<{ ok: true; body: unknown }>
+  | Readonly<{ ok: false; reason: string }>;
+
+/** Reads Layer 2's GET /api/state on this laptop's dashboard port, within `timeoutMs`. */
+export async function readApiState(
+  dashboardPort: number,
+  timeoutMs: number,
+): Promise<ApiStateRead> {
   const url = `http://${settings.LOCAL_HOST}:${dashboardPort}/api/state`;
-  let body: unknown;
   try {
-    const response = await fetch(url, {
-      signal: AbortSignal.timeout(settings.LIVE_VIEW_API_STATE_TIMEOUT_MS),
-    });
+    const response = await fetch(url, { signal: AbortSignal.timeout(timeoutMs) });
     if (response.status !== 200) {
       await response.body?.cancel();
       return { ok: false, reason: `Layer 2's /api/state answered ${response.status}` };
     }
-    body = await response.json();
+    const body: unknown = await response.json();
+    return { ok: true, body };
   } catch (error) {
     const expected =
       error instanceof TypeError ||
@@ -121,7 +127,13 @@ export async function cameraLaptopsFrom(dashboardPort: number): Promise<CameraLa
     if (!expected) throw error;
     return { ok: false, reason: `can't read Layer 2's /api/state (${errorKind(error)})` };
   }
-  const nodeIds = parseCameraLaptops(body);
+}
+
+/** Asks Layer 2's dashboard on this laptop for its camera laptops, within a time limit. */
+export async function cameraLaptopsFrom(dashboardPort: number): Promise<CameraLaptops> {
+  const read = await readApiState(dashboardPort, settings.LIVE_VIEW_API_STATE_TIMEOUT_MS);
+  if (!read.ok) return read;
+  const nodeIds = parseCameraLaptops(read.body);
   if (nodeIds === undefined) return { ok: false, reason: "Layer 2's /api/state has no laptops" };
   return { ok: true, nodeIds };
 }

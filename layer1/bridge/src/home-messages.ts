@@ -1,5 +1,5 @@
 /**
- * Hub → phone messages (phone-hub.md §3): `alert`, `care_status`, `report` and the `heartbeat`,
+ * Hub → phone messages (phone-hub.md §3): `alert`, `care_status`, `monitoring`, `report` and the `heartbeat`,
  * sealed with the home key, and `reply`, sealed with one phone's own key; the only place in bridge/
  * that builds their plaintext or wrapper. Each is sealed once;
  * the LAN gateway, and later the relay, serve the same wrapper. No I/O, so the relay may import it.
@@ -12,7 +12,7 @@ import { utcSeconds, type Wrapper } from "./wire.ts";
 const HOME_KID = "home";
 
 /** The hub → caregivers types sealed with the home key (§3's message types). */
-export type HomeMessageType = "alert" | "care_status" | "heartbeat" | "report";
+export type HomeMessageType = "alert" | "care_status" | "heartbeat" | "monitoring" | "report";
 
 /** An alert's fields as the phone gets them, with detected_at already in UTC whole seconds. */
 export type AlertFields = Readonly<{
@@ -79,6 +79,15 @@ export function sealCareStatus(
   choices: SealChoices = {},
 ): Wrapper {
   return sealHomeMessage("care_status", status, home, choices);
+}
+
+/** The hub's monitoring snapshot of the home's laptops and sensors, for every caregiver phone (§3). */
+export function sealMonitoring(
+  snapshot: Readonly<Record<string, unknown>>,
+  home: HomeSeal,
+  choices: SealChoices = {},
+): Wrapper {
+  return sealHomeMessage("monitoring", snapshot, home, choices);
 }
 
 /** The heartbeat, which carries no fields and goes through the relay only, never the outbox (§3). */

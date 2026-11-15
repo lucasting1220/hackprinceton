@@ -1,15 +1,17 @@
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
 import { once } from "node:events";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { copyFile, mkdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { type TestContext, test } from "node:test";
 import { pathToFileURL } from "node:url";
-import { createHome } from "../bridge/src/home.ts";
+import { createHome, readHomeSecrets } from "../bridge/src/home.ts";
 import { startBridge } from "../bridge/src/main.ts";
 import * as settings from "../bridge/src/settings.ts";
+import type { Wrapper } from "../bridge/src/wire.ts";
 import { freePort, makeTempDir, STUB, waitFor } from "./coordinator-fixtures.ts";
+import { openHomeWrapper } from "./home-reader.ts";
 
 const MAIN = path.join(import.meta.dirname, "..", "bridge", "src", "main.ts");
 
@@ -173,4 +175,66 @@ test("the bridge exits 1 with a clear message when it cannot run", () => {
   const run = spawnSync(process.execPath, [MAIN, "--state-dir", "relative"], options);
   const why = "the state folder must be an absolute path: pass --state-dir <folder>";
   assert.deepEqual([run.status, run.stdout, run.stderr], [1, "", `L1 bridge: ${why}\n`]);
+});
+
+test("the coordinator's bridge queues a monitoring snapshot for caregivers from Layer 2's /api/state", async (t) => {
+  const [repoRoot, stateDir] = [await makeTempDir(), await makeTempDir()];
+  const stub = path.join(repoRoot, ...settings.COORDINATOR_STUB_PATH);
+  await mkdir(path.dirname(stub), { recursive: true });
+  await copyFile(STUB, stub);
+  t.after(() => Promise.all([repoRoot, stateDir].map((dir) => rm(dir, { recursive: true }))));
+  const { COORDINATOR_LISTEN_PORT: listen, COORDINATOR_CLIENT_PORT: client } = settings;
+  const home = await createHome(stateDir, {
+    ports: { listen, dashboard: await freePort(), client },
+  });
+  const body = {
+    schema_version: 1,
+    updated_at: new Date().toISOString(),
+    laptops: [
+      {
+        node_id: "node-a",
+        display_name: "Kitchen laptop",
+        last_status_at: new Date().toISOString(),
+        sensors: ["camera", "mic"],
+        missing: [],
+      },
+    ],
+    jobs: [
+      { job: "capture", node_id: "node-a", state: "running" },
+      { job: "fall_model", node_id: "node-a", state: "running" },
+    ],
+    dropped: [],
+  };
+  const bridge = await startBridge({
+    stateDir,
+    repoRoot,
+    port: 0,
+    open: async () => undefined,
+    log: () => undefined,
+    network: { port: 0, addresses: (port) => [`127.0.0.1:${port}`] },
+    monitoring: {
+      readState: async () => ({ ok: true, body }),
+      languageModel: async () => true,
+    },
+  });
+  t.after(() => bridge.stop("the test ended"));
+  const outboxFile = path.join(stateDir, settings.OUTBOX_FILE_NAME);
+  const queued = (): Wrapper[] => {
+    if (!existsSync(outboxFile)) return [];
+    const saved = JSON.parse(readFileSync(outboxFile, "utf8")) as {
+      messages: { wrapper: Wrapper }[];
+    };
+    return saved.messages.map((entry) => entry.wrapper).filter((w) => w.type === "monitoring");
+  };
+  let found: Wrapper[] = [];
+  await waitFor(() => {
+    found = queued();
+    return found.length > 0;
+  }, STOP_WAIT_MS);
+  const [wrapper] = found;
+  assert.ok(wrapper !== undefined);
+  const { homeKey } = await readHomeSecrets(stateDir);
+  const plaintext = openHomeWrapper(wrapper, homeKey, home.homeId);
+  const { state, camera, mic, fall_detection: fall, sound_detection: sound } = plaintext;
+  assert.deepEqual([state, camera, mic, fall, sound], ["ok", "up", "up", "running", "unplaced"]);
 });
