@@ -8,9 +8,7 @@ import argparse
 import asyncio
 import contextlib
 import logging
-import signal
 import sys
-import threading
 from collections.abc import Generator
 from pathlib import Path
 
@@ -19,9 +17,14 @@ from fastapi import FastAPI, WebSocket
 
 from layer2 import settings
 from layer2.contracts import CoordinatorConfig
+from layer2.coordinator.ai_plan import choose_plan
+from layer2.coordinator.event_log import EventLog
+from layer2.coordinator.plan import JobNeed, LaptopView, Placement, Plan
 from layer2.coordinator.registry import Registry
 from layer2.coordinator.server import create_control_app, create_dashboard_app
-from layer2.files import ConfigError, load_config, retry_while_busy, wait_for_stop_file
+from layer2.files import ConfigError, load_config, wait_for_stop_file
+from layer2.job_files import job_needs
+from layer2.stopping import consume_stop_file, stop_requested, stop_signals
 
 log = logging.getLogger(__name__)
 
@@ -29,12 +32,10 @@ EXIT_OK = 0
 EXIT_ERROR = 1
 EXIT_BAD_CONFIG = 2
 
-_STOP_SIGNALS = ("SIGINT", "SIGTERM", "SIGBREAK")
-
 
 class _Server(uvicorn.Server):
     """Two servers share one process, so neither may take over the signal handlers;
-    _stop_signals handles them for both."""
+    stop_signals handles them for both."""
 
     @contextlib.contextmanager
     def capture_signals(self) -> Generator[None]:
@@ -70,34 +71,6 @@ async def _run(server: _Server) -> None:
         ) from None
 
 
-def _consume_stop_file(path: Path) -> None:
-    """The stop request has been acted on; remove it so the next start is not stopped."""
-    try:
-        retry_while_busy(lambda: path.unlink(missing_ok=True))
-    except OSError as error:
-        log.warning("L2 coordinator: could not remove the stop file: %s", error)
-
-
-@contextlib.contextmanager
-def _stop_signals(loop: asyncio.AbstractEventLoop, stopping: asyncio.Event) -> Generator[None]:
-    """Ctrl+C, SIGTERM and Windows Ctrl+Break stop the servers gracefully, like the stop
-    file. Signals can only be caught on the main thread; elsewhere this does nothing."""
-    if threading.current_thread() is not threading.main_thread():
-        yield
-        return
-
-    def handle(signum: int, frame: object) -> None:
-        loop.call_soon_threadsafe(stopping.set)
-
-    caught = [getattr(signal, name) for name in _STOP_SIGNALS if hasattr(signal, name)]
-    originals = {sig: signal.signal(sig, handle) for sig in caught}
-    try:
-        yield
-    finally:
-        for sig, original in originals.items():
-            signal.signal(sig, original)
-
-
 async def _log_when_ready(servers: list[_Server], config: CoordinatorConfig) -> None:
     while not all(server.started for server in servers):
         await asyncio.sleep(settings.STOP_POLL_S)
@@ -109,15 +82,31 @@ async def _log_when_ready(servers: list[_Server], config: CoordinatorConfig) -> 
     )
 
 
+def _job_needs() -> list[JobNeed]:
+    """Every always-on job Layers 3 and 4 provide, read again at each re-plan."""
+    return job_needs()
+
+
 async def _serve(config: CoordinatorConfig) -> int:
     registry: Registry[WebSocket] = Registry()
+    planner_log = Path(config.state_dir) / "planner.log"
+
+    def planner(
+        needs: list[JobNeed], connected: list[LaptopView], known: set[str], previous: Plan
+    ) -> Plan:
+        plan, _ = choose_plan(config.ollama_url, needs, connected, known, previous, planner_log)
+        return plan
+
+    placement = Placement(_job_needs, planner=planner)
+    events = EventLog(Path(config.state_dir) / "events")
+    control = create_control_app(config, registry, placement, events)
     servers = [
-        _server(create_control_app(config, registry), "0.0.0.0", config.listen_port),
-        _server(create_dashboard_app(registry), "127.0.0.1", config.dashboard_port),
+        _server(control, "0.0.0.0", config.listen_port),
+        _server(create_dashboard_app(registry, placement), "127.0.0.1", config.dashboard_port),
     ]
     stop_file = Path(config.stop_file)
     stopping = asyncio.Event()
-    with _stop_signals(asyncio.get_running_loop(), stopping):
+    with stop_signals(asyncio.get_running_loop(), stopping):
         stop = asyncio.create_task(wait_for_stop_file(stop_file))
         signalled = asyncio.create_task(stopping.wait())
         ready = asyncio.create_task(_log_when_ready(servers, config))
@@ -132,7 +121,7 @@ async def _serve(config: CoordinatorConfig) -> int:
         outcomes = await asyncio.gather(*running, return_exceptions=True)
     if stop in done:
         log.info("L2 coordinator: stop file found; stopped")
-        _consume_stop_file(stop_file)
+        consume_stop_file(stop_file, "coordinator")
         return EXIT_OK
     if signalled in done:
         log.info("L2 coordinator: stop signal received; stopped")
@@ -152,14 +141,10 @@ def main(argv: list[str] | None = None) -> int:
         log.error("L2 coordinator: %s", error)
         return EXIT_BAD_CONFIG
     stop_file = Path(config.stop_file)
-    try:
-        stop_requested = stop_file.exists()
-    except OSError:
-        stop_requested = False
-    if stop_requested:
+    if stop_requested(stop_file):
         # Never delete it unread: it may be a real request made while this program started.
         log.info("L2 coordinator: the stop file is already there; not starting")
-        _consume_stop_file(stop_file)
+        consume_stop_file(stop_file, "coordinator")
         return EXIT_OK
     try:
         return asyncio.run(_serve(config))

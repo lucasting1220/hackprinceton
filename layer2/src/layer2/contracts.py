@@ -1,6 +1,6 @@
 """Pydantic models for the contract files in contracts/. The files are the truth."""
 
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from typing import Annotated, Literal, Self
 
 from pydantic import (
@@ -9,6 +9,7 @@ from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
+    JsonValue,
     StrictBool,
     StrictInt,
     model_validator,
@@ -181,6 +182,15 @@ class ApiState(Strict):
     dropped: list[DroppedWork]
 
 
+JobName = Annotated[str, Field(pattern=r"^[a-z][a-z0-9_]{0,63}$")]
+"""A job's name, which is also its folder's name."""
+
+
+class JobStatus(Strict):
+    job: JobName
+    state: Literal["starting", "running", "restarting"]
+
+
 class StatusMessage(Strict):
     """Worker to coordinator, every STATUS_INTERVAL_S. Internal to Layer 2: no contract file."""
 
@@ -189,6 +199,96 @@ class StatusMessage(Strict):
     missing: Annotated[list[MissingItem], Field(max_length=100)]
     memory_free_gb: Annotated[float, Field(ge=0, strict=True, allow_inf_nan=False)]
     cpu_percent: Annotated[float, Field(ge=0, le=100, strict=True, allow_inf_nan=False)]
+    jobs: list[JobStatus] = Field(default_factory=list, max_length=100)
+
+
+class StartMessage(Strict):
+    """Coordinator to worker: run this job. Internal to Layer 2: no contract file. It names the
+    job only; the worker finds the command in its own job folder, so a message can never make
+    a worker run an arbitrary program."""
+
+    type: Literal["start"]
+    schema_version: Literal[1]
+    job: JobName
+
+
+class StopMessage(Strict):
+    """Coordinator to worker: stop this job if it is running. Internal to Layer 2."""
+
+    type: Literal["stop"]
+    schema_version: Literal[1]
+    job: JobName
+
+
+RequestId = Annotated[str, Field(pattern=r"^[A-Za-z0-9_-]{1,64}$")]
+"""Chosen by the worker; the coordinator's reply carries it back."""
+
+
+class LoggedEvent(Strict):
+    """One stored event: Layer 4's opaque event and the coordinator's own time."""
+
+    logged_at: UtcDatetime
+    event: dict[str, JsonValue]
+
+
+class LogAppend(Strict):
+    """Worker to coordinator, for a job: store this event. Internal to Layer 2."""
+
+    type: Literal["log_append"]
+    schema_version: Literal[1]
+    id: RequestId
+    event: dict[str, JsonValue]
+
+
+class LogRead(Strict):
+    """Worker to coordinator, for a job: events since a time, or of one UTC day (exactly one
+    of the two). Internal to Layer 2."""
+
+    type: Literal["log_read"]
+    schema_version: Literal[1]
+    id: RequestId
+    since: UtcDatetime | None = None
+    day: date | None = None
+
+    @model_validator(mode="after")
+    def _exactly_one(self) -> Self:
+        if (self.since is None) == (self.day is None):
+            raise ValueError("give exactly one of since and day")
+        return self
+
+
+class StateRead(Strict):
+    """Worker to coordinator, for a job's status() call: the same data as /api/state.
+    Internal to Layer 2."""
+
+    type: Literal["state_read"]
+    schema_version: Literal[1]
+    id: RequestId
+
+
+class Reply(Strict):
+    """Coordinator to worker: the answer to a request with the same id. `truncated` means the
+    oldest events were left out to fit one message. Internal to Layer 2."""
+
+    type: Literal["reply"]
+    schema_version: Literal[1]
+    id: RequestId
+    ok: StrictBool
+    error: str | None = None
+    events: list[LoggedEvent] | None = None
+    truncated: StrictBool = False
+    state: ApiState | None = None
+
+
+class JobDescription(Strict):
+    """contracts/job.json: written by Layers 3 and 4, one per job folder."""
+
+    schema_version: Literal[1]
+    name: JobName
+    start_command: Annotated[list[Annotated[str, Field(min_length=1)]], Field(min_length=1)]
+    kind: Literal["always-on", "per-item"]
+    memory_gb: Annotated[float, Field(ge=0, allow_inf_nan=False)]
+    sensor: Literal["camera", "mic"] | None
 
 
 class LaptopHardware(Strict):
