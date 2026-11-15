@@ -1,6 +1,7 @@
 import { existsSync } from "node:fs";
 import path from "node:path";
 import { parseArgs } from "node:util";
+import { type HomeAlerts, openHomeAlerts } from "./alert-intake.ts";
 import { type Home, HomeError, loadHome, resolveStateDir } from "./home.ts";
 import { errorMessage, removePath } from "./json-file.ts";
 import { PhoneAccess, type PhoneAccessOptions } from "./phone-access.ts";
@@ -53,6 +54,8 @@ export async function startBridge(options: BridgeOptions) {
     if (!(error instanceof HomeError)) throw error;
     log(`L1 bridge: ${error.message}`); // the setup page shows it too
   });
+  let alerts: Promise<HomeAlerts | undefined> | undefined;
+  let alertsReady: HomeAlerts | undefined;
   let phones: Promise<PhoneAccess | undefined> | undefined;
   let started: PhoneAccess | undefined;
   let stopping: Promise<void> | undefined;
@@ -62,7 +65,9 @@ export async function startBridge(options: BridgeOptions) {
    * side on the coordinator. Steps 4 and 5 start their outbox and relay link here too.
    */
   async function onHomeReady(home: Home): Promise<void> {
-    phones ??= PhoneAccess.start(home, { ...options.network, log }).catch((error: unknown) => {
+    const outbox = (await openAlerts(home))?.outbox;
+    const network = { ...options.network, log, ...(outbox === undefined ? {} : { outbox }) };
+    phones ??= PhoneAccess.start(home, network).catch((error: unknown) => {
       log(`L1 bridge: phone pairing could not start: ${errorMessage(error)}`);
       return undefined;
     });
@@ -71,12 +76,24 @@ export async function startBridge(options: BridgeOptions) {
     else started = access;
   }
 
+  /** Step 4: the home key and the outbox, for the alert intake and the LAN gateway's fetch. */
+  async function openAlerts(home: Home): Promise<HomeAlerts | undefined> {
+    alerts ??= openHomeAlerts(home, log).catch((error: unknown) => {
+      log(`L1 bridge: alerts for phones could not start: ${errorMessage(error)}`);
+      return undefined;
+    });
+    const opened = await alerts;
+    if (stopping === undefined) alertsReady = opened;
+    return opened;
+  }
+
   // The page's port comes first: a second bridge must exit before it touches the coordinator.
   const server = await startSetupServer({
     ...options,
     log,
     onHomeReady,
     phoneAccess: () => started,
+    homeAlerts: () => alertsReady,
   });
   const stopFile = path.join(options.stateDir, settings.STATE_NAMES.bridgeStop);
   try {

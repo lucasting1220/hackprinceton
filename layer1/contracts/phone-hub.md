@@ -178,7 +178,7 @@ The `fetch` plaintext carries `after`, a cursor string or `null`, and `limit`, a
 - An `after` that is `null`, lacks `l.` (such as the relay's `r.` cursors), names another epoch or can't be read starts at the oldest kept message. It is never refused, because the app keeps one cursor for both routes.
 - `next` is the cursor of the last message the hub examined for this page, whether it returned it or skipped it as not for this phone. With none examined, it is the cursor given, or this outbox's newest cursor when the given one wasn't this outbox's.
 - `hub` is the hub's own state. On the LAN it is always online, with `last_contact_at` set to now.
-- Until step 4 fills the outbox, every page is empty with `next` `null`. A phone keeps its cursor when `next` is `null`.
+- While the outbox has never held a message, every page is empty with `next` `null`. A phone keeps its cursor when `next` is `null`.
 
 ### 4.6 Statuses and error codes
 

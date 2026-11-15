@@ -4,11 +4,13 @@ import { once } from "node:events";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import { text } from "node:stream/consumers";
+import { AlertIntake, type HomeAlerts } from "./alert-intake.ts";
 import type { CreateHomeOptions, Home } from "./home.ts";
 import { createHome, HomeError, HomeExistsError, loadHome } from "./home.ts";
 import { type Html, html, page } from "./html.ts";
 import { errorMessage } from "./json-file.ts";
 import { CoordinatorLauncher, type CoordinatorStatus } from "./launcher.ts";
+import { readJsonBody } from "./network-server.ts";
 import type { PhoneAccess } from "./phone-access.ts";
 import { PairingPage } from "./pairing-page.ts";
 import * as settings from "./settings.ts";
@@ -38,22 +40,54 @@ export interface SetupServerOptions {
   readonly onHomeReady?: (home: Home) => Promise<void>;
   /** The phone side once the home is ready, for the Pair a phone page and the Phones section. */
   readonly phoneAccess?: () => PhoneAccess | undefined;
+  /** The home's alerts once the home is ready, for POST /v1/alerts (step 4). */
+  readonly homeAlerts?: () => HomeAlerts | undefined;
 }
 
 /** A page route's answer: a page with its status, or a 303 to `redirect`. */
 export type PageReply =
   | { readonly status: number; readonly body: string }
-  | { readonly redirect: string };
+  | { readonly redirect: string }
+  | MachineReply;
+
+/** A machine route's answer: JSON, never a page. */
+export type MachineReply = { readonly status: number; readonly json: object };
 
 /**
  * A row of the setup page's route table. Every route checks the Host; a "form" route also checks
- * the Origin, the body's size and the per-run token, and gets the form's fields.
+ * the Origin, the body's size and the per-run token, and gets the form's fields. A "machine" route,
+ * for programs on this laptop such as Layer 2's coordinator, refuses any Origin (a browser sends one
+ * with every POST), takes only JSON under the JSON request limits and gets the parsed body; other
+ * methods on its path get 405, and no route sends an Access-Control header.
  */
-export interface PageRoute {
-  readonly method: "GET" | "POST";
-  readonly path: string;
-  readonly guard: "view" | "form";
-  readonly handle: (fields: URLSearchParams) => Promise<PageReply>;
+export type PageRoute =
+  | {
+      readonly method: "GET" | "POST";
+      readonly path: string;
+      readonly guard: "view" | "form";
+      readonly handle: (fields: URLSearchParams) => Promise<PageReply>;
+    }
+  | {
+      readonly method: "POST";
+      readonly path: string;
+      readonly guard: "machine";
+      readonly handle: (body: unknown) => Promise<MachineReply>;
+    };
+
+/** A machine route's refusal: its reason is a fixed code, never a value from the request. */
+const machineRefusal = (status: number, reason: string): MachineReply => ({
+  status,
+  json: { type: "rejected", schema_version: 1, reason },
+});
+
+/** The machine guard: no Origin, then readJsonBody's JSON, size and parse rules. */
+async function machineBody(request: IncomingMessage): Promise<MachineReply | { body: unknown }> {
+  if (request.headers.origin !== undefined) return machineRefusal(403, "origin_not_allowed");
+  const read = await readJsonBody(request);
+  if (read.ok) return { body: read.value };
+  const error: unknown = Reflect.get(read.reply.body, "error");
+  const code = typeof error === "object" && error !== null ? Reflect.get(error, "code") : "";
+  return machineRefusal(read.reply.status, String(code));
 }
 
 const welcomePage = (token: string) =>
@@ -93,7 +127,12 @@ export async function startSetupServer(options: SetupServerOptions) {
   const { stateDir, repoRoot, homeOptions, port = settings.BRIDGE_LOCAL_PORT } = options;
   const log = options.log ?? ((line: string) => console.log(line));
   const token = randomBytes(settings.SETUP_TOKEN_BYTES).toString("base64url");
-  const server = createServer({ requestTimeout: settings.SETUP_REQUEST_TIMEOUT_MS });
+  const server = createServer({
+    requestTimeout: settings.SETUP_REQUEST_TIMEOUT_MS,
+    // The machine route reads JSON with readJsonBody, which needs the JSON request limits.
+    headersTimeout: settings.JSON_REQUEST_HEADERS_TIMEOUT_MS,
+    connectionsCheckingInterval: settings.JSON_REQUEST_TIMEOUT_CHECK_MS,
+  });
   try {
     await once(server.listen(port, settings.LOCAL_HOST), "listening");
   } catch (error) {
@@ -107,6 +146,8 @@ export async function startSetupServer(options: SetupServerOptions) {
   const hosts: string[] = settings.SETUP_HOST_NAMES.map((name) => `${name}:${bound}`);
   const origins = hosts.map((host) => `http://${host}`);
   const pairingPage = new PairingPage(options.phoneAccess ?? (() => undefined), token);
+  const alerts = new AlertIntake({ ready: options.homeAlerts ?? (() => undefined), log });
+  const homeSections = () => html`${pairingPage.phonesSection()}${alerts.section()}`;
   let launcher: CoordinatorLauncher | undefined;
   let closed = false;
 
@@ -132,7 +173,7 @@ export async function startSetupServer(options: SetupServerOptions) {
     try {
       const home = await loadHome(stateDir);
       if (home === undefined) return welcomePage(token);
-      return homePage(home, launcher?.status(), pairingPage.phonesSection());
+      return homePage(home, launcher?.status(), homeSections());
     } catch (error) {
       if (!(error instanceof HomeError)) throw error;
       return problemPage(error.message);
@@ -143,7 +184,7 @@ export async function startSetupServer(options: SetupServerOptions) {
     try {
       const home = await createHome(stateDir, { ...homeOptions, bridgeUrl });
       await homeReady(home);
-      return { status: 200, body: homePage(home, launcher?.status(), pairingPage.phonesSection()) };
+      return { status: 200, body: homePage(home, launcher?.status(), homeSections()) };
     } catch (error) {
       if (error instanceof HomeExistsError) return { status: 409, body: await currentPage() };
       if (!(error instanceof HomeError)) throw error;
@@ -158,6 +199,7 @@ export async function startSetupServer(options: SetupServerOptions) {
     { method: "GET", path: "/home", guard: "view", handle: showPage },
     { method: "POST", path: "/home", guard: "form", handle: createHomeReply },
     ...pairingPage.routes(),
+    alerts.route(),
   ];
 
   function refuse(why: string): PageReply {
@@ -169,8 +211,16 @@ export async function startSetupServer(options: SetupServerOptions) {
     const { method, url: target, headers } = request;
     if (!hosts.includes(headers.host ?? "")) return refuse("it was not for this page's address");
     const route = routes.find((row) => row.method === method && row.path === target);
-    if (route === undefined) return { status: 404, body: problemPage("No such page.") };
+    if (route === undefined) {
+      const machine = routes.some((row) => row.path === target && row.guard === "machine");
+      if (machine) return machineRefusal(405, "method_not_allowed");
+      return { status: 404, body: problemPage("No such page.") };
+    }
     if (route.guard === "view") return route.handle(new URLSearchParams());
+    if (route.guard === "machine") {
+      const read = await machineBody(request);
+      return "body" in read ? route.handle(read.body) : read;
+    }
     if (!origins.includes(headers.origin ?? "")) return refuse("it did not come from this page");
     const length = Number(headers["content-length"]); // NaN without one, so that is refused too
     if (!(length <= settings.SETUP_MAX_BODY_BYTES)) {
@@ -191,6 +241,9 @@ export async function startSetupServer(options: SetupServerOptions) {
     }
     if ("redirect" in reply) {
       response.writeHead(303, { ...HEADERS, location: reply.redirect }).end();
+    } else if ("json" in reply) {
+      const json = { ...HEADERS, "content-type": "application/json" };
+      response.writeHead(reply.status, json).end(JSON.stringify(reply.json));
     } else {
       response.writeHead(reply.status, HEADERS).end(reply.body);
     }

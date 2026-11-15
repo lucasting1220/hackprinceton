@@ -1,8 +1,14 @@
 import assert from "node:assert/strict";
+import { spawn } from "node:child_process";
+import { once } from "node:events";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
 import os from "node:os";
 import path from "node:path";
+import { text } from "node:stream/consumers";
 import { describe, type TestContext, test } from "node:test";
+import { ALERT_FIELDS, parseAlert } from "../bridge/src/alert-intake.ts";
 import { createHome, type Home } from "../bridge/src/home.ts";
 import { readJsonFile } from "../bridge/src/json-file.ts";
 import * as settings from "../bridge/src/settings.ts";
@@ -129,5 +135,40 @@ describe("the bridge's ports", () => {
     ];
     assert.ok(ports.every((port) => Number.isInteger(port) && port >= 1 && port <= 65535));
     assert.equal(new Set(ports).size, ports.length, "the five ports must differ");
+  });
+});
+
+describe("the alert Layer 4 sends (no shared contracts/alert.json; the intake's ALERT_FIELDS)", () => {
+  test("the stub sends exactly ALERT_FIELDS, with the types the intake accepts", async (t) => {
+    const received: unknown[] = [];
+    const server = createServer((request, response) => {
+      text(request).then(
+        (body) => {
+          received.push(JSON.parse(body));
+          response.writeHead(202, { "content-type": "application/json" }).end("{}");
+        },
+        (error: unknown) => response.destroy(error instanceof Error ? error : undefined),
+      );
+    });
+    server.listen(0, "127.0.0.1");
+    await once(server, "listening");
+    t.after(() => server.close());
+    const { port } = server.address() as AddressInfo;
+    const stubFile = path.join(import.meta.dirname, "..", "stubs", "fake-layer2-to-phone.ts");
+    const child = spawn(
+      process.execPath,
+      [stubFile, "--bridge-url", `http://127.0.0.1:${port}`, "--rewrite-after", "0"],
+      { stdio: "ignore", timeout: 20_000 },
+    );
+    const [code] = await once(child, "close");
+    assert.equal(code, 0);
+    assert.equal(received.length, 2);
+    for (const alert of received) {
+      assert.ok(typeof alert === "object" && alert !== null);
+      assert.deepEqual(Object.keys(alert).sort(), [...ALERT_FIELDS].sort());
+      const parsed = parseAlert(alert);
+      assert.ok(parsed.ok, parsed.ok ? "" : parsed.reason);
+      assert.deepEqual(parsed.unknownFields, []);
+    }
   });
 });
