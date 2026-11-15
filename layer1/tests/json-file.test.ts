@@ -1,13 +1,15 @@
 import assert from "node:assert/strict";
-import fsPromises, { mkdtemp, readdir, rm, stat, writeFile } from "node:fs/promises";
+import fsPromises, { mkdtemp, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { syncBuiltinESMExports } from "node:module";
 import os from "node:os";
 import path from "node:path";
 import { describe, type TestContext, test } from "node:test";
+import { setImmediate as nextTurn } from "node:timers/promises";
 import {
   JsonFileError,
   readJsonFile,
   retryWhileBusy,
+  updateJsonFile,
   writeFileWhole,
 } from "../bridge/src/json-file.ts";
 import { FILE_BUSY_RETRY_MS } from "../bridge/src/settings.ts";
@@ -128,5 +130,51 @@ describe("readJsonFile", () => {
     const file = path.join(await tempDir(t), "bom.json");
     await writeFile(file, '\uFEFF{"a":1}', { encoding: "utf8" });
     assert.deepEqual(await readJsonFile(file), { a: 1 });
+  });
+});
+
+/** An update that appends `item` to the list in the file, and gives other updates a turn first. */
+const append = (item: number) => async (current: unknown) => {
+  const items: unknown[] = Array.isArray(current) ? current : [];
+  await nextTurn();
+  return [...items, item];
+};
+
+describe("updateJsonFile", () => {
+  test("updates of one file started together all land, in the order they were started", async (t) => {
+    const file = path.join(await tempDir(t), "list.json");
+    const results = await Promise.all(
+      [1, 2, 3, 4].map((item) => updateJsonFile(file, append(item))),
+    );
+    assert.deepEqual(results, [[1], [1, 2], [1, 2, 3], [1, 2, 3, 4]]);
+    assert.deepEqual(await readJsonFile(file), [1, 2, 3, 4]);
+  });
+
+  test("an update that throws or a file that isn't JSON leaves the file, and the next one runs", async (t) => {
+    const dir = await tempDir(t);
+    const file = path.join(dir, "list.json");
+    await writeFileWhole(file, "[0]");
+    const refused = updateJsonFile(file, () => {
+      throw new Error("refused");
+    });
+    const next = updateJsonFile(file, append(1));
+    await assert.rejects(refused, /^Error: refused$/);
+    assert.deepEqual(await next, [0, 1]);
+    await writeFile(file, "[0, not-json", { encoding: "utf8" });
+    await assert.rejects(updateJsonFile(file, append(2)), JsonFileError);
+    assert.equal(await readFile(file, { encoding: "utf8" }), "[0, not-json");
+    assert.deepEqual(await readdir(dir), ["list.json"]);
+  });
+
+  test("an update of one file does not wait for an update of another", async (t) => {
+    const dir = await tempDir(t);
+    const gate = Promise.withResolvers<void>();
+    const held = updateJsonFile(path.join(dir, "a.json"), async () => {
+      await gate.promise;
+      return [];
+    });
+    assert.deepEqual(await updateJsonFile(path.join(dir, "b.json"), append(1)), [1]);
+    gate.resolve();
+    assert.deepEqual(await held, []);
   });
 });
