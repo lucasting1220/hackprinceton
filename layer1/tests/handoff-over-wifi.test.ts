@@ -160,6 +160,8 @@ test("Layer 4's replies, reports and status reach phones over the LAN, and phone
   const [heart] = watch.heart_rate;
   assert.ok(heart !== undefined);
   assert.deepEqual(inbox.received.at(-1)?.body, {
+    schema_version: 1,
+    type: "watch_data",
     device_id: resident.deviceId,
     heart_rate: [{ measured_at: heart.measured_at, bpm: heart.bpm }],
     sleep: watch.sleep,

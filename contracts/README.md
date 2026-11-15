@@ -107,11 +107,31 @@ Added Nov 15 from the field list that the Layer 1 doc ("Handoff to Layer 4"), `l
 ### Rules that go with this file
 
 - **Path:** the bridge posts the object to the coordinator at `POST /v1/watch-data` on `client_port`. The coordinator answers 202 once the worker whose job takes `watch-data` has it, or 503 when no job takes it. Layer 3 gets the same object from `layer2.receive("watch-data")`.
-- **On the wire:** `device_id` and the three lists `heart_rate`, `sleep` and `steps`, each of which may be empty, with only the fields in the example on each row. `schema_version` and `type` are optional in version 1: the bridge does not send them today, and Layer 3 takes a batch with or without them.
+- **On the wire:** `device_id` and the three lists `heart_rate`, `sleep` and `steps`, each of which may be empty, with only the fields in the example on each row. `schema_version` and `type` are optional in version 1: the bridge sends both, and Layer 3 takes a batch with or without them.
 - **Times:** `measured_at`, `bedtime_at` and `wake_at` are in UTC and carry their time zone, between 1970-01-02 and 2999-12-31, the range Layer 4 accepts. `night_of` is a `YYYY-MM-DD` date in the same range.
 - **Counts:** `bpm` and `asleep_minutes` are numbers and may be decimals; `interruptions` and `steps_today` are whole numbers; none is below 0. Layer 3 passes every count on as a whole number, rounding a decimal to the nearest, halves up, and refuses a `bpm` below 1, because Layer 4 takes a whole number above 0.
 - **`measured_at` for steps** is the moment the count was read, so a later count on the same day is a new reading.
 - **Repeats:** Layer 3 passes a reading on once. The same kind with the same measured time is a repeat; a sleep record's measured time is its `wake_at`.
 - **What Layer 3 refuses:** a reading that breaks a rule above is refused and counted, and the rest of the batch is still read. The bridge already answers the phone 400 for a batch that is malformed as a whole.
 - **Names Layer 3 does not read:** it reads only the three lists. `device_id`, `type`, `schema_version`, `msg_id` and `sent_at` are expected and not read; any other top-level name is logged as a warning.
-- **What Layer 3 passes on** has no contract file yet: Layer 2 has no call that takes a job's watch readings.
+- **What Layer 3 passes on** is `watch-reading.json`, one message per new reading (see below).
+
+## Layer 3 to Layer 4: watch readings
+
+Added Nov 15. One watch reading that Layer 3's watch data receiver has checked and found new, on its way to Layer 4's health check.
+
+| File | Written by | Read by | What it is |
+|---|---|---|---|
+| `watch-reading.json` | Layer 3's `watch_data` job | Layer 4's `health_check` job, carried unchanged by Layer 2 | One new heart-rate, sleep or steps reading |
+
+### Rules that go with this file
+
+- **Path:** Layer 3 calls `layer2.pass_on("watch-readings", reading)`; Layer 4 gets the same object from `layer2.receive("watch-readings")`. Layer 2 carries it the way it carries the bridge's `watch-data`: the first job to call `receive("watch-readings")` takes that kind. `pass_on` raises `Layer2Error` when no job takes it; Layer 3 logs that and goes on, so a reading can be lost while Layer 4's job is down (`last_received_at` on the next reading shows the gap). `pass_on` is Layer 2's to add; the name is a proposal.
+- **One message per reading,** sent in the order Layer 3 read them from the batch. Repeats are already dropped by Layer 3 (see "Layer 1 to Layer 3: watch data", Repeats).
+- **Common fields:** `schema_version` 1, `type` `watch_reading`, `kind` (`heart_rate`, `sleep` or `steps`), and `last_received_at`, when Layer 3 last received a new reading of any kind.
+- **Fields by `kind`,** only these:
+  - `heart_rate`: `measured_at` and `bpm`, a whole number above 0 (the example).
+  - `sleep`: `night_of` (`YYYY-MM-DD`), `asleep_minutes`, `bedtime_at`, `wake_at` and `interruptions`, whole numbers not below 0 for the counts.
+  - `steps`: `measured_at` and `steps_today`, a whole number not below 0.
+- **Times** are ISO 8601 in UTC, written with `Z`, between 1970-01-02 and 2999-12-31. Counts are already whole numbers: Layer 3 rounds them (see "Layer 1 to Layer 3: watch data", Counts).
+- **Privacy:** readings are passed on and judged, never sent anywhere else by Layer 3.

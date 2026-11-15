@@ -12,6 +12,7 @@ import { ALERT_FIELDS, parseAlert } from "../bridge/src/alert-intake.ts";
 import { createHome, type Home } from "../bridge/src/home.ts";
 import { readJsonFile } from "../bridge/src/json-file.ts";
 import { workerConfig } from "../bridge/src/laptop.ts";
+import { parseWatchData } from "../bridge/src/phone-handoff.ts";
 import * as settings from "../bridge/src/settings.ts";
 import { startStub, waitFor } from "./coordinator-fixtures.ts";
 
@@ -211,5 +212,42 @@ describe("contracts/worker.json, as a joined laptop's bridge writes it", () => {
     assert.equal(url, exampleUrl);
     const parsed = new URL(String(url));
     assert.deepEqual([parsed.protocol, parsed.pathname], ["ws:", "/ws"]);
+  });
+});
+
+/** A JSON value's shape: its object keys in order and each leaf's JSON type, recursively. */
+function jsonShape(value: unknown): unknown {
+  if (Array.isArray(value)) return (value as unknown[]).map(jsonShape);
+  if (typeof value === "object" && value !== null) {
+    return Object.entries(value).map(([key, item]) => [key, jsonShape(item)]);
+  }
+  if (typeof value === "number") return Number.isInteger(value) ? "integer" : "number";
+  return value === null ? "null" : typeof value;
+}
+
+describe("contracts/watch-data.json, the watch data the bridge posts", () => {
+  test("the bridge builds exactly the contract's keys and JSON types from a phone's watch_data", async () => {
+    const example = await readContract("watch-data.json");
+    // A resident phone's plaintext holds the three lists, plus names the bridge drops or replaces.
+    const plaintext = {
+      heart_rate: [{ measured_at: "2026-11-14T03:12:45Z", bpm: 72, source: "watch" }],
+      sleep: [
+        {
+          interruptions: 2,
+          wake_at: "2026-11-14T11:05:00Z",
+          bedtime_at: "2026-11-14T03:40:00Z",
+          asleep_minutes: 412,
+          night_of: "2026-11-13",
+        },
+      ],
+      steps: [{ measured_at: "2026-11-14T11:20:00Z", steps_today: 230 }],
+      device_id: "claimed-by-the-phone",
+      schema_version: 2,
+    };
+    const body = parseWatchData("device-uuid", plaintext);
+    assert.ok(body !== undefined);
+    const posted: unknown = JSON.parse(JSON.stringify(body));
+    assert.deepEqual(jsonShape(posted), jsonShape(example));
+    assert.deepEqual(posted, example);
   });
 });
