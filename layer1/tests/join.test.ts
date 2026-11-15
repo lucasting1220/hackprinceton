@@ -264,6 +264,22 @@ test("a laptop joins: Join a home, a caregiver's approval over the LAN gateway, 
   await waitFor(() => again.lines.some((line) => line.includes(`connected as ${nodeId}`)), 5_000);
   assert.equal(await readFile(files.token, "utf8"), token);
 
+  // Leave this home: the joined page offers it, a confirm page asks, and leaving stops the worker,
+  // deletes the join's files and shows Join a home again.
+  const rejoined = await pageWith(again.page, "/", "<p>Joined</p>");
+  assert.match(rejoined, /<a href="\/join\/leave">Leave this home<\/a>/);
+  const confirm = (await again.page.get("/join/leave")).page;
+  assert.match(confirm, /<form method="post" action="\/join\/reset">/);
+  assert.match(confirm, /<button>Leave this home<\/button>/);
+  assert.equal((await again.page.post("/join/reset")).statusCode, 303);
+  await pageWith(again.page, "/join", 'action="/join/start"');
+  for (const file of [files.laptop, files.config, files.token]) {
+    await assert.rejects(stat(file), { code: "ENOENT" }, `${file} survived leaving`);
+  }
+  const left = await readWorkerStatus(files.status);
+  assert.ok(left.ok && left.state === "none", "the status file survived leaving");
+  assert.equal((await again.page.get("/join/leave")).statusCode, 303, "leave without a home");
+
   for (const line of [...hub.lines, ...laptop.lines, ...again.lines]) {
     assert.ok(!line.includes(token) && !line.includes(tokenSha256(token)), line);
     assert.ok(!line.includes("Kitchen laptop"), `a chosen name was logged: ${line}`);
