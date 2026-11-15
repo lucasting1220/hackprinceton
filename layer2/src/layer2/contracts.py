@@ -269,6 +269,30 @@ class PhoneSend(Strict):
     body: dict[str, JsonValue]
 
 
+InboundKind = Literal["requests", "watch-data"]
+"""What Layer 1's bridge posts to the coordinator: requests from phones (for Layer 4) and watch
+readings (for Layer 3)."""
+
+
+class Subscribe(Strict):
+    """Worker to coordinator: a job on this worker takes `kind` from the bridge. The latest
+    subscriber of a kind gets it. Internal to Layer 2."""
+
+    type: Literal["subscribe"]
+    schema_version: Literal[1]
+    kind: InboundKind
+
+
+class Deliver(Strict):
+    """Coordinator to worker: one message from the bridge, for the job that subscribed to
+    `kind`. Internal to Layer 2; the body's fields belong to Layers 1, 3 and 4."""
+
+    type: Literal["deliver"]
+    schema_version: Literal[1]
+    kind: InboundKind
+    body: dict[str, JsonValue]
+
+
 class StateRead(Strict):
     """Worker to coordinator, for a job's status() call: the same data as /api/state.
     Internal to Layer 2."""
