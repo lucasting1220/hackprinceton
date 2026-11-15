@@ -27,7 +27,10 @@ export const PRIVATE_FILE_MODE = 0o600;
 /** The owner-only mode for the folders the bridge creates, such as the keys folder. */
 export const PRIVATE_DIR_MODE = 0o700;
 
-/** Names inside the state folder, which home.ts owns. The two key files are in `keysDir`. */
+/**
+ * Names inside the state folder. phones.ts owns phones.json and home.ts owns the rest; the two key
+ * files are in `keysDir`.
+ */
 export const STATE_NAMES = {
   home: "home.json",
   keysDir: "keys",
@@ -38,6 +41,7 @@ export const STATE_NAMES = {
   coordinatorStop: "coordinator.stop",
   coordinatorStateDir: "coordinator",
   bridgeStop: "bridge.stop",
+  phones: "phones.json",
 } as const;
 
 /** The home key's length in bytes. */
@@ -92,3 +96,6 @@ export const BROWSER_OPEN_TIMEOUT_MS = 10_000;
 
 /** How often the bridge checks for its stop file, which ends it as a stop signal does. */
 export const BRIDGE_STOP_POLL_MS = 250;
+
+/** The length in bytes of each phone's own key, which pairing derives and phones.json keeps. */
+export const PHONE_KEY_BYTES = 32;

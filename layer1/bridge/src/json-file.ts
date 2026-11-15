@@ -93,6 +93,39 @@ export async function writeFileWhole(
   }
 }
 
+/**
+ * The end of each file's update queue, which settles once every update queued for it has. The
+ * bridge updates a few fixed files, so entries are kept.
+ */
+const updateQueues = new Map<string, Promise<unknown>>();
+
+/**
+ * Reads the JSON file (undefined when there is none), passes it to `update` and writes what that
+ * returns as the whole file through writeFileWhole. Updates of one path run one at a time, in the
+ * order they were called, so none is lost. If the read, `update` or the write fails, the file is
+ * left as it was, the returned promise rejects and the next update still runs; a file that can't
+ * be read or parsed never reaches `update`. Later updates of the path wait for `update`, so it
+ * must not wait on anything slow.
+ */
+export function updateJsonFile<T extends object>(
+  filePath: string,
+  update: (current: unknown) => T | Promise<T>,
+): Promise<T> {
+  const result = (updateQueues.get(filePath) ?? Promise.resolve()).then(async () => {
+    const current = await readJsonFile(filePath).catch((error: unknown) => {
+      if (error instanceof JsonFileError && error.code === "ENOENT") return undefined;
+      throw error;
+    });
+    const next = await update(current);
+    await writeFileWhole(filePath, `${JSON.stringify(next, null, 2)}\n`);
+    return next;
+  });
+  // The queue keeps only when the update ends, not what it wrote, which may hold keys.
+  const ended = Promise.allSettled([result]).then(() => undefined);
+  updateQueues.set(filePath, ended);
+  return result;
+}
+
 /** Removes a file, or a folder and everything in it, retrying while Windows reports it busy. */
 export function removePath(target: string): Promise<void> {
   return retryWhileBusy(() => rm(target, { recursive: true, force: true }));
