@@ -37,6 +37,7 @@ export const STATE_NAMES = {
   acceptedWorkers: "accepted-workers.json",
   coordinatorStop: "coordinator.stop",
   coordinatorStateDir: "coordinator",
+  bridgeStop: "bridge.stop",
 } as const;
 
 /** The home key's length in bytes. */
@@ -79,3 +80,15 @@ export const COORDINATOR_PROBE_TIMEOUT_MS = 500;
 
 /** How often the launcher checks whether a coordinator left running has taken its stop file. */
 export const COORDINATOR_STOP_POLL_MS = 100;
+
+/** The setup page's only Host names (against DNS rebinding), body limit, time limit, token bytes. */
+export const SETUP_HOST_NAMES = [LOCAL_HOST, "localhost"] as const;
+export const SETUP_MAX_BODY_BYTES = 1_024;
+export const SETUP_REQUEST_TIMEOUT_MS = 10_000;
+export const SETUP_TOKEN_BYTES = 32;
+
+/** How long the command that opens the setup page in the default browser may run. */
+export const BROWSER_OPEN_TIMEOUT_MS = 10_000;
+
+/** How often the bridge checks for its stop file, which ends it as a stop signal does. */
+export const BRIDGE_STOP_POLL_MS = 250;

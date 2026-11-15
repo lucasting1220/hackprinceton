@@ -27,7 +27,7 @@ export async function waitFor(check: () => boolean, ms = 5_000): Promise<void> {
   }
 }
 
-async function freePort(): Promise<number> {
+export async function freePort(): Promise<number> {
   const server = createServer().listen(0, "127.0.0.1");
   await once(server, "listening");
   const { port } = server.address() as AddressInfo;
