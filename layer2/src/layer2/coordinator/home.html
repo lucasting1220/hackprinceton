@@ -67,6 +67,8 @@ main { flex: 1; background: var(--bg); overflow-y: auto; padding: 2.2rem 2.6rem;
 .st.running { color: var(--green); } .st.starting { color: var(--muted); } .st.restarting { color: var(--orange); }
 .chip { width: 10px; height: 10px; border-radius: 3px; flex: none; }
 .muted { color: var(--muted); }
+.small { font-size: .85rem; }
+.row .small { margin-left: .4rem; }
 .warn { color: var(--orange); }
 svg.dots { width: 100%; height: 64px; display: block; margin: .3rem 0 .2rem; }
 .pair { display: flex; gap: 1.2rem; }
@@ -107,6 +109,8 @@ const HISTORY_POINTS = __HISTORY_POINTS__;
 const SVG = "http://www.w3.org/2000/svg";
 const cpuHistory = new Map();  // node_id -> [0..1], newest last
 let latest = null;
+let restarts = new Map();  // "node_id job" -> restarts, from /api/details
+const CRASHING_AFTER = 3;  // restarts before a job is shown as crashing
 
 function el(tag, className, text) {
   const node = document.createElement(tag);
@@ -240,6 +244,11 @@ function jobRows(jobs) {
     chip.style.background = job.state === "running" ? "var(--green)" : job.state === "restarting" ? "var(--orange)" : "var(--dim)";
     row.appendChild(chip);
     row.appendChild(el("span", "", job.job));
+    const count = restarts.get(job.node_id + " " + job.job) || 0;
+    if (count > 0) {
+      const note = count >= CRASHING_AFTER ? "keeps crashing · " + count + " restarts" : "restarted " + count + "×";
+      row.appendChild(el("span", count >= CRASHING_AFTER ? "warn small" : "muted small", note));
+    }
     row.appendChild(el("span", "st " + job.state, job.state));
     box.appendChild(row);
   }
@@ -284,7 +293,9 @@ function overview(state, hwById, now) {
   const running = state.jobs.filter((j) => j.state === "running").length;
   view.appendChild(hero("This home", state.laptops.length + (state.laptops.length === 1 ? " laptop" : " laptops") + " working as one",
     facts([["Laptops online", online + " of " + state.laptops.length], ["Memory pooled", pooled + " GB"], ["Memory in use", used.toFixed(1) + " GB"]],
-          [["Jobs running", String(running)], ["Jobs placed", String(state.jobs.length)], ["Work not placed", String(state.dropped.length)]])));
+          [["Jobs running", String(running)], ["Jobs placed", String(state.jobs.length)],
+           ["Job restarts", String([...restarts.values()].reduce((a, b) => a + b, 0))],
+           ["Work not placed", String(state.dropped.length)]])));
   const grid = el("div", "grid");
   for (const laptop of state.laptops) {
     grid.appendChild(laptopSummary(laptop, hwById.get(laptop.node_id), state.jobs.filter((j) => j.node_id === laptop.node_id), now));
@@ -424,6 +435,12 @@ async function refresh() {
     hwById = new Map(hardware.laptops.map((h) => [h.node_id, h]));
   } catch (problem) {
     note = "Hardware details are unavailable right now.";
+  }
+  try {
+    const details = await getJson("/api/details");
+    restarts = new Map(details.jobs.map((j) => [j.node_id + " " + j.job, j.restarts]));
+  } catch (problem) {
+    restarts = new Map();  // the page still works without the extra details
   }
   for (const hw of hwById.values()) {
     if (hw.cpu_percent === null) continue;

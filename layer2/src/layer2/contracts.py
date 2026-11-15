@@ -190,6 +190,7 @@ JobName = Annotated[str, Field(pattern=r"^[a-z][a-z0-9_]{0,63}$")]
 class JobStatus(Strict):
     job: JobName
     state: Literal["starting", "running", "restarting"]
+    restarts: Annotated[int, Field(ge=0, strict=True)] = 0
 
 
 class StatusMessage(Strict):
@@ -346,3 +347,21 @@ class HardwareState(Strict):
     schema_version: Literal[1]
     updated_at: UtcDatetime
     laptops: list[LaptopHardware]
+
+
+class JobHealth(Strict):
+    """One job on the dashboard's details. Internal to Layer 2."""
+
+    job: str
+    node_id: str
+    state: str
+    restarts: int
+
+
+class DashboardDetails(Strict):
+    """GET /api/details on the dashboard port: what the page shows beyond /api/state and
+    /api/hardware. Internal to Layer 2: Layer 1 reads only /api/state."""
+
+    schema_version: Literal[1]
+    updated_at: UtcDatetime
+    jobs: list[JobHealth]

@@ -264,7 +264,7 @@ def test_hardware_endpoint_refuses_other_host_names(registry: Registry[WebSocket
 
 def test_dashboard_page_shows_each_laptop_as_one_card(dashboard: TestClient) -> None:
     page = dashboard.get("/").text
-    assert "/api/state" in page and "/api/hardware" in page
+    assert "/api/state" in page and "/api/hardware" in page and "/api/details" in page
     for part in (
         "Overview",
         "Laptops online",
@@ -275,9 +275,27 @@ def test_dashboard_page_shows_each_laptop_as_one_card(dashboard: TestClient) -> 
         '"Memory"',
         '"Processor"',
         "Load, last minute",
+        "Job restarts",
+        "keeps crashing",
         "createElementNS(SVG",
     ):
         assert part in page
     assert "cluster" not in page.lower(), "CLAUDE.md: say home, not cluster"
     assert "__" not in page.split("<script>")[1], "a placeholder was left unfilled"
     assert "<script src" not in page, "the page must work without internet"
+
+
+def test_details_list_each_jobs_restarts(control: TestClient, dashboard: TestClient) -> None:
+    with control.websocket_connect("/ws") as socket:
+        socket.send_text(json.dumps(HELLO))
+        socket.receive_text()
+        status = json.loads(status_message())
+        status["jobs"] = [{"job": "care_rules", "state": "restarting", "restarts": 4}]
+        socket.send_text(json.dumps(status))
+        socket.close()
+    body = dashboard.get("/api/details").json()
+    assert body["jobs"] == [
+        {"job": "care_rules", "node_id": node_id(), "state": "restarting", "restarts": 4}
+    ]
+    outsider = TestClient(dashboard.app, base_url="http://attacker.example")
+    assert outsider.get("/api/details").status_code == 400
