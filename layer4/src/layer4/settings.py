@@ -47,6 +47,9 @@ FALL_HIP_DROP_FULL = 1.0
 FALL_DESCENT_FAST = timedelta(seconds=1.2)
 FALL_DESCENT_SLOW = timedelta(seconds=3)
 
+# MediaPipe follows this many people per frame: one, the resident.
+POSE_MODEL_PEOPLE = 1
+
 # Alert rewrite: how much of the event log the quick model sees (proposed in the Layer 4 doc),
 # and the longest rewrite the phone is sent; a longer one is dropped and the template stands.
 REWRITE_CONTEXT = timedelta(minutes=10)
