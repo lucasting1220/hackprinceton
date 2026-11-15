@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
-import { describe, test } from "node:test";
+import { describe, type TestContext, test } from "node:test";
+import { createHome, type Home } from "../bridge/src/home.ts";
+import { readJsonFile } from "../bridge/src/json-file.ts";
 import * as settings from "../bridge/src/settings.ts";
 
 const contractsDir = path.join(import.meta.dirname, "..", "..", "contracts");
@@ -25,6 +28,7 @@ describe("contracts/coordinator.json", () => {
       dashboard_port: settings.DASHBOARD_PORT,
       client_port: settings.COORDINATOR_CLIENT_PORT,
       ollama_url: settings.OLLAMA_URL,
+      bridge_url: settings.BRIDGE_URL,
     };
     for (const [field, value] of Object.entries(fromSettings)) {
       assert.equal(typeof value, typeof example[field], `${field} in contracts/coordinator.json`);
@@ -32,5 +36,55 @@ describe("contracts/coordinator.json", () => {
     const ports = [fromSettings.listen_port, fromSettings.dashboard_port, fromSettings.client_port];
     assert.ok(ports.every((port) => Number.isInteger(port) && port >= 1 && port <= 65535));
     assert.equal(new Set(ports).size, ports.length, "the coordinator's three ports must differ");
+    const withBridge = [...ports, settings.BRIDGE_LOCAL_PORT];
+    assert.ok(withBridge.every((port) => Number.isInteger(port) && port >= 1 && port <= 65535));
+    assert.equal(new Set(withBridge).size, withBridge.length, "the bridge's port must differ too");
+  });
+});
+
+describe("the files createHome writes, checked as Layer 2's models check them", () => {
+  async function createdHome(t: TestContext): Promise<Home> {
+    const stateDir = await mkdtemp(path.join(os.tmpdir(), "l1-contracts-"));
+    t.after(() => rm(stateDir, { recursive: true, force: true }));
+    return createHome(stateDir);
+  }
+
+  /** The written file, once it has exactly the example's fields, each of the same JSON type. */
+  async function readLike(filePath: string, contract: string): Promise<Record<string, unknown>> {
+    const written = await readJsonFile(filePath);
+    const example = await readContract(contract);
+    assert.ok(typeof written === "object" && written !== null, `${filePath} must hold an object`);
+    const fields = written as Record<string, unknown>;
+    const kind = (value: unknown) => (Array.isArray(value) ? "array" : typeof value);
+    assert.deepEqual(Object.keys(fields).sort(), Object.keys(example).sort());
+    for (const [field, value] of Object.entries(example)) {
+      assert.equal(kind(fields[field]), kind(value), `${field} has the wrong type`);
+    }
+    return fields;
+  }
+
+  test("coordinator.json: version 1, three different ports, absolute paths and the bridge's URL", async (t) => {
+    const home = await createdHome(t);
+    const { schema_version, listen_port, dashboard_port, client_port, bridge_url, ...others } =
+      await readLike(home.coordinatorConfigFile, "coordinator.json");
+    assert.equal(schema_version, 1);
+    const ports = [listen_port, dashboard_port, client_port];
+    for (const port of ports) {
+      assert.ok(typeof port === "number" && Number.isInteger(port) && port >= 1 && port <= 65535);
+    }
+    assert.equal(new Set(ports).size, 3, "the three ports must differ");
+    for (const [field, value] of Object.entries(others)) {
+      if (field.endsWith("_file") || field.endsWith("_dir")) {
+        assert.ok(typeof value === "string" && path.isAbsolute(value), `${field} is not absolute`);
+      }
+    }
+    // contracts/README.md: the coordinator reaches the bridge by plain HTTP, on 127.0.0.1 only.
+    assert.equal(bridge_url, `http://127.0.0.1:${settings.BRIDGE_LOCAL_PORT}`);
+  });
+
+  test("accepted-workers.json: version 1 and an empty workers list", async (t) => {
+    const home = await createdHome(t);
+    const written = await readLike(home.acceptedWorkersFile, "accepted-workers.json");
+    assert.deepEqual(written, { schema_version: 1, workers: [] });
   });
 });
