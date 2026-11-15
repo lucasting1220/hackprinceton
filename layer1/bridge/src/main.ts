@@ -4,6 +4,7 @@ import { parseArgs } from "node:util";
 import { type HomeAlerts, openHomeAlerts } from "./alert-intake.ts";
 import { type Home, HomeError, loadHome, resolveStateDir } from "./home.ts";
 import { errorMessage, removePath } from "./json-file.ts";
+import { KeepAwake, type KeepAwakeOptions } from "./keep-awake.ts";
 import { PhoneAccess, type PhoneAccessOptions } from "./phone-access.ts";
 import { readRelayCredential } from "./relay-credential.ts";
 import {
@@ -37,6 +38,8 @@ export interface BridgeOptions
   readonly network?: Omit<PhoneAccessOptions, "log">;
   /** The relay link's times; tests pass shorter ones. */
   readonly relayTiming?: Partial<RelayLinkTiming>;
+  /** The keep-awake helper's platform or command; tests pass an unsupported or missing one. */
+  readonly keepAwake?: Omit<KeepAwakeOptions, "log">;
 }
 
 let outputGuarded = false;
@@ -73,6 +76,7 @@ export async function startBridge(options: BridgeOptions) {
   let stopping: Promise<void> | undefined;
   let remote: RemoteAccess = { state: "not_set_up" };
   let relayLink: RelayLink | undefined;
+  let keepAwake: KeepAwake | undefined;
 
   /**
    * The home-ready hook, after a home loads at start and after Create a home: starts the phone
@@ -151,6 +155,7 @@ export async function startBridge(options: BridgeOptions) {
     phoneAccess: () => started,
     homeAlerts: () => alertsReady,
     remoteAccess: () => remoteAccessText(relayLink?.status() ?? remote),
+    keepAwakeProblem: () => keepAwake?.problem(),
   });
   const stopFile = path.join(options.stateDir, settings.STATE_NAMES.bridgeStop);
   try {
@@ -173,6 +178,7 @@ export async function startBridge(options: BridgeOptions) {
       log(`L1 bridge: could not stop the coordinator: ${errorMessage(error)}`);
       process.exitCode = 1;
     });
+    await keepAwake?.stop();
     await removePath(stopFile).catch((error: unknown) => {
       log(`L1 bridge: could not remove ${stopFile}: ${errorMessage(error)}`);
       process.exitCode = 1;
@@ -196,6 +202,8 @@ export async function startBridge(options: BridgeOptions) {
 
   log(`L1 bridge: the setup page is at ${server.url}`);
   try {
+    // Before the coordinator starts: the laptop must not sleep while the home is watched.
+    keepAwake = await KeepAwake.start({ ...options.keepAwake, log });
     // By role: the home laptop starts its coordinator; a laptop that joined a home, its worker.
     if (home) await server.homeReady(home);
     else await server.resumeLaptop();
@@ -212,6 +220,8 @@ export async function startBridge(options: BridgeOptions) {
     phones: () => started,
     /** The relay link, while relay-credential.json is usable and the bridge runs (step 5). */
     relayLink: () => relayLink,
+    /** The helper that keeps this laptop awake, from before the coordinator starts. */
+    keepAwake: () => keepAwake,
     /** The shutdown a stop signal or the stop file starts; resolves once it is done. */
     stop(reason: string): Promise<void> {
       requestStop(reason);
