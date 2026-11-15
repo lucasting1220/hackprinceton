@@ -136,3 +136,8 @@ STT_QUEUE_SIZE = 4
 STT_DETECTION_GAP = timedelta(seconds=5)
 STT_HEALTH_CHECK_S = 10.0
 STT_MODEL_RETRY_S = 30.0
+
+# The health_check job: how long one receive("watch-readings") waits (Layer 2 allows at most
+# 30 s), and how long to wait before asking again when Layer 2 cannot be reached.
+WATCH_WAIT_S = 25.0
+WATCH_RETRY_S = 5.0
