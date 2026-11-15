@@ -52,3 +52,5 @@ export const BRIDGE_URL = `http://127.0.0.1:${BRIDGE_LOCAL_PORT}`;
 export const MACOS_APP_DATA_DIRS = ["Library", "Application Support"] as const;
 export const WINDOWS_APP_DATA_ENV = "LOCALAPPDATA";
 export const STATE_DIR_NAME = "Debbie";
+/** The labelled stand-in for Layer 2's coordinator, relative to the repository root. */
+export const COORDINATOR_STUB_PATH = ["layer1", "stubs", "fake-layer2-coordinator.ts"] as const;
