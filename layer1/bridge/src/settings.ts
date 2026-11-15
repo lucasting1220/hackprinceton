@@ -126,3 +126,20 @@ export const LAN_ADDRESSES_MAX = 4;
 
 /** GET /v1/hello's hub tag: this many first characters of the hub's public key (phone-hub.md §4.1). */
 export const HUB_TAG_CHARS = 8;
+/** How long a pairing code works before a phone is confirmed (phone-hub.md §2.1): 10 minutes. */
+export const PAIRING_CODE_LIFETIME_MS = 10 * 60_000;
+
+/** How long a confirmed phone may collect its bundle after Confirm, even past the code's expiry. */
+export const BUNDLE_COLLECTION_MS = 60_000;
+
+/** The pairing QR code's secret, in bytes (§2.1). */
+export const PAIRING_SECRET_BYTES = 16;
+
+/** A phone's device credential, in bytes (§4.3). */
+export const DEVICE_CREDENTIAL_BYTES = 32;
+
+/** The bundle's home_name, until the setup page asks for a name (§4.3). */
+export const HOME_NAME = "Home";
+
+/** The bundle's relay_url: empty until remote access is set up (step 5 replaces this constant). */
+export const RELAY_URL = "";
