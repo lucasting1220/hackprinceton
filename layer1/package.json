@@ -9,6 +9,7 @@
     "format:check": "biome format .",
     "lint": "biome lint --error-on-warnings .",
     "start": "node bridge/src/main.ts",
+    "stub:alert": "node stubs/fake-layer2-to-phone.ts",
     "typecheck": "tsc --noEmit",
     "test": "node --test --test-timeout=30000 \"**/*.test.ts\""
   },

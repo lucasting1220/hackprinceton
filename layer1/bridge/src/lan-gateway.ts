@@ -7,10 +7,11 @@
 import type { KeyObject } from "node:crypto";
 import type { Reply, Route } from "./network-server.ts";
 import { errorReply } from "./network-server.ts";
+import type { MessageSource } from "./outbox.ts";
 import { open, PhoneCryptoRefusal } from "./phone-crypto.ts";
 import type { PhoneLookup } from "./phones.ts";
 import * as settings from "./settings.ts";
-import { isUtcTime, parseWrapper, utcSeconds } from "./wire.ts";
+import { isUtcTime, parseWrapper, utcSeconds, type Wrapper } from "./wire.ts";
 
 /** What the gateway needs of the phone list: PhoneRegistry, or an in-memory list in tests. */
 export interface PhoneDirectory {
@@ -25,6 +26,8 @@ export interface LanGatewayOptions {
   readonly now?: () => number;
   /** Gets the gateway's lines; console.log by default. */
   readonly log?: (line: string) => void;
+  /** Step 4's outbox, which fills a fetch's page; without one every page is empty. */
+  readonly outbox?: MessageSource;
 }
 
 /** A request that passed checks 1 to 6: the phone, and the plaintext as a JSON object. */
@@ -70,6 +73,7 @@ export class LanGateway {
   readonly #phones: PhoneDirectory;
   readonly #now: () => number;
   readonly #log: (line: string) => void;
+  readonly #outbox: MessageSource | undefined;
   /** Per phone, each msg_id seen in the last PHONE_SEEN_IDS_MS and when, oldest first. */
   readonly #seen = new Map<string, Map<string, number>>();
   /** Per phone, when its wrong clock was last logged. */
@@ -80,6 +84,7 @@ export class LanGateway {
     this.#phones = options.phones;
     this.#now = options.now ?? Date.now;
     this.#log = options.log ?? ((line: string) => console.log(line));
+    this.#outbox = options.outbox;
   }
 
   /** §4.4's checks 1 to 6, in order, on a received wrapper. */
@@ -123,7 +128,7 @@ export class LanGateway {
   messages(body: unknown): Reply {
     const opened = this.openPhoneRequest(body);
     if (!opened.ok) return opened.reply;
-    const { type, plaintext } = opened.request;
+    const { type, plaintext, deviceId, role } = opened.request;
     if (type !== "fetch") return REFUSED.unsupportedType;
     const { after, limit } = plaintext;
     const cursorOk = after === null || typeof after === "string";
@@ -131,7 +136,8 @@ export class LanGateway {
       return REFUSED.badRequest;
     }
     const hub = { online: true, last_contact_at: utcSeconds(new Date(this.#now())) };
-    return { status: 200, body: { v: 1, messages: [], next: null, hub } };
+    const page = this.#outbox?.page(after, limit, forPhone(deviceId, role)) ?? EMPTY_PAGE;
+    return { status: 200, body: { v: 1, messages: page.messages, next: page.next, hub } };
   }
 
   /** A phone → hub command: `unpair` removes the phone; later steps' types get 501. */
@@ -201,3 +207,14 @@ export class LanGateway {
 }
 
 const refuse = (reply: Reply): OpenResult => ({ ok: false, reply });
+
+const EMPTY_PAGE = { messages: [], next: null } as const;
+
+/**
+ * The wrappers a phone may fetch (§4.5): a caregiver's home-key messages and those sent to it; a
+ * resident holds no home key, so only those sent to it.
+ */
+const forPhone =
+  (deviceId: string, role: OpenedRequest["role"]) =>
+  (wrapper: Wrapper): boolean =>
+    wrapper.to === deviceId || (role === "caregiver" && wrapper.to === undefined);

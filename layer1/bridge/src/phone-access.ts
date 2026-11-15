@@ -9,6 +9,7 @@ import { HomeError, readHomeSecrets } from "./home.ts";
 import { errorMessage } from "./json-file.ts";
 import { LanGateway } from "./lan-gateway.ts";
 import { lanAddresses, type NetworkSide, startNetworkSide } from "./network-server.ts";
+import type { MessageSource } from "./outbox.ts";
 import { Pairing } from "./pairing.ts";
 import { PhoneRegistry, PhonesError } from "./phones.ts";
 import * as settings from "./settings.ts";
@@ -19,6 +20,8 @@ export interface PhoneAccessOptions {
   /** The addresses phones reach this laptop at, for a port; lanAddresses by default. */
   readonly addresses?: (port: number) => string[];
   readonly log?: (line: string) => void;
+  /** Step 4's outbox, which the LAN gateway's fetch pages through. */
+  readonly outbox?: MessageSource;
 }
 
 /** What the pairing page reads: the parts while the network side runs, or why it doesn't. */
@@ -107,7 +110,13 @@ export class PhoneAccess {
 
   async #listen(pairing: Pairing, phones: PhoneRegistry): Promise<void> {
     const port = this.#options.port ?? settings.BRIDGE_NETWORK_PORT;
-    const gateway = new LanGateway({ homeId: this.#home.homeId, phones, log: this.#log });
+    const { outbox } = this.#options;
+    const gateway = new LanGateway({
+      homeId: this.#home.homeId,
+      phones,
+      log: this.#log,
+      ...(outbox === undefined ? {} : { outbox }),
+    });
     const pair = {
       method: "POST",
       path: "/v1/pair",

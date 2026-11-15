@@ -201,3 +201,21 @@ export const RELAY_SIGNIN_BLOCK_MS = 60_000;
 
 /** The most addresses the sign-in limiter remembers; the least recently seen go first. */
 export const RELAY_LIMITER_ADDRESSES_MAX = 10_000;
+/** Step 4's outbox of sealed hub → phone messages, in the state folder; only outbox.ts uses it. */
+export const OUTBOX_FILE_NAME = "outbox.json";
+
+/** The outbox keeps at most this many messages, each for MESSAGE_RETENTION_MS. */
+export const OUTBOX_MESSAGES_MAX = 500;
+
+/** The bytes of an outbox's epoch, the name in its cursors: 12 base64url characters. */
+export const OUTBOX_EPOCH_BYTES = 9;
+
+/** An alert's title and body, in Unicode code points (step 4's alert intake). */
+export const ALERT_TITLE_MAX_CHARS = 200;
+export const ALERT_BODY_MAX_CHARS = 2_000;
+
+/** The alert intake saves an alert identical to one of this many it saved since start only once. */
+export const ALERTS_REMEMBERED = 500;
+
+/** The setup page lists at most this many unlisted field names that Layer 2 sent in alerts. */
+export const ALERT_UNKNOWN_FIELDS_SHOWN = 10;
