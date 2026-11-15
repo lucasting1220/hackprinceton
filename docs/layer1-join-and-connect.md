@@ -4,7 +4,7 @@
 
 **Corrected by Lucas, Nov 14,** to match the cross-layer decisions in `docs/coherence-review.md`. This doc is the reference for joining, connecting, the relay and the iPhone app. Layer 1 makes no decisions about care or monitoring: it connects devices and delivers what Layer 4 sends. How the other layers work is defined in their own docs, not here.
 
-**Changed Nov 14: Vultr replaces AWS.** The relay is now one server the team runs on Vultr, with no AWS services. Everything else in this doc is unchanged by that switch.
+**Changed Nov 14: Vultr replaces AWS.** The relay is now one server the team runs on Vultr, with no AWS services. The hub now reaches the relay with a hub credential instead of a device certificate; nothing else in this doc changed with that switch.
 
 ## Summary
 
@@ -40,7 +40,7 @@ Layer 1 builds no scheduler, cluster heartbeat, care engine or second dashboard,
 
 | Topic | Decision |
 |---|---|
-| Laptops | The demo uses several laptops: one coordinator laptop and one or more workers, as in Layer 2. The first laptop set up becomes the coordinator, so start with the laptop that stays plugged in. The external webcam plugs into a worker, the camera laptop: in the demo, a MacBook Air (24 GB). The webcam's built-in mic is the only mic, and macOS lists the two as separate devices with different names (camera `j5 WebCam JVCU100`, mic `Audio Streaming`). The HP (Windows) is a worker with no sensors, so its `camera` and `mic` are `null` |
+| Laptops | The demo uses several laptops: one coordinator laptop and one or more workers, as in Layer 2. The first laptop set up becomes the coordinator, so start with the laptop that stays plugged in. The external webcam plugs into a worker, the camera laptop: in the demo, a MacBook Air (24 GB). The webcam's built-in mic is the only mic, and macOS lists the two as separate devices with different names (camera `j5 WebCam JVCU100`, mic `Audio Streaming`). The HP (Windows) is planned as a worker with no sensors, so its `camera` and `mic` are `null`, pending its memory check (Layer 2 needs at least 16 GB on a worker) |
 | Laptop pairing | Layer 1 gives each worker a join token and writes the accepted tokens to a file the coordinator reads. The worker sends its token in `hello`; Lucas's coordinator only checks it and replies accept or reject (ask L2) |
 | Approving a laptop | The new laptop shows a QR code. A paired caregiver scans it in the app and approves |
 | Phone pairing | The coordinator laptop shows a single-use QR code that expires after 10 minutes. The person at that laptop confirms a 4-digit code that also shows on the phone. A phone pairs as a caregiver (it gets the home key) or as a resident (heart rate only). A caregiver phone can also turn on resident mode, so one iPhone can play both roles in the demo |
@@ -64,7 +64,7 @@ Each ask is small and sized to sit next to Layer 2's build steps 1 and 2. "Neede
 
 | # | Ask | Why | Needed by |
 |---|---|---|---|
-| L1 | Entry points that start the coordinator and the worker from a config file, plus a `check` mode (details in "Handoff to Layer 2"). `check` opens only the camera and mic named in `worker.json`, reads one frame and about a second of audio, and reports the mic as failing if the audio is all zeros | Layer 1 starts the programs, and the setup page shows what's missing and whether OS permissions work | Hour 10 |
+| L1 | Entry points that start the coordinator and the worker from a config file, plus a `check` mode (details in "Handoff to Layer 2"). Decided Nov 14 (`contracts/README.md`): `check` covers the config file, the token file, Python and Ollama, and does not open the camera or mic; Layer 3, which owns them, provides the device check behind the setup page's **Camera OK** and **Mic OK** | Layer 1 starts the programs, and the setup page shows what's missing and whether OS permissions work | Hour 10 |
 | L2 | The coordinator re-reads `accepted-workers.json` on each `hello`, looks up the token's hash, and replies with a `welcome` that accepts or rejects. Neither program logs the token or whole `hello` messages | Laptop pairing | Hour 10 |
 | L3 | The worker writes a small status file: connected, rejected or disconnected, plus anything missing | The setup page shows "Joined" only after acceptance | Hour 10 |
 | L4 | When its connection drops, the worker keeps running, writes `disconnected`, and retries every few seconds, re-reading `coordinator_url` from `worker.json` before each try. A `hello` from a laptop the coordinator already knows replaces that laptop's old connection | Switching to the hotspot, or restarting the coordinator, without re-pairing | Hour 10 |
@@ -124,7 +124,7 @@ Caregiver iPhone ◀──── push ─────┐
 
 | Process | Built by | Started by | Runs on |
 |---|---|---|---|
-| Layer 1 bridge | Layer 1 | The person setting up, from Terminal (later, at login) | Every laptop |
+| Layer 1 bridge | Layer 1 | The person setting up, from Terminal (later, at login, except on the camera laptop, which always starts it from Terminal.app) | Every laptop |
 | Coordinator program | Lucas | Layer 1 launcher, which restarts it after a crash | Coordinator laptop |
 | Worker program | Lucas | Layer 1 launcher, which restarts it after a crash | Each worker laptop |
 | Capture job, with the frame feed (ask T5) | Layer 3 | Lucas's worker | The camera laptop |
@@ -169,7 +169,7 @@ Nothing on the network side can confirm a pairing or post an alert. Those happen
 2. The app asks for Local Network access first. It then scans the code, makes its own key pair, and sends its public key, a name (for example "Caregiver's iPhone") and its role, with a proof that it saw the QR code.
 3. The laptop and the phone show the same 4-digit code, and the person at the laptop clicks **Confirm**. Only someone at the coordinator laptop can confirm.
 4. The bridge sends back, encrypted with the phone's own key: the home ID, a device ID and device credential, the relay's address and, for caregivers, the home key.
-5. The hub tells the relay about the new phone (device ID, role and a hash of its credential) over its own relay connection. From then on, the relay accepts that phone.
+5. The hub tells the relay about the new phone (device ID, role and a hash of its credential) over its own relay connection. From then on, the relay accepts that phone. A phone paired before the hub has a relay connection (before build step 5, or while the hub is offline) is registered when the hub next connects: on every connection, the hub sends the relay its full list of paired phones.
 6. The phone keeps its keys and credential in a Keychain access group shared with its notification extension, readable after the first unlock, so the extension can decrypt alerts while the phone is locked.
 
 ### Add a laptop
@@ -178,13 +178,13 @@ Nothing on the network side can confirm a pairing or post an alert. Those happen
 3. It sends a join request (the laptop's name and public key) to the coordinator's bridge and shows an **Add this laptop** QR code.
 4. A caregiver taps **Add a laptop** in the app, scans the code and approves. The approval goes to the coordinator's bridge over home Wi-Fi, or through the relay when the phone isn't on the home network.
 5. The coordinator's bridge gives the laptop a node ID and a join token, encrypted to its key. It adds the token's hash to `accepted-workers.json` before sending the token.
-6. **Check sensors** (on the camera or mic laptop): the person picks the external webcam and mic, and the bridge runs Lucas's `check` through the same launch path the demo uses. The page shows **Camera OK** and **Mic OK**, or names the setting to change. The camera and the mic are picked separately and never assumed to match, because they are separate devices with different names (on the demo camera laptop, `j5 WebCam JVCU100` and `Audio Streaming`). The pickers never offer the laptop's own `MacBook Air Camera` or `MacBook Air Microphone`, and each device is identified by its name, never by the camera's Unique ID.
+6. **Check sensors**: the person picks the camera and the mic from the device names Layer 3's device list reports, or picks **No sensors on this laptop** (the HP). The pickers offer only external devices: never a built-in camera or mic (the demo MacBook Air's `MacBook Air Camera` and `MacBook Air Microphone`, for example), a Continuity Camera iPhone, or a virtual device, and they never preselect one. The camera and the mic are picked separately and never assumed to match, because they are separate devices with different names (on the demo camera laptop, `j5 WebCam JVCU100` and `Audio Streaming`); each is identified by its name, never by an index or the camera's Unique ID. The bridge then runs Layer 3's device check through the same launch path the demo uses, and the page shows **Camera OK** and **Mic OK**, or names the setting to change.
 7. The bridge writes `worker.json` and the token file, deletes any old status and stop files, and starts Lucas's worker. It shows **Joined** only when the worker's status file says the coordinator accepted it.
 8. The bridge keeps a link to the coordinator's bridge, signed in with its join token, used to start and stop live view and to report setup progress.
 
 ### Network permissions
 - **iPhone**: the app declares local-network use and the Bonjour service it looks for, and allows plain HTTP to local addresses (from iOS 17, App Transport Security blocks connections to IP addresses otherwise). It brings up the Local Network prompt before pairing, and retries, because iOS may refuse the first request while that prompt is showing.
-- **Mac**: start the bridge from Terminal.app or over SSH. From macOS 15, programs started from other apps (VS Code, Cursor, iTerm) can't reach the local network or use mDNS until that app is allowed under Privacy & Security → Local Network.
+- **Mac**: start the bridge from Terminal.app or over SSH; on the camera laptop, only from Terminal.app, since an SSH session has no app to hold the camera and mic permission. From macOS 15, programs started from other apps (VS Code, Cursor, iTerm) can't reach the local network or use mDNS until that app is allowed under Privacy & Security → Local Network.
 - **Windows coordinator**: allow Node and Python through the firewall and set the network to Private, or the other laptops can't reach it.
 - **Camera and mic**: on macOS the permission belongs to the app that started the bridge, so start it the same way every time.
 
@@ -238,7 +238,7 @@ These are proposals for Lucas: he can rename any field or change any behaviour, 
 
 - **Token.** 64 lowercase hex characters, written to `token_file` with no newline and readable only by the user running the bridge. `token_sha256` is the SHA-256 of those characters, in lowercase hex. Tokens never appear in logs or on command lines.
 - **`hello`** stays as Layer 2 defines it: the token goes in as the credential, and `display_name` as the laptop name. The coordinator finds the laptop's `node_id` from the token's hash. It replies `{"type": "welcome", "accepted": true, "node_id": "…"}`, or `{"type": "welcome", "accepted": false, "reason": "unknown_token"}` and then closes the connection.
-- **Sensors.** `camera` and `mic` name the only devices the worker may report and capture (a name or index Lucas's code can open), or are `null` when there is none or the resident declined it. Built-in cameras and mics aren't used unless named.
+- **Sensors.** `camera` and `mic` name the only devices the worker may report and capture (a device name exactly as Layer 3's device list reports it, never an index), or are `null` when there is none or the resident declined it. Built-in cameras and mics aren't used unless named.
 - **`python`** is the interpreter Lucas's worker uses for Layer 3 and Layer 4 jobs.
 - **Files.** Every JSON file is written whole: to a temporary file, then renamed (retried if Windows reports the file busy). Times are ISO 8601 in UTC.
 - **Worker status file:** `{"node_id": "…", "state": "connected", "missing": [], "updated_at": "…"}`, where `state` is `connected`, `rejected` or `disconnected`, and `missing` items look like `check`'s.
@@ -375,7 +375,7 @@ Target: reconnect within 30 seconds once both ends have a working connection. Re
 | Chrome or Edge on the camera laptop (the MacBook Air) | To check |
 | Demo laptops listed: OS, chip, memory, and which one gets the webcam | Partly done. The MacBook Air (24 GB) gets the webcam. The HP (Windows) is a worker with no sensors; its memory is still to confirm, since Layer 2 needs at least 16 GB on a worker. The coordinator laptop is still to choose |
 | Network test on venue Wi-Fi and the hotspot: phone to coordinator laptop, and laptop to laptop | To do, with Lucas |
-| Continuity Camera off on the team iPhone, so macOS doesn't offer the iPhone as the camera laptop's camera | To do |
+| Continuity Camera off on every iPhone signed in to the camera laptop's Apple ID, so macOS doesn't offer one as a camera or mic | To do |
 | The bridge started from Terminal.app on the camera laptop, the same way every time, because macOS gives the camera and mic permission to the app that started it | To do |
 
 With one iPhone, it pairs as a caregiver and turns on resident mode. Do the watch data step on home Wi-Fi first, then switch the phone to cellular for the alert, "hub offline" and live-view steps.
@@ -459,7 +459,7 @@ Kept from the first draft, but not built tonight:
 
 - **Coordinator laptop:** runs Lucas's coordinator and its planner model (through Ollama), Layer 1's bridge with the hub connector, and the event log. It runs nothing from Layers 3 or 4.
 - **Worker laptop:** runs Lucas's worker, Layer 3's capture and Layer 4's jobs.
-- **Camera laptop:** the worker the external webcam is plugged into. Its built-in mic is the only mic. Built-in laptop cameras and mics aren't used unless named in `worker.json`.
+- **Camera laptop:** the worker the external webcam is plugged into. The webcam's built-in mic is the only mic. Built-in laptop cameras and mics aren't used unless named in `worker.json`.
 - **Home** (`home_id`): one coordinator, its workers and the paired phones. The same thing as Layer 2's cluster.
 - **Hub:** the coordinator laptop's bridge, acting for the whole home. It holds the home key and its own key pair, pairs phones, and reaches the relay through the hub connector.
 - **Bridge:** Layer 1's Node program on every laptop. On the coordinator laptop it also pairs phones and laptops, serves phones on home Wi-Fi (the **LAN gateway**), and encrypts messages for phones and holds the relay connection (the **hub connector**).
