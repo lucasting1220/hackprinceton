@@ -85,8 +85,14 @@ export const COORDINATOR_PROBE_TIMEOUT_MS = 500;
 /** How often the launcher checks whether a coordinator left running has taken its stop file. */
 export const COORDINATOR_STOP_POLL_MS = 100;
 
+/**
+ * The team's name for this laptop's own pages: its DNS record points at 127.0.0.1, so
+ * http://home.debbie.health:<port>/ opens the setup page and Layer 2's dashboard on this laptop.
+ */
+export const HOME_HOST_NAME = "home.debbie.health";
+
 /** The setup page's only Host names (against DNS rebinding), body limit, time limit, token bytes. */
-export const SETUP_HOST_NAMES = [LOCAL_HOST, "localhost"] as const;
+export const SETUP_HOST_NAMES = [LOCAL_HOST, "localhost", HOME_HOST_NAME] as const;
 export const SETUP_MAX_BODY_BYTES = 1_024;
 export const SETUP_REQUEST_TIMEOUT_MS = 10_000;
 export const SETUP_TOKEN_BYTES = 32;

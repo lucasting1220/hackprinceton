@@ -54,8 +54,23 @@ test("answers on 127.0.0.1 only for its own Host, and a POST only from its page"
   const security = [h["content-security-policy"], h["referrer-policy"], h["cache-control"]];
   const csp = "default-src 'none'; style-src 'self'; form-action 'self'; frame-ancestors 'none'";
   assert.deepEqual([welcome.statusCode, ...security], [200, csp, "same-origin", "no-store"]);
-  assert.equal((await s.send("GET", "/", { host: `localhost:${port}` })).statusCode, 200);
-  for (const host of [`rebound.example:${port}`, "rebound.example", "127.0.0.1:1"]) {
+  for (const name of ["localhost", "home.debbie.health"]) {
+    assert.equal((await s.send("GET", "/", { host: `${name}:${port}` })).statusCode, 200, name);
+  }
+  // From the page opened as home.debbie.health, a POST passes the Host and Origin checks and
+  // reaches the token check (an old token gets the reload page), so no home is created here.
+  const named = await s.post("old-token", {
+    host: `home.debbie.health:${port}`,
+    origin: `http://home.debbie.health:${port}`,
+  });
+  assert.match(named.page, /from an earlier run of the bridge/, "home.debbie.health's POST");
+  for (const host of [
+    `rebound.example:${port}`,
+    "rebound.example",
+    "127.0.0.1:1",
+    `debbie.health:${port}`,
+    `evil.home.debbie.health:${port}`,
+  ]) {
     assert.equal((await s.send("GET", "/", { host })).statusCode, 403, host);
   }
   const token = await s.token();
@@ -87,7 +102,9 @@ test("Create a home shows the home and starts the stub, which its dashboard link
   const home = await loadHome(s.stateDir);
   assert.ok(home !== undefined && created.statusCode === 200);
   const dashboard = `http://127.0.0.1:${s.dashboard}/`;
+  const named = `http://home.debbie.health:${s.dashboard}/`;
   const shown = [home.homeId, "Remote access: not set up", "Coordinator: STUB", `"${dashboard}"`];
+  shown.push(`"${named}"`);
   for (const part of shown) assert.ok(created.page.includes(part), part);
   const config = (await readJsonFile(home.coordinatorConfigFile)) as { bridge_url?: unknown };
   assert.equal(config.bridge_url, s.server.url.slice(0, -1), "bridge_url is this page's address");
