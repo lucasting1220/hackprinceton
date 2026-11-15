@@ -219,3 +219,13 @@ export const ALERTS_REMEMBERED = 500;
 
 /** The setup page lists at most this many unlisted field names that Layer 2 sent in alerts. */
 export const ALERT_UNKNOWN_FIELDS_SHOWN = 10;
+
+/** The largest WebSocket frame the relay takes from a hub: room for one wrapper and its frame. */
+export const RELAY_HUB_MAX_FRAME_BYTES = 128 * 1024;
+
+/** How often the relay pings a connected hub, and how long a silent hub keeps its connection. */
+export const RELAY_HUB_PING_INTERVAL_MS = 20_000;
+export const RELAY_HUB_SILENT_CLOSE_MS = 40_000;
+
+/** How long a phone's command waits at the relay for the hub's answer before 504 hub_timeout. */
+export const RELAY_COMMAND_TIMEOUT_MS = 5_000;
