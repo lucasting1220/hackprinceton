@@ -14,6 +14,7 @@ dependencies = [
 [project.scripts]
 layer2-coordinator = "layer2.coordinator.main:run"
 layer2-worker = "layer2.worker.main:run"
+layer2-compare-models = "layer2.compare_models:run"
 
 [dependency-groups]
 dev = [

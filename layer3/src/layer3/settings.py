@@ -30,3 +30,29 @@ CAMERA_BACKENDS: dict[str, str] = {
     "Darwin": "CAP_AVFOUNDATION",
     "Windows": "CAP_DSHOW",
 }
+
+# Audio format asked of the mic (docs/layer3-raw-data.md, "Audio format"), and the chunk length.
+AUDIO_SAMPLE_RATE: int = 16000
+AUDIO_CHANNELS: int = 1
+AUDIO_SAMPLE_TYPE: str = "int16"
+AUDIO_CHUNK_SECONDS: float = 0.5
+
+# How long the caller waits for the mic to open and deliver its first chunk,
+# and for each chunk after that.
+AUDIO_OPEN_TIMEOUT_SECONDS: float = 10.0
+AUDIO_CHUNK_TIMEOUT_SECONDS: float = 2.0
+
+# Chunks the mic's reader thread may hold while the reader is busy.
+AUDIO_QUEUE_SIZE: int = 2
+
+# How long the audio reader runs when no length is given.
+AUDIO_READER_SECONDS: float = 5.0
+
+# The name of the audio host interface used to list and open mics, by operating system.
+AUDIO_HOST_INTERFACES: dict[str, str] = {
+    "Darwin": "Core Audio",
+    "Windows": "Windows WASAPI",
+}
+
+# The host interface that converts a mic's own rate only when it is asked to.
+AUDIO_INTERFACE_NEEDING_CONVERT_REQUEST: str = "Windows WASAPI"

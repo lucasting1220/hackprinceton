@@ -5,7 +5,13 @@ from pathlib import Path
 
 import pytest
 
-from layer3.worker_config import FIELDS_READ, ConfigError, load_camera
+from layer3.worker_config import (
+    FIELDS_READ,
+    MIC_FIELDS_READ,
+    ConfigError,
+    load_camera,
+    load_mic,
+)
 
 CONTRACT_FILE: Path = Path(__file__).resolve().parents[2] / "contracts" / "worker.json"
 
@@ -101,3 +107,42 @@ def test_a_file_that_is_not_utf_8_is_a_config_error(tmp_path: Path) -> None:
 
     with pytest.raises(ConfigError, match="cannot read"):
         load_camera(config_path)
+
+
+def test_contract_example_gives_its_mic() -> None:
+    example = json.loads(CONTRACT_FILE.read_text(encoding="utf-8"))
+
+    assert load_mic(CONTRACT_FILE) == example["mic"]
+    assert isinstance(example["mic"], str)
+
+
+def test_only_the_contract_fields_in_mic_fields_read_are_needed_for_the_mic(tmp_path: Path) -> None:
+    example = json.loads(CONTRACT_FILE.read_text(encoding="utf-8"))
+    only_fields_read = {field: example[field] for field in MIC_FIELDS_READ}
+
+    assert MIC_FIELDS_READ == ("schema_version", "mic")
+    assert load_mic(write_config(tmp_path, only_fields_read)) == example["mic"]
+
+
+@pytest.mark.parametrize("field", MIC_FIELDS_READ)
+def test_each_contract_field_in_mic_fields_read_is_required(tmp_path: Path, field: str) -> None:
+    example = json.loads(CONTRACT_FILE.read_text(encoding="utf-8"))
+    del example[field]
+
+    with pytest.raises(ConfigError, match=field):
+        load_mic(write_config(tmp_path, example))
+
+
+@pytest.mark.parametrize("mic", ["Audio Streaming", None])
+def test_mic_is_a_name_returned_unchanged_or_none(tmp_path: Path, mic: str | None) -> None:
+    config_path = write_config(tmp_path, {"schema_version": 1, "mic": mic})
+
+    assert load_mic(config_path) == mic
+
+
+@pytest.mark.parametrize("mic", [0, True, 1.5, [], "", "   "])
+def test_mic_that_is_not_a_name_or_null_is_a_config_error(tmp_path: Path, mic: object) -> None:
+    config_path = write_config(tmp_path, {"schema_version": 1, "mic": mic})
+
+    with pytest.raises(ConfigError, match="must be a mic name or null"):
+        load_mic(config_path)

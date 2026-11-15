@@ -1,4 +1,4 @@
-"""Reads which camera to open from a worker's config file (contracts/worker.json)."""
+"""Reads which camera and mic to open from a worker's config file (contracts/worker.json)."""
 
 import json
 from pathlib import Path
@@ -7,7 +7,9 @@ from layer3 import settings
 
 SCHEMA_VERSION_FIELD: str = "schema_version"
 CAMERA_FIELD: str = "camera"
+MIC_FIELD: str = "mic"
 FIELDS_READ: tuple[str, ...] = (SCHEMA_VERSION_FIELD, CAMERA_FIELD)
+MIC_FIELDS_READ: tuple[str, ...] = (SCHEMA_VERSION_FIELD, MIC_FIELD)
 
 
 class ConfigError(Exception):
@@ -15,10 +17,17 @@ class ConfigError(Exception):
 
 
 def load_camera(config_path: Path) -> str | None:
-    """Return the camera's name exactly as written, or None when there is none or it was declined.
+    """Return the camera's name exactly as written, or None when there is none or it is declined."""
+    return _load_sensor(config_path, FIELDS_READ)
 
-    The file is read as UTF-8 with an optional byte-order mark, as Layer 2 reads it.
-    """
+
+def load_mic(config_path: Path) -> str | None:
+    """Return the mic's name exactly as written, or None when there is none or it was declined."""
+    return _load_sensor(config_path, MIC_FIELDS_READ)
+
+
+def _load_sensor(config_path: Path, fields_read: tuple[str, ...]) -> str | None:
+    """Read one sensor's name. The file is UTF-8 with an optional byte-order mark, as in Layer 2."""
     try:
         text = config_path.read_text(encoding="utf-8-sig")
     except (OSError, UnicodeDecodeError) as error:
@@ -29,7 +38,8 @@ def load_camera(config_path: Path) -> str | None:
         raise ConfigError(f"{config_path} is not valid JSON: {error}") from error
     if not isinstance(config, dict):
         raise ConfigError(f"{config_path} must hold one JSON object")
-    for field in FIELDS_READ:
+    sensor_field = fields_read[-1]
+    for field in fields_read:
         if field not in config:
             raise ConfigError(f"{config_path} has no {field!r} field")
 
@@ -40,11 +50,11 @@ def load_camera(config_path: Path) -> str | None:
             f"this code reads version {settings.SUPPORTED_SCHEMA_VERSION}"
         )
 
-    camera = config[CAMERA_FIELD]
-    if camera is None:
+    name = config[sensor_field]
+    if name is None:
         return None
-    if isinstance(camera, str) and camera.strip():
-        return camera
+    if isinstance(name, str) and name.strip():
+        return name
     raise ConfigError(
-        f"{config_path} has {CAMERA_FIELD} {camera!r}; it must be a camera name or null"
+        f"{config_path} has {sensor_field} {name!r}; it must be a {sensor_field} name or null"
     )
