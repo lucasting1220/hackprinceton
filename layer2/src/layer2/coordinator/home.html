@@ -447,7 +447,12 @@ function render() {
   const home = document.getElementById("nav-overview");
   if (!home.querySelector("svg")) home.prepend(icon("home"));
   const setup = document.getElementById("nav-setup");
-  if (setup && !setup.querySelector("svg")) setup.prepend(icon("setup"));
+  if (setup && !setup.querySelector("svg")) {
+    setup.prepend(icon("setup"));
+    const url = new URL(setup.href);
+    url.hostname = location.hostname;  // stay on the name this page was opened with
+    setup.href = url.href;
+  }
   for (const laptop of state.laptops) {
     const a = el("a", laptop === chosen ? "on" : "");
     a.href = "#" + encodeURIComponent(laptop.node_id);

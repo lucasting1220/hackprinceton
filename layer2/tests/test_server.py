@@ -264,6 +264,18 @@ def test_hardware_endpoint_refuses_other_host_names(registry: Registry[WebSocket
     assert outsider.get("/api/hardware").status_code == 400
 
 
+def test_dashboard_answers_to_home_debbie_health_and_only_our_names(
+    registry: Registry[WebSocket],
+) -> None:
+    app = create_dashboard_app(registry)
+    for name in ("127.0.0.1", "localhost", "home.debbie.health"):
+        client = TestClient(app, base_url=f"http://{name}:7450")
+        assert client.get("/").status_code == 200
+        assert client.get("/api/state").status_code == 200
+    for name in ("debbie.health", "evil.debbie.health", "home.debbie.health.evil.example"):
+        assert TestClient(app, base_url=f"http://{name}").get("/").status_code == 400
+
+
 def test_dashboard_page_shows_each_laptop_as_one_card(dashboard: TestClient) -> None:
     page = dashboard.get("/").text
     assert "/api/state" in page and "/api/hardware" in page and "/api/details" in page
