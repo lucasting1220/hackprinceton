@@ -146,7 +146,7 @@ def test_the_phone_gives_up_after_its_attempts_with_a_port_error() -> None:
     client = FakeClient()
     client.failures_left = 5
     waits: list[float] = []
-    with pytest.raises(PortError, match="alert not delivered"):
+    with pytest.raises(PortError, match="alert 6f1c2a8e-3b7d-4f0a-9c55-2e8d1a4b7f90 not delivered"):
         Layer2Phone(client, attempts=3, retry_wait_s=0.5, sleep=waits.append).send_alert(
             contract_alert()
         )
