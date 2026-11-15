@@ -28,3 +28,26 @@ test("no file suppresses a type check or a lint rule (CLAUDE.md section 5)", () 
   }
   assert.deepEqual(found, [], "fix the code instead of suppressing the check");
 });
+
+// The ways node:test skips a test or marks it as still to do, which lint's noSkippedTests does not
+// all catch. Joined from parts for the same reason as above.
+const skips = [
+  [".skip", "("],
+  [".todo", "("],
+  ["skip", ":"],
+  ["todo", ":"],
+].map((parts) => parts.join(""));
+
+test("no test is skipped or left to do (CLAUDE.md section 5)", () => {
+  const found: string[] = [];
+  for (const file of layer1Files().filter((name) => name.endsWith(".test.ts"))) {
+    const text = readFileSync(path.join(layer1, file), { encoding: "utf8" }).toLowerCase();
+    for (const [index, line] of text.split("\n").entries()) {
+      const token = skips.find((skip) => line.includes(skip));
+      if (token !== undefined) {
+        found.push(`${file}:${index + 1} uses ${token}`);
+      }
+    }
+  }
+  assert.deepEqual(found, [], "make the test pass instead of skipping it");
+});

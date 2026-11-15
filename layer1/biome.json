@@ -10,7 +10,7 @@
       "correctness": { "useImportExtensions": "error" },
       "nursery": { "noFloatingPromises": "error", "noMisusedPromises": "error" },
       "style": { "useNodejsImportProtocol": "error" },
-      "suspicious": { "noEmptyBlockStatements": "error" }
+      "suspicious": { "noEmptyBlockStatements": "error", "noSkippedTests": "error" }
     }
   }
 }

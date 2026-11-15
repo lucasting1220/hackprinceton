@@ -7,11 +7,24 @@ import { layer1, layer1Files } from "./layer1-files.ts";
 
 const LOAD_CHECK_TIMEOUT_MS = 10_000;
 
-test("Layer 1's code is all .ts files, the only ones tsc and npm test pick up", () => {
-  // tsconfig.json checks **/*.ts and npm test runs **/*.test.ts, so neither would see a .mts or .cts
-  // file that no .ts file imports, a .test.mts file or any JavaScript file.
-  const others = layer1Files().filter((file) => /\.(?:mts|cts|js|mjs|cjs)$/.test(file));
-  assert.deepEqual(others, [], "make these .ts files, which tsc checks and npm test runs");
+test("Layer 1's code is all .ts files outside dot-folders, the only ones tsc and npm test pick up", () => {
+  // tsconfig.json checks **/*.ts and npm test runs **/*.test.ts. Neither looks inside a folder whose
+  // name starts with a dot, and neither picks up a .mts, .cts or .tsx file that no .ts file imports,
+  // a .test.mts file, an upper-case .TS file or any JavaScript file.
+  const code = /\.[cm]?[jt]sx?$/i;
+  const inDotFolder = (file: string): boolean =>
+    file
+      .split(path.sep)
+      .slice(0, -1)
+      .some((folder) => folder.startsWith("."));
+  const unseen = layer1Files().filter(
+    (file) => code.test(file) && (!file.endsWith(".ts") || inDotFolder(file)),
+  );
+  assert.deepEqual(
+    unseen,
+    [],
+    "make these .ts files outside dot-folders, which tsc checks and npm test runs",
+  );
 });
 
 test("every .ts, .mts and .cts file outside tests/ loads under Node's type stripping", () => {
@@ -27,9 +40,10 @@ test("every .ts, .mts and .cts file outside tests/ loads under Node's type strip
   assert.ok(files.length > 0, "found no .ts, .mts or .cts file outside tests/ to load");
   // `node --check` cannot do this: on Node 24 it does not strip types, so it rejects valid typed
   // code such as `const x: number = 1;`. Instead a child Node imports every file. It loads every
-  // module before it runs any, stripping types as it loads, so a syntax error or an enum fails
-  // there, in a .cts file as in a .ts or .mts one. It runs imports in order, so the first import
-  // exits before any of these files runs.
+  // ES module before it runs any, stripping types as it loads, so a syntax error or an enum fails
+  // there. It runs imports in order, so the first import exits before any of these files runs. A
+  // .cts file is CommonJS, which Node compiles only when it runs, so this can miss an error in one,
+  // such as a decorator; the test above keeps .cts files out.
   const urls = files.map((file) => pathToFileURL(path.join(layer1, file)).href);
   const entry = ["data:text/javascript,process.exit(0)", ...urls]
     .map((url) => `import ${JSON.stringify(url)};`)
