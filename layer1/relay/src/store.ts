@@ -84,6 +84,13 @@ export interface MessagePage {
   readonly next: string | null;
 }
 
+/** A stored alert whose push never went out, which the relay pushes when it starts (R13). */
+export interface UnpushedAlert {
+  readonly homeId: string;
+  readonly seq: number;
+  readonly wrapper: Wrapper;
+}
+
 /** A database that this relay can't use, such as one with a newer schema. */
 export class RelayStoreError extends Error {
   override name = "RelayStoreError";
@@ -530,6 +537,22 @@ export class RelayStore {
   #lastSeq(): number {
     const row = this.#get("SELECT seq FROM sqlite_sequence WHERE name = 'messages'");
     return row === undefined ? 0 : integer(row, "seq");
+  }
+
+  /** Records that Apple has answered every push of message `seq`, so a restart won't push it again. */
+  markPushed(seq: number, atMs: number): void {
+    this.#run("UPDATE messages SET pushed_at_ms = ? WHERE seq = ?", atMs, seq);
+  }
+
+  /** Alerts received since `sinceMs` and never pushed, oldest first. */
+  unpushedAlerts(sinceMs: number): UnpushedAlert[] {
+    const sql = `SELECT seq, home_id, wrapper FROM messages
+      WHERE type = 'alert' AND pushed_at_ms IS NULL AND received_at_ms >= ? ORDER BY seq`;
+    return this.#all(sql, sinceMs).map((row) => ({
+      homeId: text(row, "home_id"),
+      seq: integer(row, "seq"),
+      wrapper: storedWrapper(text(row, "wrapper")),
+    }));
   }
 
   /** Deletes messages older than the 7-day window, in batches; returns how many. */

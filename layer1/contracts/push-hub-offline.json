@@ -1,0 +1,15 @@
+{
+  "aps": {
+    "alert": { "title": "Can't Reach Home", "body": "Debbie can't reach home right now." },
+    "mutable-content": 1,
+    "interruption-level": "active",
+    "sound": "default",
+    "thread-id": "home-status"
+  },
+  "debbie": {
+    "v": 1,
+    "type": "hub_offline",
+    "last_contact": 1794669525,
+    "last_contact_at": "2026-11-14T15:18:45Z"
+  }
+}
