@@ -130,6 +130,13 @@ export class HubJoin {
     return { joins, problem: this.#problem };
   }
 
+  /** Drops the join that made node `nodeId`, once that laptop left or was removed. */
+  forget(nodeId: string): void {
+    for (const [joinId, join] of this.#joins) {
+      if (join.nodeId === nodeId) this.#joins.delete(joinId);
+    }
+  }
+
   /** A new laptop's join request (§6.2): its name and a fresh public key. */
   request(body: unknown): Reply {
     if (!isRecord(body)) return REFUSED.badRequest;

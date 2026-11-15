@@ -14,6 +14,7 @@ import {
   HomeError,
   HomeExistsError,
   loadHome,
+  removeAcceptedWorker,
 } from "./home.ts";
 import { HandoffIntake } from "./handoff-intake.ts";
 import { devicesPage } from "./devices-page.ts";
@@ -264,12 +265,12 @@ export async function startSetupServer(options: SetupServerOptions) {
       ? "This laptop is already the home laptop, so it can't join another home."
       : undefined;
   const joinPage = new JoinPage(laptop, token, roleTaken);
-  const homeView = (home: Home) =>
+  const homeView = async (home: Home) =>
     homePage(
       home,
       launcher?.status(),
       homeSections(),
-      laptopsSection(options.phoneAccess?.(), home.hubPublicKey),
+      laptopsSection(options.phoneAccess?.(), home.hubPublicKey, await sidebarLaptops(home), token),
       options.remoteAccess?.(),
     );
 
@@ -315,7 +316,7 @@ export async function startSetupServer(options: SetupServerOptions) {
           joinPage.currentPage() ?? welcomePage(token, laptopCheckSection(await laptopFacts()))
         );
       }
-      return homeView(home);
+      return await homeView(home);
     } catch (error) {
       if (!(error instanceof HomeError)) throw error;
       return problemPage(error.message);
@@ -330,7 +331,7 @@ export async function startSetupServer(options: SetupServerOptions) {
     try {
       const home = await createHome(stateDir, { ...homeOptions, bridgeUrl });
       await homeReady(home);
-      return { status: 200, body: homeView(home) };
+      return { status: 200, body: await homeView(home) };
     } catch (error) {
       if (error instanceof HomeExistsError) return { status: 409, body: await currentPage() };
       if (!(error instanceof HomeError)) throw error;
@@ -394,6 +395,25 @@ export async function startSetupServer(options: SetupServerOptions) {
       return body;
     }
   }
+  /**
+   * Remove on the Laptops section: takes the laptop out of accepted-workers.json, so Layer 2's
+   * coordinator refuses its token and drops its connection, and out of what the page lists.
+   */
+  async function removeLaptopReply(fields: URLSearchParams): Promise<PageReply> {
+    const nodeId = fields.get("node_id") ?? "";
+    try {
+      const home = await loadHome(stateDir);
+      if (home === undefined) return { status: 409, body: problemPage("This laptop has no home.") };
+      const state = options.phoneAccess?.()?.state();
+      if (state?.on === true) await state.link.remove(nodeId);
+      else await removeAcceptedWorker(home, nodeId);
+    } catch (error) {
+      if (!(error instanceof HomeError)) throw error;
+      return { status: 500, body: problemPage(error.message) };
+    }
+    return { redirect: "/" };
+  }
+
   /** The camera laptop's sender page, only while a live view session is open. */
   async function senderReply(): Promise<PageReply> {
     const sender = liveSender.reply();
@@ -409,6 +429,7 @@ export async function startSetupServer(options: SetupServerOptions) {
     { method: "GET", path: "/home", guard: "view", handle: showPage },
     { method: "POST", path: "/home", guard: "form", handle: createHomeReply },
     { method: "POST", path: "/keep-awake/off", guard: "form", handle: turnOffKeepAwake },
+    { method: "POST", path: "/laptops/remove", guard: "form", handle: removeLaptopReply },
     { method: "GET", path: settings.LIVE_SENDER_PATH, guard: "view", handle: senderReply },
     ...pairingPage.routes(),
     alerts.route(),

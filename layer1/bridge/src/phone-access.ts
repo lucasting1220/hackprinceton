@@ -170,7 +170,12 @@ export class PhoneAccess {
       ...(outbox === undefined ? {} : { outbox }),
       ...(handoff === undefined ? {} : { handoff }),
     });
-    const link = new LinkHub({ home: this.#home, seen: gateway, log: this.#log });
+    const link = new LinkHub({
+      home: this.#home,
+      seen: gateway,
+      log: this.#log,
+      onRemoved: (nodeId) => join.forget(nodeId),
+    });
     this.#forRelay?.liveView?.close();
     const hub =
       liveView === undefined

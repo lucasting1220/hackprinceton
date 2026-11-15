@@ -240,6 +240,7 @@ export class JoinPage {
         handle: (fields) => this.#saveSensors(fields),
       },
       { method: "GET", path: "/join/leave", guard: "view", handle: async () => this.#leave() },
+      { method: "POST", path: "/join/leave", guard: "form", handle: () => this.#left() },
       { method: "POST", path: "/join/reset", guard: "form", handle: () => this.#reset() },
     ];
   }
@@ -247,9 +248,9 @@ export class JoinPage {
   /** Leave this home's confirm page, once joined; it doesn't reload, so it waits for an answer. */
   #leave(): PageReply {
     if (this.#laptop.view().step !== "joined") return { redirect: "/join" };
-    const body = html`<p>Leaving stops the worker on this laptop and deletes its join token and files. The home stops hearing from it.</p>
+    const body = html`<p>Leaving tells the home laptop, which removes this laptop from the home, then stops the worker on this laptop and deletes its join token and files.</p>
 <p>To join again, choose Join a home, and a caregiver approves this laptop again in the Debbie app.</p>
-${button("/join/reset", this.#token, "Leave this home")}
+${button("/join/leave", this.#token, "Leave this home")}
 <p><a href="/join">Back</a></p>`;
     return { status: 200, body: page(LEAVE_TITLE, body) };
   }
@@ -316,6 +317,17 @@ ${button("/join/reset", this.#token, "Leave this home")}
     return { redirect: "/join" };
   }
 
+  /** Leaves; when the home laptop couldn't be told, says to remove this laptop there. */
+  async #left(): Promise<PageReply> {
+    if (this.#laptop.view().step !== "joined") return { redirect: "/join" };
+    const told = await this.#laptop.leave();
+    if (told.ok) return { redirect: "/join" };
+    const body = html`<p>This laptop left the home, but the home laptop couldn't be told: ${told.reason}.</p>
+<p>On the home laptop's page, under Laptops, press Remove next to this laptop.</p>
+<p><a href="/join">Continue</a></p>`;
+    return { status: 200, body: page(LEAVE_TITLE, body) };
+  }
+
   async #reset(): Promise<PageReply> {
     await this.#laptop.reset();
     return { redirect: "/join" };
@@ -334,7 +346,12 @@ const JOIN_WORDS = {
  * The Laptops section of the home laptop's page: how to add one (this laptop's addresses and the
  * home code), the laptops waiting for approval or approved, and what each linked laptop reported.
  */
-export function laptopsSection(access: PhoneAccess | undefined, hubPublicKey: string): Html {
+export function laptopsSection(
+  access: PhoneAccess | undefined,
+  hubPublicKey: string,
+  accepted: readonly Readonly<{ nodeId: string; displayName: string }>[],
+  token: string,
+): Html {
   const heading = html`<h2>Laptops</h2>`;
   const state = access?.state();
   if (state?.on !== true) {
@@ -347,18 +364,29 @@ export function laptopsSection(access: PhoneAccess | undefined, hubPublicKey: st
       ? html`<p>This laptop isn't connected to a network, so no laptop can join yet.</p>`
       : html`<p>To add a laptop, start the bridge on it, choose Join a home and type this laptop's address: ${addresses.join(" or ")}. Home code: <strong>${homeCode}</strong>.</p>`;
   const { joins, problem } = state.join.listing();
-  const joinItems = joins.map((join) => {
-    const node = join.nodeId === null ? "" : html`, node <code>${join.nodeId}</code>`;
-    const until = join.state === "waiting" ? `, until ${join.expiresAt}` : "";
-    return html`<li>${join.name}: ${JOIN_WORDS[join.state]}${until}${node}</li>`;
-  });
+  const joinItems = joins
+    .filter((join) => join.state !== "approved")
+    .map((join) => {
+      const node = join.nodeId === null ? "" : html`, node <code>${join.nodeId}</code>`;
+      const until = join.state === "waiting" ? `, until ${join.expiresAt}` : "";
+      return html`<li>${join.name}: ${JOIN_WORDS[join.state]}${until}${node}</li>`;
+    });
   const joinList = joinItems.length === 0 ? html`` : html`<ul>${joinItems}</ul>`;
   const failed =
     problem === undefined ? html`` : html`<p>The last approval failed: ${problem}.</p>`;
-  const linked = [...state.link.linked().values()].map(
-    (laptop) =>
-      html`<li>Node <code>${laptop.nodeId}</code>: ${laptop.state.replace("_", " ")}, reported ${laptop.reportedAt}${missingList(laptop.missing)}</li>`,
-  );
-  const linkList = linked.length === 0 ? html`` : html`<p>Linked laptops:</p><ul>${linked}</ul>`;
-  return html`${heading}${how}${joinList}${failed}${linkList}`;
+  const linked = state.link.linked();
+  const items = accepted.map((worker) => {
+    const laptop = linked.get(worker.nodeId);
+    const about =
+      laptop === undefined
+        ? html`not reporting`
+        : html`${laptop.state.replace("_", " ")}, reported ${laptop.reportedAt}${missingList(laptop.missing)}`;
+    const remove = html`<form method="post" action="/laptops/remove"><input type="hidden" name="token" value="${token}"><input type="hidden" name="node_id" value="${worker.nodeId}"><button>Remove</button></form>`;
+    return html`<li>${worker.displayName}, node <code>${worker.nodeId}</code>: ${about}${remove}</li>`;
+  });
+  const joinedList =
+    items.length === 0
+      ? html``
+      : html`<p>Joined laptops. Remove takes a laptop out of the home: its token stops working and its worker is disconnected.</p><ul>${items}</ul>`;
+  return html`${heading}${how}${joinList}${failed}${joinedList}`;
 }

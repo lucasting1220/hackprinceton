@@ -385,6 +385,7 @@ link_key = HKDF-SHA256(ikm = SHA-256(join_token) as 32 raw bytes, salt = UTF-8 n
 - The report's plaintext is `{"msg_id","sent_at","type":"link_report","state":"connected","missing":[{"id","reason","required"}]}`: the laptop's setup state (lowercase letters and `_`, at most 32) and what it is missing, as `contracts/check-output.json` lists it. The camera laptop adds `"live_view_lost":"<session_id>"` (an ID) once, when its sender window for that session couldn't start (no Chrome or Edge) or closed by itself; the hub then ends the session with `lost` (§7.5).
 - The hub checks the wrapper's shape (`400 bad_request`), the type (`400 unsupported_type`), the node, the envelope and the plaintext's `type`, `msg_id` and `sent_at` (`400 bad_envelope`), the 30-second clock rule (`400 stale`), a repeated `msg_id` (`409 duplicate`, in the same memory as phones' IDs) and the report's fields (`400 bad_request`).
 - It answers `200` with a `link_reply` wrapper sealed the same way (associated data `.../link_reply`), whose plaintext is `{"msg_id","sent_at","type":"link_reply","in_reply_to":"<the report's msg_id>","commands":[…]}`. `commands` holds what the hub queued for this laptop since its last report, oldest first, each sent once (at most 16); usually it is empty. The laptop runs each command it can parse, in order, and ignores any other.
+- A laptop that leaves its home (Leave this home on its page) first sends one `link_leave` wrapper to `POST /v1/link`, sealed the same way (associated data `.../link_leave`), whose plaintext has only `msg_id`, `sent_at` and `type`. After the same checks as a report, the hub takes the node out of `accepted-workers.json`, so Layer 2's coordinator refuses its token and drops its connection, and answers `202 {"v":1,"accepted":true}`. The laptop counts `202` or `403` as told; with any other answer, or none, it still leaves, and its page says to press Remove next to it on the home laptop's page, which removes it the same way.
 - Live view's commands (§7), with exactly these fields:
   - `{"type":"live_view_open","session_id":"<id>","sender_token":"<43 base64url characters>","signaling_url":"wss://<relay host>/v1/live-view/sessions/<session_id>/signal","expires_at":"2026-11-14T15:25:00Z"}`: serve the sender page at `GET /live-sender` on `127.0.0.1:7470` and open it in Chrome (or Edge on Windows) until `expires_at`. `signaling_url` is on the origin of `relay-credential.json`'s `relay_url` (`ws:` for an `http:` relay). The token is a secret: only this command and the sender page hold it, and nothing logs it.
   - `{"type":"live_view_close","session_id":"<id>","reason":"stopped"}`: stop serving the page and close the window; `reason` is the session's end reason (§7.2). A close for a session whose open is still queued removes that open instead.
@@ -395,6 +396,7 @@ link_key = HKDF-SHA256(ikm = SHA-256(join_token) as 32 raw bytes, salt = UTF-8 n
 | Status | Code             | Where                         | Meaning                                                             |
 | ------ | ---------------- | ----------------------------- | ------------------------------------------------------------------- |
 | 202    | none             | `/v1/join`, `laptop_approval` | The join is waiting; the approval or decline was taken              |
+| 202    | none             | `/v1/link`                    | The `link_leave` was taken; the node is no longer accepted          |
 | 400    | `forbidden`      | `laptop_approval`             | A resident's phone approved                                         |
 | 400    | `unknown_join`   | `laptop_approval`             | The hub has no such join                                            |
 | 400    | `expired`        | `laptop_approval`             | The code ran out, or the join was declined                          |
@@ -411,6 +413,7 @@ link_key = HKDF-SHA256(ikm = SHA-256(join_token) as 32 raw bytes, salt = UTF-8 n
 | `join_ticket` | hub → new laptop    | `join`  | `v, home_id, node_id, display_name, join_token, coordinator_port` |
 | `link_report` | worker laptop → hub | node ID | `state, missing`, and `live_view_lost` when a sender window ended |
 | `link_reply`  | hub → worker laptop | node ID | `in_reply_to, commands`                                           |
+| `link_leave`  | worker laptop → hub | node ID | none                                                              |
 
 ## 7. Live view
 
