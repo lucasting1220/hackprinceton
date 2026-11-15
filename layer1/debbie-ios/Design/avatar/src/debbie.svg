@@ -1,0 +1,98 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="200" height="200">
+  <!--
+    Debbie, the assistant's face. Layered source for every avatar the app draws: 30 pt
+    (centre tab), 44 pt (chat), 64 pt (onboarding guide), 111 pt (badge view) and 148 pt
+    (welcome hero), per Tokens.swift. Export: Design/scripts/export-avatar.sh (one PDF
+    imageset per layer, review sheet in Design/reviews/avatar/debbie.png).
+
+    Canvas: 200 x 200, transparent. Every layer is one <g id> on this same canvas, so the
+    exported layers stack in perfect alignment. Composite order, bottom to top:
+      body, hair-back, head, cheeks, eyes-open | eyes-closed, brows, mouth, hair-front
+    eyes-closed is the blink frame: hidden here (display="none") so this file previews the
+    rest pose; the export script shows it in its own layer. Its lids sit on the lower lash
+    line, where a real blink closes.
+
+    NECK PIVOT (head tilt centre): (100, 150), the neck centre; UnitPoint(x: 0.5, y: 0.75)
+    in SwiftUI. Every layer except body tilts around it. body stays still. The circle crop
+    is the inscribed circle (centre 100,100, r 100): body's lower edge follows that arc, and
+    the head layers keep their distance from it so a +/-3 degree tilt never clips, and at
+    rest they stay inside the 30 pt tab's selected ring (the export script measures both).
+
+    Style: flat vector, rounded geometric shapes with round ends, no outlines, no gradients,
+    no text, logos or jewellery. The eyes are plain dark rounds with no white: the owner saw
+    white catch-lights as white pupils (17:24), so there are none. The hair is
+    one flat tone; 'deep' fills behind the head, shows only as the small shadow under the
+    fringe's sweep, and never forms the outer silhouette (the export script checks this).
+
+    Palette (edit it here, in one place):
+      mint    #6CDCB0  top (brand mint.fill)
+      collar  #0A6B4D  crew neckline (brand accent.text)
+      skin    #C28468  face, ears, neck: warm medium tone
+      shade   #A76A50  neck shadow, inner ear, nose, lid creases
+      cheek   #C9806E  cheek warmth (luminance-matched to skin, so it stays subtle)
+      hair    #573A2D  crown, fringe, bun, brows: soft dark brown
+      deep    #38231B  back hair, eyes (round, no white), closed lids
+      lip     #492E28  closed-mouth smile: a warm dark brown that still reads at 30 pt
+    Appearance colours, named <class>-<appearance>, apply only to the groups that list that
+    appearance in data-appearances: the export writes those layers a rendition per
+    appearance. The circle behind her is mint.tint, which darkens in Dark (#123026) and
+    again in Dark + Increase Contrast (#1C4536), where the light hair would sink into it.
+      hair-dark    #6E4A39  deep-dark    #4E3328   hair on #123026: 1.83:1
+      hair-darkHC  #7E5644  deep-darkHC  #5A3D30   hair on #1C4536: 1.69:1
+    Light + Increase Contrast keeps the light colours. The brows keep the light hair colour
+    in every appearance: they sit on skin. (deep-darkHC is 0.8 CIEDE2000 from the review's
+    #5C3D30, which sat 16.9 from urgent.fill.pressed in Dark + Increase Contrast.)
+    The non-brand colours are each at least CIEDE2000 17 from every urgent, caution and live
+    fill (pressed included) in every appearance they show in: all four for the base colours,
+    their own for the appearance colours. So nothing in the face reads as a status colour
+    (CRAFT.md C5). The export script re-measures this, and the hair against mint.tint, on
+    every run.
+  -->
+  <style>
+    .mint{fill:#6CDCB0}.collar{fill:#0A6B4D}.skin{fill:#C28468}.shade{fill:#A76A50}
+    .cheek{fill:#C9806E}.hair{fill:#573A2D}.deep{fill:#38231B}
+    .lip{fill:#492E28}
+    .hair-dark{fill:#6E4A39}.deep-dark{fill:#4E3328}
+    .hair-darkHC{fill:#7E5644}.deep-darkHC{fill:#5A3D30}
+  </style>
+  <g id="body">
+    <path class="skin" d="M88 108 H112 V137 C112 142.5 115 145 120 146 V158 H80 V146 C85 145 88 142.5 88 137 Z"/>
+    <path class="shade" d="M88 120 H112 V133.5 C107.5 141.5 92.5 141.5 88 133.5 Z"/>
+    <path class="mint" d="M85 144 C73 146 52 149 40 154 C32 157.5 26 161 23.4 164.3 A100 100 0 0 0 176.6 164.3 C174 161 168 157.5 160 154 C148 149 127 146 115 144 C113 150 107 153.5 100 153.5 C93 153.5 87 150 85 144 Z"/>
+    <path class="collar" d="M85 144 C87 150 93 153.5 100 153.5 C107 153.5 113 150 115 144 L119.5 144.6 C117.5 153 109.5 158 100 158 C90.5 158 82.5 153 80.5 144.6 Z"/>
+  </g>
+  <g id="hair-back" data-appearances="dark darkHC">
+    <circle class="hair" cx="68.5" cy="38.5" r="14"/>
+    <path class="deep" d="M100.54 31.2 C123.76 31.2 141.58 48.48 141.58 74.4 C141.58 87.36 140.61 96 138.88 101.4 L61.12 101.4 C60.2 100.6 59.4 97.6 59.3 93.6 C59.2 90.2 59.3 86.8 59.5 83.2 C59.6 80 59.6 78.2 59.5 76.56 C59.5 49.56 77.32 31.2 100.54 31.2 Z"/>
+  </g>
+  <g id="head">
+    <ellipse class="skin" cx="62.2" cy="97.08" rx="6.48" ry="10.26"/>
+    <path class="shade" d="M62.2 91.14 C58.96 94.38 58.96 99.78 62.2 103.02 C60.9 99.24 60.9 94.92 62.2 91.14 Z"/>
+    <path class="skin" d="M100 44.16 C121.06 44.16 137.15 60.36 137.37 85.2 C137.58 106.5 131.6 124.3 114.69 132.94 C111.2 135.0 106.6 136.4 101.51 136.4 C96.3 136.4 91.6 135.2 88.12 133.37 C70.4 124.4 62.63 106.5 62.63 85.2 C62.63 60.36 78.94 44.16 100 44.16 Z"/>
+    <path class="shade" d="M81.69 85.28 A22.46 22.46 0 0 1 91.54 85.47 A0.40 0.40 0 0 1 91.35 86.24 A21.66 21.66 0 0 0 81.85 86.07 A0.40 0.40 0 0 1 81.69 85.28 Z"/>
+    <path class="shade" d="M114.94 85.47 A22.46 22.46 0 0 1 124.79 85.28 A0.40 0.40 0 0 1 124.63 86.07 A21.66 21.66 0 0 0 115.13 86.24 A0.40 0.40 0 0 1 114.94 85.47 Z"/>
+    <path class="shade" d="M106.7 97.08 C109.29 100.54 110.37 103.99 108.64 105.94 C107.13 107.45 104.32 107.45 101.73 106.58 C104.54 106.37 106.48 105.72 106.91 104.42 C107.45 102.48 107.34 99.89 106.7 97.08 Z"/>
+  </g>
+  <g id="cheeks">
+    <ellipse class="cheek" cx="80.6" cy="102.6" rx="6.6" ry="4.1"/>
+    <ellipse class="cheek" cx="125.4" cy="102.6" rx="5.6" ry="3.8"/>
+  </g>
+  <g id="eyes-open">
+    <path class="deep" d="M82.6 90.9 C82.6 88.3 84.4 86.7 86.6 86.7 C88.8 86.7 90.6 88.3 90.6 90.9 C90.6 93.1 88.8 94.3 86.6 94.3 C84.4 94.3 82.6 93.1 82.6 90.9 Z"/>
+    <path class="deep" d="M115.8 90.9 C115.8 88.3 117.6 86.7 119.8 86.7 C122.0 86.7 123.8 88.3 123.8 90.9 C123.8 93.1 122.0 94.3 119.8 94.3 C117.6 94.3 115.8 93.1 115.8 90.9 Z"/>
+  </g>
+  <g id="eyes-closed" display="none">
+    <path class="deep" d="M82.2 91.6 Q86.6 96.0 91.0 91.6 Q86.6 93.0 82.2 91.6 Z"/>
+    <path class="deep" d="M115.4 91.6 Q119.8 96.0 124.2 91.6 Q119.8 93.0 115.4 91.6 Z"/>
+  </g>
+  <g id="brows">
+    <path class="hair" d="M76.89 80.23 C79.91 75.91 87.69 73.75 94.6 76.13 C95.25 76.78 95.03 78.72 93.95 78.61 C87.47 77.21 80.99 78.5 78.18 81.1 C77.54 81.64 76.56 80.99 76.89 80.23 Z"/>
+    <path class="hair" d="M129.38 80.23 C126.35 75.91 118.79 73.75 111.88 76.13 C111.23 76.78 111.45 78.72 112.53 78.61 C119.01 77.21 125.27 78.5 128.08 81.1 C128.73 81.64 129.7 80.99 129.38 80.23 Z"/>
+  </g>
+  <g id="mouth">
+    <path class="lip" d="M94.82 115.66 C99.35 120.0 108.21 120.0 112.74 115.66 C113.39 115.12 114.36 115.76 113.93 116.63 C109.29 124.2 98.27 124.2 93.63 116.63 C93.2 115.76 94.17 115.12 94.82 115.66 Z"/>
+  </g>
+  <g id="hair-front" data-appearances="dark darkHC">
+    <path class="hair" d="M57.23 87.36 C56.37 70.08 58.74 53.88 69.76 42 C77.86 33.36 88.66 28.61 100.54 28.39 C128.08 27.96 145.58 47.4 143.85 74.4 C143.2 87.36 141.47 100.32 137.8 108.96 C135.8 113.4 133.7 116.5 131.6 117.8 C130.3 118.6 129.2 117.6 129.7 116.4 C132.3 110.6 133.91 102.6 133.91 93.84 C133.91 83.04 131.32 72.78 124.3 66.3 C121.06 63.6 117.82 61.98 114.04 61.44 C101.08 59.82 87.04 54.96 80.56 45.78 C69.76 56.04 64.79 70.08 65.33 85.85 C64.0 87.2 60.4 87.3 57.63 89.8 C57.3 89.0 57.15 88.2 57.23 87.36 Z"/>
+  </g>
+</svg>

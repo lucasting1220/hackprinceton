@@ -29,7 +29,7 @@ export interface LanGatewayOptions {
   readonly log?: (line: string) => void;
   /** Step 4's outbox, which fills a fetch's page; without one every page is empty. */
   readonly outbox?: MessageSource;
-  /** Handlers for the later steps' command types, in place of 501 (step 3: laptop_approval). */
+  /** Handlers for the later steps' command types (step 3: laptop_approval; step 7: live_view_setting). */
   readonly handlers?: Readonly<Record<string, CommandHandler>>;
   /** Carries `request` and `watch_data` to Layer 2's coordinator; without it they get 503. */
   readonly handoff?: PhoneHandoff;
@@ -71,7 +71,7 @@ export type CommandRoute = "lan" | "relay";
 const LAN_ONLY: ReadonlySet<string> = new Set(["heart_rate", "fetch"]);
 
 /** Commands that a later step builds: 501 until then, on either route (Reconciliation 11). */
-const LATER_COMMANDS: ReadonlySet<string> = new Set(["laptop_approval", "live_view_setting"]);
+const LATER_COMMANDS: ReadonlySet<string> = new Set(["laptop_approval"]);
 
 const utf8 = new TextDecoder("utf-8", { fatal: true });
 

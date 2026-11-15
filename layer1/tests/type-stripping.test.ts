@@ -3,14 +3,15 @@ import { spawnSync } from "node:child_process";
 import path from "node:path";
 import { test } from "node:test";
 import { pathToFileURL } from "node:url";
-import { layer1, layer1Files } from "./layer1-files.ts";
+import { appCopy, layer1, layer1Files } from "./layer1-files.ts";
 
 const LOAD_CHECK_TIMEOUT_MS = 10_000;
 
 test("Layer 1's code is all .ts files outside dot-folders, the only ones tsc and npm test pick up", () => {
   // tsconfig.json checks **/*.ts and npm test runs **/*.test.ts. Neither looks inside a folder whose
   // name starts with a dot, and neither picks up a .mts, .cts or .tsx file that no .ts file imports,
-  // a .test.mts file, an upper-case .TS file or any JavaScript file.
+  // a .test.mts file, an upper-case .TS file or any JavaScript file. The iPhone app's copy is left
+  // out: it is a Swift project, and the app's own checks run its Node tools.
   const code = /\.[cm]?[jt]sx?$/i;
   const inDotFolder = (file: string): boolean =>
     file
@@ -18,7 +19,10 @@ test("Layer 1's code is all .ts files outside dot-folders, the only ones tsc and
       .slice(0, -1)
       .some((folder) => folder.startsWith("."));
   const unseen = layer1Files().filter(
-    (file) => code.test(file) && (!file.endsWith(".ts") || inDotFolder(file)),
+    (file) =>
+      file.split(path.sep)[0] !== appCopy &&
+      code.test(file) &&
+      (!file.endsWith(".ts") || inDotFolder(file)),
   );
   assert.deepEqual(
     unseen,

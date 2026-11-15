@@ -5,6 +5,7 @@ import { type HomeAlerts, openHomeAlerts } from "./alert-intake.ts";
 import { type Home, HomeError, loadHome, resolveStateDir } from "./home.ts";
 import { errorMessage, removePath } from "./json-file.ts";
 import { KeepAwake, type KeepAwakeOptions } from "./keep-awake.ts";
+import { LiveViewConsent } from "./live-view-consent.ts";
 import { PhoneAccess, type PhoneAccessOptions } from "./phone-access.ts";
 import { readRelayCredential } from "./relay-credential.ts";
 import {
@@ -77,6 +78,7 @@ export async function startBridge(options: BridgeOptions) {
   let remote: RemoteAccess = { state: "not_set_up" };
   let relayLink: RelayLink | undefined;
   let keepAwake: KeepAwake | undefined;
+  let liveView: LiveViewConsent | undefined;
 
   /**
    * The home-ready hook, after a home loads at start and after Create a home: starts the phone
@@ -87,10 +89,12 @@ export async function startBridge(options: BridgeOptions) {
     const relayUrl = credential.state === "ok" ? credential.credential.relayUrl : "";
     const alertsOpened = await openAlerts(home);
     const { outbox, handoff } = alertsOpened ?? {};
+    liveView ??= await LiveViewConsent.load(home.stateDir, { log });
     const network = {
       ...options.network,
       log,
       relayUrl,
+      liveView,
       ...(outbox === undefined ? {} : { outbox }),
       ...(handoff === undefined ? {} : { handoff }),
     };
@@ -156,6 +160,7 @@ export async function startBridge(options: BridgeOptions) {
     homeAlerts: () => alertsReady,
     remoteAccess: () => remoteAccessText(relayLink?.status() ?? remote),
     keepAwakeProblem: () => keepAwake?.problem(),
+    liveView: () => liveView,
   });
   const stopFile = path.join(options.stateDir, settings.STATE_NAMES.bridgeStop);
   try {

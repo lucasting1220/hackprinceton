@@ -319,7 +319,7 @@ test("a phone's command goes through the relay to the LAN gateway and its answer
   await waitFor(() => connected(link) && relay.store.device(phone.deviceId) !== undefined);
 
   const later = await call(relay, "/v1/commands", phone, {
-    body: phoneCommand(phone, relay.homeId, "live_view_setting"),
+    body: phoneCommand(phone, relay.homeId, "laptop_approval"),
   });
   assert.equal(later.status, 501);
   assert.equal(errorCode(later), "not_supported");
@@ -348,7 +348,7 @@ test("on the relay route heart_rate gets lan_only, and a repeat from either rout
   const onLan = await gateway.commands(phoneCommand(phone, relay.homeId, "heart_rate"));
   assert.match(JSON.stringify(onLan.body), /"unsupported_type"/);
 
-  const request = phoneCommand(phone, relay.homeId, "live_view_setting");
+  const request = phoneCommand(phone, relay.homeId, "laptop_approval");
   assert.equal((await gateway.commands(request)).status, 501, "the LAN route answers first");
   const again = await call(relay, "/v1/commands", phone, { body: request });
   assert.equal(again.status, 409);

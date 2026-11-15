@@ -1,0 +1,2 @@
+# One extended regex per line, each with a reason. Keep this empty unless a warning
+# is emitted by Apple's tooling and cannot be fixed in this repo.

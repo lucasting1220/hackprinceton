@@ -1,0 +1,110 @@
+{
+  "credential_hash" : [
+    {
+      "credential" : "dGVzdC1jcmVkZW50aWFs",
+      "sha256_hex" : "31d09f8d3942d55641b599a34d3e6da15a0d8901f7b6485547e1f92d76950302"
+    }
+  ],
+  "envelopes" : [
+    {
+      "ad" : "debbie/v1/7a8e0c4e-5f1d-4c39-9d7e-1b2a3c4d5e6f/home/alert",
+      "envelope" : {
+        "c" : "0BzeC95SqoVDc7iksPSwudzZkdzDT36QUS4umN5FkEPfYD4T39eR454rofkWmpylF7-XOiA_K_5pz5U64g0IPchN2ltxik4euQINJsN_S6dmS9AWfhY_J3EpmiWUI83PurwF06sLNmH-mNHKkjdwRjoGnVacIohTpIvJt9kd6PZAzSWSX4M_KXSpInJo4rC8EAoPCSbNKhJFBBQw4Ac2HNYG8UwJTQDP09dkA076VOp4xpsj9I7KlvWGBlBnxOpB5VPYXC9zwE6lacW38xAIDO_nrMGPZJf19VeSJvjHTh0uDiiHGBzkXZ-hLJmi1oLVciwSL8t9sy-hVnylBCfoLZ90kZumDS1_O6c",
+        "kid" : "home",
+        "n" : "AQEBAQEBAQEBAQEB",
+        "v" : 1
+      },
+      "home_id" : "7a8e0c4e-5f1d-4c39-9d7e-1b2a3c4d5e6f",
+      "key" : "__79_Pv6-fj39vX08_Lx8O_u7ezr6uno5-bl5OPi4eA",
+      "kid" : "home",
+      "name" : "alert-home-key",
+      "nonce" : "AQEBAQEBAQEBAQEB",
+      "plaintext" : "{\"alert_id\":\"a1\",\"body\":\"Debbie asked \\\"Are you okay?\\\" and heard no answer.\",\"detected_at\":\"2026-11-14T15:12:03Z\",\"kind\":\"fall\",\"msg_id\":\"m1\",\"sent_at\":\"2026-11-14T15:12:04Z\",\"severity\":\"urgent\",\"title\":\"Possible fall\",\"type\":\"alert\",\"update\":false}",
+      "type" : "alert"
+    },
+    {
+      "ad" : "debbie/v1/7a8e0c4e-5f1d-4c39-9d7e-1b2a3c4d5e6f/home/heartbeat",
+      "envelope" : {
+        "c" : "qZSIjVeexhIylFgygAhojgA6hDmBTXh84ttwS8Q6jtE7JOvotkUAYMuaQW-o5a75caDT-r_kllHsVKOvxOk-7oza1ih4oLzpFCGc6bsthnMxyqI",
+        "kid" : "home",
+        "n" : "AgICAgICAgICAgIC",
+        "v" : 1
+      },
+      "home_id" : "7a8e0c4e-5f1d-4c39-9d7e-1b2a3c4d5e6f",
+      "key" : "__79_Pv6-fj39vX08_Lx8O_u7ezr6uno5-bl5OPi4eA",
+      "kid" : "home",
+      "name" : "heartbeat-home-key",
+      "nonce" : "AgICAgICAgICAgIC",
+      "plaintext" : "{\"msg_id\":\"m2\",\"sent_at\":\"2026-11-14T15:13:00Z\",\"type\":\"heartbeat\"}",
+      "type" : "heartbeat"
+    },
+    {
+      "ad" : "debbie/v1/7a8e0c4e-5f1d-4c39-9d7e-1b2a3c4d5e6f/0f9e8d7c-6b5a-4938-8271-605f4e3d2c1b/ack",
+      "envelope" : {
+        "c" : "PNPWzxaS5-FA-jemMGs2c3xS2Oabxdr2LlrL5Sx54kMSDzNA0Hnd0NPsWpSy577lae017f6771Gea9j7rYEA2L7f2bHeZaRQIj_B6zyNN1jiwNUui48cpkYM8x0DYnewMXRXqnSWydtOEYmX1Igt0UTTtbbxVYV6f294wVspGJ6ETx3dODdGIp1v3UBVQiPZQuvb",
+        "kid" : "0f9e8d7c-6b5a-4938-8271-605f4e3d2c1b",
+        "n" : "AwMDAwMDAwMDAwMD",
+        "v" : 1
+      },
+      "home_id" : "7a8e0c4e-5f1d-4c39-9d7e-1b2a3c4d5e6f",
+      "key" : "pM9tLkL8zR1UaWhAY6DsHjnYyzokUIDA-lcYeJV0AEo",
+      "kid" : "0f9e8d7c-6b5a-4938-8271-605f4e3d2c1b",
+      "name" : "ack-phone-key",
+      "nonce" : "AwMDAwMDAwMDAwMD",
+      "plaintext" : "{\"acked_at\":\"2026-11-14T15:14:00Z\",\"alert_id\":\"a1\",\"false_alarm\":false,\"msg_id\":\"m3\",\"sent_at\":\"2026-11-14T15:14:00Z\",\"type\":\"ack\"}",
+      "type" : "ack"
+    },
+    {
+      "ad" : "debbie/v1/pair",
+      "envelope" : {
+        "c" : "KVWMUWPHDXDa4Ogs7A3X-FzSAUCdAsKetkHG7TgJ8MpydUav6WP0Ofqf_IVXCBfgfCQTwtEIPx3oYt73wuiOEHZgc-HrcUUsOgJcFKIiyGpa6fHO7C1gAFqagKklR_RyUmGevA_Hm9gT_YZI53R-D9Qsx0yJ--vsXxYDTuSJEuS0Q0KY6jA5bgMF4IRzp68A32h5wgJqCWNBJc6Pf_YY6sT7-LtipdPIAy5qx7tsaUr0RCYwPQqcOTS0NzXr",
+        "kid" : "pair",
+        "n" : "BAQEBAQEBAQEBAQE",
+        "v" : 1
+      },
+      "home_id" : "7a8e0c4e-5f1d-4c39-9d7e-1b2a3c4d5e6f",
+      "key" : "pM9tLkL8zR1UaWhAY6DsHjnYyzokUIDA-lcYeJV0AEo",
+      "kid" : "pair",
+      "name" : "pairing-bundle",
+      "nonce" : "BAQEBAQEBAQEBAQE",
+      "plaintext" : "{\"device_id\":\"0f9e8d7c-6b5a-4938-8271-605f4e3d2c1b\",\"home_id\":\"7a8e0c4e-5f1d-4c39-9d7e-1b2a3c4d5e6f\",\"msg_id\":\"m0\",\"role\":\"caregiver\",\"sent_at\":\"2026-11-14T15:10:00Z\",\"v\":1}",
+      "type" : "pair"
+    }
+  ],
+  "generated_by" : "DebbieCryptoTests/VectorTests",
+  "pairing" : [
+    {
+      "code" : "7710",
+      "device_name" : "Caregiver's iPhone",
+      "name" : "caregiver",
+      "phone_key" : "pM9tLkL8zR1UaWhAY6DsHjnYyzokUIDA-lcYeJV0AEo",
+      "phone_public" : "e06Qm75__kTEZaIgA31gjuNYl9Me-XLwf3SJLLD3PxM",
+      "proof" : "KYrF2KZwBiAPhnF1_wwpnoWqp3uMJ66drj1o0u8at9k",
+      "role" : "caregiver",
+      "secret" : "AAMGCQwPEhUYGx4hJCcqLQ",
+      "shared" : "ngBAmO_AkdTsJmO06fXP1NcGRXFpC0vql6sUarnzUFY"
+    },
+    {
+      "code" : "4105",
+      "device_name" : "Mamá's iPhone",
+      "name" : "resident-non-ascii",
+      "phone_key" : "gGubf0Vlzgz0CnfmqZSaKd3kd7c3LaVND7A1J7AYbUQ",
+      "phone_public" : "ew1H2TQn-DERYHgcfHM_2J-IlwrvSQ2KoO4ZpMuKGxQ",
+      "proof" : "yucgSUeCAl9ph_vugR4v9c8auSX2Fzg8KMjHNnA0wcA",
+      "role" : "resident",
+      "secret" : "AAMGCQwPEhUYGx4hJCcqLQ",
+      "shared" : "H9wZL6oCEqmq57tPQbWAIn_VrT5dd3-q4jDf6XPz6AU"
+    }
+  ],
+  "v" : 1,
+  "x25519" : [
+    {
+      "hub_private" : "IiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiI",
+      "hub_public" : "D6poTtKIZ7l_Smot7l34zpdOdrcBjj8iocTPJnhXDyA",
+      "name" : "phone-hub",
+      "phone_private" : "ERERERERERERERERERERERERERERERERERERERERERE",
+      "phone_public" : "e06Qm75__kTEZaIgA31gjuNYl9Me-XLwf3SJLLD3PxM",
+      "shared" : "ngBAmO_AkdTsJmO06fXP1NcGRXFpC0vql6sUarnzUFY"
+    }
+  ]
+}

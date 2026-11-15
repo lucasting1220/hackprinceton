@@ -42,6 +42,7 @@ export const STATE_NAMES = {
   coordinatorStateDir: "coordinator",
   bridgeStop: "bridge.stop",
   phones: "phones.json",
+  liveView: "live-view.json",
 } as const;
 
 /** The home key's length in bytes. */

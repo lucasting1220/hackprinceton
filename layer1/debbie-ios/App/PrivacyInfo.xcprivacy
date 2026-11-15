@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Debbie's privacy manifest (docs/DECISIONS.md D-017). No tracking, no tracking domains.
+     No collected data: alerts and status travel end-to-end encrypted (the relay can't read them),
+     heart rate goes only to the family's own home laptop over the local network, and there is
+     no analytics, advertising or crash reporting. No required-reason APIs are used. -->
+<plist version="1.0">
+<dict>
+	<key>NSPrivacyTracking</key>
+	<false/>
+	<key>NSPrivacyTrackingDomains</key>
+	<array/>
+	<key>NSPrivacyCollectedDataTypes</key>
+	<array/>
+	<key>NSPrivacyAccessedAPITypes</key>
+	<array/>
+</dict>
+</plist>
