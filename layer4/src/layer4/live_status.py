@@ -2,7 +2,7 @@
 
 Built from the health check's latest readings. Each part carries the time its reading was
 taken, so the app can show its age. The heart-rate trend compares the latest reading with the
-one before it. Activity is null in version 1: the fall model's activity lives in another job.
+one before it. Activity is what the fall model last logged, null until it has logged one.
 """
 
 from datetime import UTC, datetime, timedelta
@@ -58,11 +58,14 @@ def live_status(
     steps_part: dict[str, object] | None = None
     if steps is not None:
         steps_part = {"steps_today": steps.steps_today, "at": _utc(steps.measured_at)}
+    activity_part: dict[str, object] | None = None
+    if latest.activity is not None and latest.activity_since is not None:
+        activity_part = {"state": latest.activity.value, "at": _utc(latest.activity_since)}
     no_heart_data = heart is None or now - heart.measured_at > no_heart_data_after
     return {
         "schema_version": 1,
         "type": "live_status",
-        "activity": None,
+        "activity": activity_part,
         "heart_rate": heart_part,
         "sleep": sleep_part,
         "steps": steps_part,

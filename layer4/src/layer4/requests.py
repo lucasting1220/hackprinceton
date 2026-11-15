@@ -2,9 +2,10 @@
 
 check_now is silent: a fresh live status goes to the phones, and no reply. ask is answered
 by the deep model from the live status only (the Layer 4 doc: questions are answered only from
-what is happening right now); if the model fails or says nothing, the reply is a plain summary
-of the latest readings, so a question is never left unanswered. A request's text and the
-answer are never logged.
+what is happening right now). The model is told to state the readings and their times only,
+never to judge them or give medical advice. If the model fails or says nothing, the reply is a
+plain summary of the latest readings, so a question is never left unanswered. A request's
+text and the answer are never logged.
 """
 
 import logging
@@ -16,6 +17,7 @@ from typing import Literal, Protocol
 
 from layer4 import settings
 from layer4.alerts import format_date, format_time
+from layer4.fall import Activity
 from layer4.health_check import LatestHealth
 from layer4.live_status import live_status
 from layer4.ports import Model, PortError, Quality
@@ -26,6 +28,12 @@ _ID = re.compile(r"^[A-Za-z0-9_.-]{1,64}$")
 _FIELDS = {"request_id", "device_id", "kind", "text"}
 _OPTIONAL = {"schema_version", "type"}
 _TEXT_MAX_CHARS = 1000
+_ACTIVITY_WORDS = {
+    Activity.WALKING: "up and about",
+    Activity.SITTING: "sitting",
+    Activity.LYING_DOWN: "lying down",
+    Activity.NOT_IN_VIEW: "not in view of the camera",
+}
 
 
 @dataclass(frozen=True)
@@ -60,6 +68,11 @@ def parse_request(message: Mapping[str, object]) -> PhoneRequest:
 def facts(latest: LatestHealth, tz: tzinfo | None = None) -> list[str]:
     """The latest readings in plain words, one per line; what the model and a summary use."""
     lines: list[str] = []
+    if latest.activity is not None and latest.activity_since is not None:
+        lines.append(
+            f"Activity: {_ACTIVITY_WORDS[latest.activity]} since "
+            f"{format_time(latest.activity_since, tz)} on {format_date(latest.activity_since, tz)}."
+        )
     heart = latest.heart_rate
     if heart is not None:
         lines.append(
@@ -85,8 +98,10 @@ def question_prompt(question: str, latest: LatestHealth, tz: tzinfo | None = Non
     known = facts(latest, tz) or ["No readings from the watch yet."]
     return (
         "You answer a family caregiver's question about an older person living at home.\n"
-        "Use only the facts below. If they do not answer the question, say what is known.\n"
-        "Answer in at most three short sentences. Do not give medical advice.\n\n"
+        "Use only the facts below: state the readings that answer the question, with their\n"
+        "times. Do not say whether a reading is normal, high, low or worrying, do not give\n"
+        "medical advice, and do not guess. If the facts do not answer the question, say so\n"
+        "and give the latest readings. Answer in at most three short sentences.\n\n"
         "Facts:\n" + "\n".join(f"- {line}" for line in known) + f"\n\nQuestion: {question}\n"
     )
 

@@ -151,3 +151,10 @@ NO_HEART_DATA_AFTER = timedelta(minutes=30)
 # contracts/README.md); a reply's title is REPLY_TITLE.
 REPLY_BODY_MAX_CHARS = 4000
 REPLY_TITLE = "Answer"
+
+# Activity for live status: fall_model logs an activity once it has held for ACTIVITY_STABLE, so
+# a flicker is not written; health_check reads the newest every ACTIVITY_POLL_S, looking back at
+# most ACTIVITY_LOOKBACK the first time.
+ACTIVITY_STABLE = timedelta(seconds=2)
+ACTIVITY_POLL_S = 5.0
+ACTIVITY_LOOKBACK = timedelta(hours=1)
