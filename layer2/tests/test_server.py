@@ -1,6 +1,7 @@
 import contextlib
 import json
 import logging
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import cast
 
@@ -11,6 +12,7 @@ from starlette.websockets import WebSocket, WebSocketDisconnect
 
 from layer2 import settings
 from layer2.contracts import ApiState, CoordinatorConfig, Hello, StatusMessage
+from layer2.coordinator.plan import Decision, Placement
 from layer2.coordinator.registry import Registry
 from layer2.coordinator.server import (
     BAD_HELLO,
@@ -276,6 +278,8 @@ def test_dashboard_page_shows_each_laptop_as_one_card(dashboard: TestClient) -> 
         '"Processor"',
         "Load, last minute",
         "Job restarts",
+        "Jobs placed by the AI planner",
+        "Jobs placed by the rules",
         "keeps crashing",
         "createElementNS(SVG",
     ):
@@ -299,3 +303,21 @@ def test_details_list_each_jobs_restarts(control: TestClient, dashboard: TestCli
     ]
     outsider = TestClient(dashboard.app, base_url="http://attacker.example")
     assert outsider.get("/api/details").status_code == 400
+
+
+def test_details_show_the_latest_planner_decision(registry: Registry[WebSocket]) -> None:
+    placement = Placement(lambda: [])
+    page = TestClient(create_dashboard_app(registry, placement), base_url="http://127.0.0.1")
+    assert page.get("/api/details").json()["planner"] is None
+    placement.decision = Decision(
+        made_by="rules",
+        why="the AI planner's answer was not used: model did not answer within 20.0 s",
+        decided_at=datetime(2026, 11, 15, 2, 0, tzinfo=UTC),
+        moved=("fall_model",),
+    )
+    assert page.get("/api/details").json()["planner"] == {
+        "made_by": "rules",
+        "why": "the AI planner's answer was not used: model did not answer within 20.0 s",
+        "decided_at": "2026-11-15T02:00:00Z",
+        "moved": ["fall_model"],
+    }

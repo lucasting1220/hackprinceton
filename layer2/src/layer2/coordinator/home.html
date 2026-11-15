@@ -68,6 +68,10 @@ main { flex: 1; background: var(--bg); overflow-y: auto; padding: 2.2rem 2.6rem;
 .chip { width: 10px; height: 10px; border-radius: 3px; flex: none; }
 .muted { color: var(--muted); }
 .small { font-size: .85rem; }
+.banner { display: flex; align-items: center; gap: 1.2rem; margin-bottom: 1.4rem; padding: 1rem 1.4rem; }
+.badge { font-weight: 700; font-size: .85rem; letter-spacing: .06em; padding: .45rem .8rem; border-radius: 8px; flex: none; }
+.badge.ai { background: rgba(10,132,255,.18); color: var(--blue); }
+.badge.rules { background: var(--raise); color: var(--muted); }
 .row .small { margin-left: .4rem; }
 .warn { color: var(--orange); }
 svg.dots { width: 100%; height: 64px; display: block; margin: .3rem 0 .2rem; }
@@ -110,6 +114,7 @@ const SVG = "http://www.w3.org/2000/svg";
 const cpuHistory = new Map();  // node_id -> [0..1], newest last
 let latest = null;
 let restarts = new Map();  // "node_id job" -> restarts, from /api/details
+let decision = null;  // the latest re-plan, from /api/details
 const CRASHING_AFTER = 3;  // restarts before a job is shown as crashing
 
 function el(tag, className, text) {
@@ -255,6 +260,26 @@ function jobRows(jobs) {
   return box;
 }
 
+// Who made the current plan and why: the AI planner, or the rules it falls back to.
+function plannerBanner() {
+  const box = el("div", "panel banner");
+  const ai = decision && decision.made_by === "ai";
+  const badge = el("span", ai ? "badge ai" : "badge rules", ai ? "AI" : "RULES");
+  const text = el("div", "side");
+  if (!decision) {
+    text.appendChild(el("div", "", "No plan yet"));
+    text.appendChild(el("div", "muted", "The planner runs when a laptop joins."));
+  } else {
+    const when = new Date(decision.decided_at).toLocaleTimeString();
+    text.appendChild(el("div", "", (ai ? "Jobs placed by the AI planner" : "Jobs placed by the rules") + " · " + when));
+    text.appendChild(el("div", "muted", decision.why));
+    if (decision.moved.length > 0) text.appendChild(el("div", "warn small", "Moved: " + decision.moved.join(", ")));
+  }
+  box.appendChild(badge);
+  box.appendChild(text);
+  return box;
+}
+
 function laptopSummary(laptop, hw, jobs, now) {
   const quiet = now - Date.parse(laptop.last_status_at) > STALE_AFTER_MS;
   const panel = el("div", "panel link" + (quiet ? " quiet" : ""));
@@ -296,6 +321,7 @@ function overview(state, hwById, now) {
           [["Jobs running", String(running)], ["Jobs placed", String(state.jobs.length)],
            ["Job restarts", String([...restarts.values()].reduce((a, b) => a + b, 0))],
            ["Work not placed", String(state.dropped.length)]])));
+  view.appendChild(plannerBanner());
   const grid = el("div", "grid");
   for (const laptop of state.laptops) {
     grid.appendChild(laptopSummary(laptop, hwById.get(laptop.node_id), state.jobs.filter((j) => j.node_id === laptop.node_id), now));
@@ -439,8 +465,10 @@ async function refresh() {
   try {
     const details = await getJson("/api/details");
     restarts = new Map(details.jobs.map((j) => [j.node_id + " " + j.job, j.restarts]));
+    decision = details.planner || null;
   } catch (problem) {
     restarts = new Map();  // the page still works without the extra details
+    decision = null;
   }
   for (const hw of hwById.values()) {
     if (hw.cpu_percent === null) continue;

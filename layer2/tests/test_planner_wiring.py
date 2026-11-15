@@ -17,10 +17,10 @@ def test_a_slow_planner_never_stalls_orders_and_runs_one_at_a_time() -> None:
 
     def planner(
         needs: list[JobNeed], connected: list[LaptopView], known: set[str], previous: Plan
-    ) -> Plan:
+    ) -> tuple[Plan, str, str]:
         calls.append([laptop.node_id for laptop in connected])
         release.wait(5)
-        return Plan(jobs={"care_rules": connected[-1].node_id})
+        return Plan(jobs={"care_rules": connected[-1].node_id}), "ai", "b has more memory"
 
     laptops = [A]
 
@@ -43,6 +43,10 @@ def test_a_slow_planner_never_stalls_orders_and_runs_one_at_a_time() -> None:
             await asyncio.sleep(0.02)
         assert calls == [["a", "b"], ["a", "b"]]  # each read the laptops when it started
         assert placement.plan.jobs == {"care_rules": "b"}
+        decision = placement.decision
+        assert decision is not None
+        assert (decision.made_by, decision.why) == ("ai", "b has more memory")
+        assert decision.moved == ()  # the second plan kept care_rules where the first put it
 
     asyncio.run(scenario())
 
@@ -52,5 +56,7 @@ def test_without_a_planner_the_rule_plan_is_made_at_once() -> None:
         placement = Placement(lambda: [RULES])
         placement.request_replan(lambda: ([A], {"a"}))
         assert placement.plan.jobs == {"care_rules": "a"}
+        assert placement.decision is not None and placement.decision.made_by == "rules"
+        assert placement.decision.moved == ()
 
     asyncio.run(scenario())
