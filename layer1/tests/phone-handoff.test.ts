@@ -134,6 +134,46 @@ test("a request the coordinator didn't take is forgotten, so the phone may send 
   assert.equal(requests.askingPhone("r1").ok, true);
 });
 
+test("watch data comes from a resident or a caregiver phone, a request only from a caregiver", async (t: TestContext) => {
+  const inbox = await startCoordinatorInbox(t);
+  const coordinator = new CoordinatorLink({ port: inbox.port, log: () => undefined });
+  const handoff = new PhoneHandoff({
+    coordinator,
+    requests: new PhoneRequests(),
+    log: () => undefined,
+  });
+  const watch = {
+    heart_rate: [{ measured_at: "2026-11-14T03:12:45Z", bpm: 72 }],
+    sleep: [],
+    steps: [{ measured_at: "2026-11-14T03:00:00Z", steps_today: 1834 }],
+  };
+  for (const role of ["caregiver", "resident"] as const) {
+    const deviceId = `${role}-phone`;
+    const opened = { deviceId, role, type: "watch_data", plaintext: watch };
+    assert.equal((await handoff.forward(opened, () => paired)).status, 202);
+    const posted = inbox.received.at(-1);
+    assert.equal(posted?.path, "/v1/watch-data");
+    assert.deepEqual(posted.body, {
+      schema_version: 1,
+      type: "watch_data",
+      device_id: deviceId,
+      ...watch,
+    });
+  }
+  const count = inbox.received.length;
+  const ask = { request_id: "r1", kind: "check_now", text: "" };
+  const fromResident = {
+    deviceId: "resident-phone",
+    role: "resident",
+    type: "request",
+    plaintext: ask,
+  } as const;
+  const refused = await handoff.forward(fromResident, () => paired);
+  assert.equal(refused.status, 400);
+  assert.match(JSON.stringify(refused.body), /"unsupported_type"/);
+  assert.equal(inbox.received.length, count);
+});
+
 test("the intakes reject a broken field by name, answer 503 without a home, and report unlisted fields", async (t: TestContext) => {
   const stateDir = await makeTempDir();
   t.after(() => rm(stateDir, { recursive: true, force: true }));

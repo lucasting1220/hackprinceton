@@ -168,9 +168,20 @@ test("Layer 4's replies, reports and status reach phones over the LAN, and phone
     steps: watch.steps,
   });
 
-  // Each role sends only its own type; a malformed request never reaches the coordinator.
+  // A caregiver phone in resident mode sends watch data too, under its own device ID.
+  const carerWatched = await caregiver.send("watch_data", watch);
+  assert.equal(carerWatched.status, 202);
+  assert.deepEqual(inbox.received.at(-1)?.body, {
+    schema_version: 1,
+    type: "watch_data",
+    device_id: caregiver.deviceId,
+    heart_rate: [{ measured_at: heart.measured_at, bpm: heart.bpm }],
+    sleep: watch.sleep,
+    steps: watch.steps,
+  });
+
+  // A resident never sends a request; a malformed request never reaches the coordinator.
   const count = inbox.received.length;
-  assert.equal(errorCode(await caregiver.send("watch_data", watch)), "unsupported_type");
   assert.equal(
     errorCode(await resident.send("request", { ...ask, request_id: "r-2" })),
     "unsupported_type",

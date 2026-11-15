@@ -265,10 +265,13 @@ export interface PhoneHandoffOptions {
   readonly log?: (line: string) => void;
 }
 
-/** The phone → home types the handoff carries, and the one role that sends each (phone-hub.md §3). */
-export const HANDOFF_TYPES: Readonly<Record<string, OpenedRequest["role"]>> = {
-  request: "caregiver",
-  watch_data: "resident",
+/**
+ * The phone → home types the handoff carries, and the roles that may send each (phone-hub.md §3):
+ * a caregiver phone in resident mode keeps its caregiver role, so it may send `watch_data` too.
+ */
+export const HANDOFF_TYPES: Readonly<Record<string, readonly OpenedRequest["role"][]>> = {
+  request: ["caregiver"],
+  watch_data: ["resident", "caregiver"],
 };
 
 /** Carries an opened `request` or `watch_data` to the coordinator, and answers the phone. */
@@ -290,7 +293,7 @@ export class PhoneHandoff {
    */
   async forward(request: OpenedRequest, phone: () => PhoneLookup): Promise<Reply> {
     const { type, deviceId, role, plaintext } = request;
-    if (!Object.hasOwn(HANDOFF_TYPES, type) || HANDOFF_TYPES[type] !== role) {
+    if (!Object.hasOwn(HANDOFF_TYPES, type) || !HANDOFF_TYPES[type]?.includes(role)) {
       return REFUSED.unsupportedType;
     }
     if (type === "watch_data") {
