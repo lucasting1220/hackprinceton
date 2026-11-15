@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "listen_port": 7490,
-  "public_url": "https://relay.example.com",
+  "public_url": "https://relay.144-202-5-15.sslip.io",
   "database_file": "/var/lib/debbie-relay/relay.db",
   "stop_file": "/var/lib/debbie-relay/relay.stop",
   "hub_silent_limit_s": 180,
@@ -10,8 +10,14 @@
     "topic": "com.example.debbie",
     "team_id": "TEAMID0000",
     "keys": {
-      "production": { "key_id": "KEYID00001", "key_file": "/etc/debbie-relay/apns-production.p8" },
-      "sandbox": { "key_id": "KEYID00002", "key_file": "/etc/debbie-relay/apns-sandbox.p8" }
+      "production": {
+        "key_id": "KEYID00000",
+        "key_file": "/run/credentials/debbie-relay.service/apns-key.p8"
+      },
+      "sandbox": {
+        "key_id": "KEYID00000",
+        "key_file": "/run/credentials/debbie-relay.service/apns-key.p8"
+      }
     }
   }
 }
