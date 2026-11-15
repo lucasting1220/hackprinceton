@@ -18,7 +18,7 @@
       "max_per_second": 15
     },
     "/mic": {
-      "reader": "Layer 4, through layer2.feed(\"mic\")",
+      "reader": "Layer 4, through layer2.feed(\"mic\"); Layer 1 live-view sender (one-way audio)",
       "message": "captured_at_us + pcm_s16le",
       "sample_rate": 16000,
       "channels": 1,
