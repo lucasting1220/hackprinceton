@@ -1,31 +1,34 @@
 """Tests for the fake Layer 2 and the sample-readings script that runs on it."""
 
 import logging
-from datetime import UTC, datetime
 
 import pytest
 import watch_demo
 from fake_layer2_client import FakeLayer2
 
-from layer3.watch_receiver import WatchReceiver
+from layer2.job_client import Layer2Error
 
 
-def test_stub_hands_over_batches_records_items_and_says_it_is_a_stub(
+def test_stub_hands_over_batches_keeps_messages_and_says_it_is_a_stub(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    layer2 = FakeLayer2([{"heart_rate": [{"measured_at": "2026-11-14T03:12:45Z", "bpm": 72}]}])
+    batch = {"heart_rate": [{"measured_at": "2026-11-14T03:12:45Z", "bpm": 72}]}
+    layer2 = FakeLayer2([batch])
+    message: dict[str, object] = {"type": "watch_reading"}
 
     with caplog.at_level(logging.INFO):
-        batch = layer2.receive("watch-data")
+        assert layer2.receive("watch-data") == batch
         assert layer2.receive("watch-data") is None
-        [item] = WatchReceiver().receive(batch, datetime(2026, 11, 14, 12, 0, tzinfo=UTC))
-        layer2.publish_watch(item)
+        layer2.pass_on("watch-readings", message)
+        layer2.nobody_takes_readings = True
+        with pytest.raises(Layer2Error):
+            layer2.pass_on("watch-readings", message)
 
-    assert layer2.published == [item]
+    assert layer2.passed_on == [message]
     stub_lines = [
         record.getMessage() for record in caplog.records if record.name == "fake_layer2_client"
     ]
-    assert len(stub_lines) == 3
+    assert len(stub_lines) == 4
     assert all("STUB" in line for line in stub_lines)
 
 
@@ -37,5 +40,5 @@ def test_script_passes_on_every_sample_reading_but_the_repeat() -> None:
         if isinstance(readings, list)
     )
 
-    assert len(watch_demo.run().published) == sent - 1
+    assert len(watch_demo.run().passed_on) == sent - 1
     assert watch_demo.main() == 0

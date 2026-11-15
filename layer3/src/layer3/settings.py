@@ -91,3 +91,12 @@ WATCH_LOWEST_COUNT: int = 0
 # LATEST_SIGNAL_TIME in layer4/src/layer4/settings.py, so Layer 4 accepts each reading.
 EARLIEST_READING_TIME: datetime = datetime(1970, 1, 2, tzinfo=UTC)
 LATEST_READING_TIME: datetime = datetime(2999, 12, 31, tzinfo=UTC)
+
+# The watch_data job (contracts/watch-reading.json). How long one receive("watch-data") waits for
+# a batch (Layer 2 allows at most 30 s), how long to pause after Layer 2 could not be reached
+# before asking again, the schema_version of each reading passed on, and how many readings of
+# one batch that Layer 2 could not pass on are logged one by one.
+WATCH_RECEIVE_WAIT_SECONDS: float = 25.0
+WATCH_RECEIVE_RETRY_SECONDS: float = 1.0
+WATCH_READING_SCHEMA_VERSION: int = 1
+WATCH_PASS_ON_FAILURES_LOGGED_PER_BATCH: int = 5

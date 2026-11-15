@@ -73,13 +73,13 @@ Proposals for each layer's owner to agree.
 
 **Layer 3 to Layer 2.** Each Layer 3 job is a folder with its script and a short description file (name, start command, kind, memory needed, sensor needed), as in the Layer 2 doc. The capture job reads which camera and mic to open from the `camera` and `mic` fields of the laptop's `worker.json`; a `null` field means there is none or the resident declined it. Device state (up, down, declined) is reported in the job's state, which Layer 2 includes in its 2-second status.
 
-**Layer 3 to Layer 4.** Layer 4 receives each feed through Layer 2's `feed(name)` call, wherever its job is running.
+**Layer 3 to Layer 4.** Layer 4 receives `camera` and `mic` through Layer 2's `feed(name)` call, wherever its job is running. Watch readings take a different path: Layer 3's `watch_data` job passes each new reading on with `layer2.pass_on("watch-readings", message)`, one `contracts/watch-reading.json` message per reading, and Layer 4 gets it from `layer2.receive("watch-readings")`. A reading Layer 2 cannot pass on is logged and dropped.
 
 | Feed | Each item carries |
 |---|---|
 | `camera` | one frame, 640 by 480, and `captured_at` |
 | `mic` | a short chunk of audio at 16 kHz in one channel, and `captured_at` |
-| `watch` | one reading (below), plus `last_received_at`, the time a new reading last arrived on the feed |
+| `watch-readings` | one reading (below), plus `last_received_at`, the time a new reading of any kind last arrived |
 
 Watch readings:
 

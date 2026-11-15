@@ -1,0 +1,8 @@
+{
+  "schema_version": 1,
+  "name": "watch_data",
+  "start_command": ["uv", "run", "--project", "../..", "python", "-m", "layer3.watch_job"],
+  "kind": "always-on",
+  "memory_gb": 0.2,
+  "sensor": null
+}
