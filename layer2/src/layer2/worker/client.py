@@ -26,6 +26,7 @@ from websockets.exceptions import ConnectionClosed, InvalidHandshake, InvalidURI
 
 from layer2 import settings
 from layer2.contracts import (
+    Deliver,
     Hello,
     MissingItem,
     Reply,
@@ -50,7 +51,9 @@ WorkerState = Literal["connected", "rejected", "disconnected"]
 Report = Callable[[WorkerState, list[MissingItem]], Awaitable[None]]
 Outcome = Literal["stopped", "rejected"]
 
-_Order = TypeAdapter[StartMessage | StopMessage | Reply](StartMessage | StopMessage | Reply)
+_Order = TypeAdapter[StartMessage | StopMessage | Reply | Deliver](
+    StartMessage | StopMessage | Reply | Deliver
+)
 _Welcome = TypeAdapter[WelcomeAccepted | WelcomeRejected](WelcomeAccepted | WelcomeRejected)
 _GB = 2**30
 # ValueError: websockets raises it for a URL with a bad port; Layer 1 may fix the file later.
@@ -177,6 +180,7 @@ async def _session(
             await tell("connected", missing)
             if relay is not None:
                 relay.attach(connection)
+                await relay.resubscribe()
             try:
                 await _first_to_end(
                     _send_status(connection, config_path, missing, tell, jobs),
@@ -257,6 +261,9 @@ async def _receive_orders(
         if isinstance(order, Reply):
             if relay is not None:
                 relay.resolve(order)
+        elif isinstance(order, Deliver):
+            if relay is not None:
+                relay.deliver(order)
         elif jobs is None:
             log.warning("L2 worker: this worker runs no jobs; ignored %s %s", order.type, order.job)
         elif isinstance(order, StartMessage):
