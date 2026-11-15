@@ -6,13 +6,23 @@ All methods run on the coordinator's one event loop, so nothing here locks.
 import logging
 import time
 from collections import deque
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Literal
 
 from layer2 import settings
-from layer2.contracts import ApiState, Hello, Laptop, MissingItem, StatusMessage
+from layer2.contracts import (
+    ApiState,
+    DroppedWork,
+    Hello,
+    JobEntry,
+    JobStatus,
+    Laptop,
+    MissingItem,
+    StatusMessage,
+)
+from layer2.coordinator.plan import LaptopView
 
 log = logging.getLogger(__name__)
 
@@ -29,6 +39,8 @@ class _Entry[C]:
     sensors: list[Sensor]
     last_status_at: datetime
     missing: list[MissingItem] = field(default_factory=list)
+    jobs: list[JobStatus] = field(default_factory=list)
+    memory_free_gb: float = 0.0
     connection: C | None = None
     replacements: deque[float] = field(default_factory=deque)
     warned_at: float | None = None
@@ -59,8 +71,8 @@ class Registry[C]:
         """Register an accepted hello. Returns the laptop's previous connection, to be closed.
 
         Only status messages advance last_status_at of a known laptop, so one that keeps
-        rejoining without ever reporting still goes quiet. Its missing list is cleared until
-        the new connection reports.
+        rejoining without ever reporting still goes quiet. Its missing and jobs lists are
+        cleared until the new connection reports.
         """
         entry = self._laptops.get(node_id)
         if entry is None:
@@ -75,6 +87,7 @@ class Registry[C]:
         entry.display_name = hello.display_name
         entry.sensors = _sensor_kinds(hello)
         entry.missing = []
+        entry.jobs = []
         entry.connection = connection
         if previous is not None:
             self._count_replacement(node_id, entry)
@@ -111,13 +124,39 @@ class Registry[C]:
         entry = self._laptops[node_id]
         entry.last_status_at = self._now()
         entry.missing = list(message.missing)
+        entry.jobs = list(message.jobs)
+        entry.memory_free_gb = message.memory_free_gb
 
     def leave(self, node_id: str, connection: C) -> None:
         """The connection closed. The laptop stays listed with its last status time."""
         if self.is_current(node_id, connection):
             self._laptops[node_id].connection = None
 
-    def api_state(self) -> ApiState:
+    def connected(self) -> list[LaptopView]:
+        """Laptops with a current connection, for the planner. Memory is 0 until the first
+        status arrives."""
+        return [
+            LaptopView(
+                node_id=node_id,
+                sensors=frozenset(entry.sensors),
+                memory_free_gb=entry.memory_free_gb,
+            )
+            for node_id, entry in self._laptops.items()
+            if entry.connection is not None
+        ]
+
+    def known(self) -> set[str]:
+        return set(self._laptops)
+
+    def job_reports(self) -> dict[str, list[JobStatus]]:
+        """The latest jobs each connected laptop reported."""
+        return {
+            node_id: list(entry.jobs)
+            for node_id, entry in self._laptops.items()
+            if entry.connection is not None
+        }
+
+    def api_state(self, dropped: Iterable[DroppedWork] = ()) -> ApiState:
         return ApiState(
             schema_version=1,
             updated_at=self._now(),
@@ -131,6 +170,10 @@ class Registry[C]:
                 )
                 for node_id, entry in self._laptops.items()
             ],
-            jobs=[],
-            dropped=[],
+            jobs=[
+                JobEntry(job=job.job, node_id=node_id, state=job.state)
+                for node_id, entry in self._laptops.items()
+                for job in entry.jobs
+            ],
+            dropped=list(dropped),
         )

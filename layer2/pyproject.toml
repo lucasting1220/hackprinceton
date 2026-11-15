@@ -11,6 +11,10 @@ dependencies = [
     "websockets>=14",
 ]
 
+[project.scripts]
+layer2-coordinator = "layer2.coordinator.main:run"
+layer2-worker = "layer2.worker.main:run"
+
 [dependency-groups]
 dev = [
     "httpx>=0.28",

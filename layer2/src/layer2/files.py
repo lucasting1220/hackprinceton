@@ -109,7 +109,14 @@ def _mode_for(path: Path) -> int:
         return _NEW_FILE_MODE
 
 
-async def wait_for_stop_file(path: Path, poll_s: float = settings.STOP_POLL_S) -> None:
-    """Return once the stop file exists."""
-    while not path.exists():
-        await asyncio.sleep(poll_s)
+async def wait_for_stop_file(path: Path, poll_s: float | None = None) -> None:
+    """Return once the stop file exists. Polls every STOP_POLL_S (read on each call). An
+    error checking the file (Windows reports access denied while another program has it
+    open) is not a stop request: keep polling."""
+    while True:
+        try:
+            if path.exists():
+                return
+        except OSError:
+            pass
+        await asyncio.sleep(settings.STOP_POLL_S if poll_s is None else poll_s)

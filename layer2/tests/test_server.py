@@ -17,6 +17,7 @@ from layer2.coordinator.server import (
     HELLO_TIMEOUT,
     REJECTED,
     REPLACED,
+    SERVER_ERROR,
     create_control_app,
     create_dashboard_app,
 )
@@ -58,7 +59,7 @@ def control(config: CoordinatorConfig, registry: Registry[WebSocket]) -> TestCli
 
 @pytest.fixture
 def dashboard(registry: Registry[WebSocket]) -> TestClient:
-    return TestClient(create_dashboard_app(registry))
+    return TestClient(create_dashboard_app(registry), base_url="http://127.0.0.1")
 
 
 def node_id() -> str:
@@ -145,8 +146,9 @@ def test_unreadable_accepted_workers_closes_without_a_welcome(
     Path(config.accepted_workers_file).write_text("{", encoding="utf-8")
     with control.websocket_connect("/ws") as socket:
         socket.send_text(json.dumps(HELLO))
-        with pytest.raises(WebSocketDisconnect):
+        with pytest.raises(WebSocketDisconnect) as closed:
             socket.receive_text()
+        assert closed.value.code == SERVER_ERROR
 
 
 def test_tokens_never_reach_the_log(control: TestClient, caplog: pytest.LogCaptureFixture) -> None:

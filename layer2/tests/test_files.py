@@ -220,3 +220,28 @@ def test_write_keeps_the_target_permissions(tmp_path: Path) -> None:
     target.chmod(0o640)
     write_json_atomic(target, STATUS)
     assert stat.S_IMODE(target.stat().st_mode) == 0o640
+
+
+def test_stop_file_wait_survives_access_errors(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    stop = tmp_path / "worker.stop"
+    real_exists = Path.exists
+    failures = [PermissionError("busy"), PermissionError("busy")]
+
+    def flaky_exists(self: Path, *, follow_symlinks: bool = True) -> bool:
+        if self == stop and failures:
+            raise failures.pop()
+        return real_exists(self, follow_symlinks=follow_symlinks)
+
+    monkeypatch.setattr(Path, "exists", flaky_exists)
+
+    async def scenario() -> None:
+        waiter = asyncio.create_task(wait_for_stop_file(stop, poll_s=0.01))
+        await asyncio.sleep(0.1)
+        assert not waiter.done()
+        stop.touch()
+        await asyncio.wait_for(waiter, timeout=1)
+
+    asyncio.run(scenario())
+    assert not failures
