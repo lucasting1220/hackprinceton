@@ -283,6 +283,13 @@ test("the same alert twice, even at once, is saved once; its update is saved too
   );
 });
 
+test("a retry with the same alert_id and update is the same alert, even if its text differs", async (t) => {
+  const s = await serve(t);
+  assert.equal((await s.post(ALERT)).statusCode, 202);
+  assert.equal((await s.post({ ...ALERT, body: "Text from a second try" })).statusCode, 202);
+  assert.equal(s.saved().length, 1);
+});
+
 test("logs never hold the title or the body", async (t) => {
   const s = await serve(t);
   await s.post(ALERT);

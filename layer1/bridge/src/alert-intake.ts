@@ -6,10 +6,10 @@
  * The bridge adds nothing and decides nothing: kind, severity and text go to the phone as sent.
  * Logs name the alert_id, kind, severity and msg_id, never the title or the body.
  */
-import { createHash, type KeyObject } from "node:crypto";
+import type { KeyObject } from "node:crypto";
 import type { Home } from "./home.ts";
 import { HomeError, readCoordinatorClientPort, readHomeSecrets } from "./home.ts";
-import { type AlertFields, canonicalJson, sealAlert } from "./home-messages.ts";
+import { type AlertFields, sealAlert } from "./home-messages.ts";
 import { type Html, html } from "./html.ts";
 import { Outbox, OutboxError } from "./outbox.ts";
 import { CoordinatorLink, PhoneHandoff, PhoneRequests } from "./phone-handoff.ts";
@@ -18,9 +18,8 @@ import type { MachineReply, PageRoute } from "./setup-server.ts";
 import { utcSeconds } from "./wire.ts";
 
 /**
- * The alert's fields, exactly those Layer 4 sends: its Alert dataclass
- * (layer4/src/layer4/alerts.py) plus `type` and `schema_version`, as in its proposed alert.json
- * (layer4/CONTRACT-DRAFTS.md §1). There is no shared contracts/alert.json; this list is the intake's.
+ * The alert's fields, exactly contracts/alert.json's: Layer 4's Alert dataclass
+ * (layer4/src/layer4/alerts.py) plus `type` and `schema_version`.
  */
 export const ALERT_FIELDS = [
   "type",
@@ -216,7 +215,9 @@ export class AlertIntake {
     }
     this.#noteUnknown(parsed.unknownFields);
     const { alert } = parsed;
-    const hash = createHash("sha256").update(canonicalJson(alert), "utf8").digest("hex");
+    // contracts/README.md: a repeated alert_id with the same update value is the same alert, so a
+    // retry whose text differs is not saved twice.
+    const hash = `${alert.alert_id}\u0000${String(alert.update)}`;
     const earlier = this.#saved.get(hash);
     if (earlier !== undefined) {
       try {
