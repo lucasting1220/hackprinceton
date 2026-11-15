@@ -1,7 +1,15 @@
 import * as crypto from "node:crypto";
 import { mkdir } from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
-import { errorMessage, JsonFileError, removePath, writeFileWhole } from "./json-file.ts";
+import {
+  errorMessage,
+  JsonFileError,
+  readFileBytes,
+  readJsonFile,
+  removePath,
+  writeFileWhole,
+} from "./json-file.ts";
 import * as settings from "./settings.ts";
 
 /** What later steps need to know about the home. It never holds the home key or the private key. */
@@ -16,6 +24,12 @@ export interface Home {
   readonly acceptedWorkersFile: string;
   readonly stopFile: string;
   readonly coordinatorStateDir: string;
+}
+
+/** The home's secrets, as key objects that print no key material. Never log them anyway. */
+export interface HomeSecrets {
+  readonly homeKey: crypto.KeyObject;
+  readonly hubPrivateKey: crypto.KeyObject;
 }
 
 export interface CreateHomeOptions {
@@ -52,9 +66,43 @@ function locked<T>(operation: () => Promise<T>): Promise<T> {
   return result;
 }
 
+/** The state folder: `--state-dir`, which must be absolute, or else this system's default. */
+export function resolveStateDir(
+  stateDirOption: string | undefined,
+  platform = process.platform,
+  env = process.env,
+  homeDir = os.homedir(),
+): string {
+  const paths = platform === "win32" ? path.win32 : path.posix;
+  const defaults: Partial<Record<NodeJS.Platform, string>> = {
+    darwin: paths.join(homeDir, ...settings.MACOS_APP_DATA_DIRS, settings.STATE_DIR_NAME),
+    win32: paths.join(env[settings.WINDOWS_APP_DATA_ENV] ?? "", settings.STATE_DIR_NAME),
+  };
+  const stateDir = stateDirOption ?? defaults[platform] ?? "";
+  // Layer 2 does not count a Windows path without a drive or share, such as \Debbie, as absolute.
+  const driveless = platform === "win32" && paths.parse(stateDir).root.length === 1;
+  if (!paths.isAbsolute(stateDir) || driveless) {
+    throw new Error("the state folder must be an absolute path: pass --state-dir <folder>");
+  }
+  return paths.normalize(stateDir);
+}
+
 /** Creates the home in `stateDir`. Throws HomeExistsError if one exists: a home is never replaced. */
 export function createHome(stateDir: string, options: CreateHomeOptions = {}): Promise<Home> {
   return locked(() => create(stateDir, options));
+}
+
+/**
+ * The home in `stateDir`, or undefined when there is none. Unreadable or invalid files throw a
+ * HomeError naming the file ("home files unreadable"); this never creates a home.
+ */
+export function loadHome(stateDir: string): Promise<Home | undefined> {
+  return locked(() => load(stateDir));
+}
+
+/** Reads the home key and the hub's private key, for later steps. Never log what it returns. */
+export function readHomeSecrets(stateDir: string): Promise<HomeSecrets> {
+  return locked(() => readSecrets(filesIn(stateDir)));
 }
 
 async function create(stateDir: string, options: CreateHomeOptions): Promise<Home> {
@@ -126,6 +174,53 @@ async function undo(written: string[], failure: unknown, stateDir: string, remov
   return new HomeError(`${reason}; its files were removed, so try again`, { cause: failure });
 }
 
+async function load(stateDir: string): Promise<Home | undefined> {
+  const files = filesIn(stateDir);
+  const saved = await readJsonFile(files.home).catch((error: unknown) => {
+    if (error instanceof JsonFileError && error.code === "ENOENT") return undefined;
+    throw unreadable(files.home, error);
+  });
+  if (saved === undefined) return undefined;
+  const config = await readJsonFile(files.coordinatorConfigFile).catch((error: unknown) => {
+    throw unreadable(files.coordinatorConfigFile, error);
+  });
+  field(files.home, saved, "schema_version", (value): value is 1 => value === 1);
+  const home = homeAt(
+    stateDir,
+    field(files.home, saved, "home_id", isString),
+    field(files.home, saved, "hub_public_key", isString),
+    field(files.coordinatorConfigFile, config, "dashboard_port", isPort),
+  );
+  // Layer 2's coordinator follows coordinator.json, so its paths must be this folder's files.
+  for (const [name, value] of Object.entries(coordinatorPaths(home))) {
+    field(files.coordinatorConfigFile, config, name, (found): found is string => found === value);
+  }
+  if (publicKeyOf((await readSecrets(files)).hubPrivateKey) !== home.hubPublicKey) {
+    throw unreadable(files.hubPrivateKey, new Error(`it does not match ${files.home}`));
+  }
+  return home;
+}
+
+async function readSecrets(files: ReturnType<typeof filesIn>): Promise<HomeSecrets> {
+  const homeKey = await readKey(files.homeKey, (bytes) => {
+    if (bytes.length !== settings.HOME_KEY_BYTES) throw new RangeError("wrong length");
+    return crypto.createSecretKey(bytes);
+  });
+  const hubPrivateKey = await readKey(files.hubPrivateKey, (der) =>
+    crypto.createPrivateKey({ key: der, format: "der", type: "pkcs8" }),
+  );
+  return { homeKey, hubPrivateKey };
+}
+
+/** Reads a key file into a key object. A failure names the file, never its bytes. */
+async function readKey(file: string, toKey: (bytes: Buffer) => crypto.KeyObject) {
+  try {
+    return toKey(await readFileBytes(file));
+  } catch (error) {
+    throw unreadable(file, error);
+  }
+}
+
 /** Every path in the state folder. */
 function filesIn(stateDir: string) {
   const at = (...names: string[]) => path.join(stateDir, ...names);
@@ -158,4 +253,19 @@ function publicKeyOf(privateKey: crypto.KeyObject): string {
   return crypto.createPublicKey(privateKey).export({ format: "jwk" }).x ?? "";
 }
 
+/** Field `name` of the JSON object read from `file`, which must pass `ok`. */
+function field<T>(file: string, data: unknown, name: string, ok: (v: unknown) => v is T): T {
+  const value: unknown = typeof data === "object" && data !== null ? Reflect.get(data, name) : null;
+  if (!ok(value)) throw unreadable(file, new Error(`${name} is missing or invalid`));
+  return value;
+}
+
+function unreadable(file: string, error: unknown): HomeError {
+  const reason = error instanceof JsonFileError ? error.message : `${file}: ${errorMessage(error)}`;
+  return new HomeError(`home files unreadable: ${reason}`, { cause: error });
+}
+
+const isString = (value: unknown): value is string => typeof value === "string";
+const isPort = (value: unknown): value is number =>
+  typeof value === "number" && Number.isInteger(value) && value > 0 && value <= 0xffff;
 const json = (data: unknown): string => `${JSON.stringify(data, null, 2)}\n`;
