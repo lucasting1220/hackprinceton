@@ -26,6 +26,27 @@ FALL_SIGNAL_WINDOW = timedelta(seconds=1)
 FALL_FRAME_MAX_AGE = timedelta(seconds=2)
 FALL_DETECTION_GAP = timedelta(seconds=5)
 
+# Reading body pose. Lengths are in fractions of the frame height. The torso is the line from
+# mid-hip to mid-shoulder; its angle is measured from straight up. Lying down means the torso
+# tilts at least the lying angle, or looks shorter than the foreshortened ratio of its last
+# upright length (lying toward or away from the camera). Sitting means the hips are within the
+# sitting ratio of a torso length of the knees, vertically.
+POSE_MIN_VISIBILITY = 0.5
+POSE_MIN_TORSO = 0.02
+POSE_UPRIGHT_ANGLE_DEG = 30.0
+POSE_LYING_ANGLE_DEG = 60.0
+POSE_FORESHORTENED_RATIO = 0.5
+POSE_SITTING_HIP_KNEE_RATIO = 0.35
+
+# Falls from body pose. A fall is scored once the resident has been lying for the settle time:
+# by how far the hips dropped from the last upright moment, in upright torso lengths (full
+# marks at the full drop), and by how long that took (full marks at or under the fast descent,
+# none at or over the slow one). One fall gives one score; the next needs the resident upright.
+FALL_SETTLE = timedelta(seconds=0.5)
+FALL_HIP_DROP_FULL = 1.0
+FALL_DESCENT_FAST = timedelta(seconds=1.2)
+FALL_DESCENT_SLOW = timedelta(seconds=3)
+
 # Alert rewrite: how much of the event log the quick model sees (proposed in the Layer 4 doc),
 # and the longest rewrite the phone is sent; a longer one is dropped and the template stands.
 REWRITE_CONTEXT = timedelta(minutes=10)
