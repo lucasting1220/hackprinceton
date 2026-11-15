@@ -7,8 +7,9 @@
  *   open: no file ───────▶ a new outbox with a new epoch
  *         valid ─────────▶ loaded; messages past retention dropped
  *         unreadable ────▶ set aside as outbox.json.unreadable-<UTC time>, a new epoch, reported
- *   append: drop by age and count, add ─▶ write the whole file ─ok─▶ swap in memory ─▶ the seq
- *                                                              └─fails─▶ memory unchanged, rejects
+ *   append: drop by age and count, and a latest-only type's older message, add
+ *           ─▶ write the whole file ─ok─▶ swap in memory ─▶ the seq
+ *                                   └─fails─▶ memory unchanged, rejects
  */
 import { randomBytes } from "node:crypto";
 import { rename } from "node:fs/promises";
@@ -138,7 +139,12 @@ export class Outbox implements MessageSource {
       const seq = this.#state.nextSeq;
       const entry = { seq, created_at: utcSeconds(new Date(now)), wrapper };
       const kept = this.#kept(this.#state, now);
-      const next = { ...kept, nextSeq: seq + 1, messages: [...kept.messages, entry] };
+      // Live status is latest-only (phone-hub.md §3): a new one replaces the one before.
+      const latestOnly = settings.LATEST_ONLY_TYPES.includes(wrapper.type);
+      const older = kept.messages.filter(
+        (item) => !latestOnly || item.wrapper.type !== wrapper.type,
+      );
+      const next = { ...kept, nextSeq: seq + 1, messages: [...older, entry] };
       const saved = this.#kept(next, now);
       const file = {
         schema_version: 1,

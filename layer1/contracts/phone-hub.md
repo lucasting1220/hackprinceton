@@ -82,19 +82,24 @@ The hub and the relay check the shape before anything else: `v` is 1; `type` mat
 | ------------------- | --------------------------------------------- | --------- | ------------------------------------------------------------ | ------------------------ |
 | `alert`             | hub → caregivers                              | `home`    | `alert_id, kind, severity, detected_at, title, body, update` | step 4                   |
 | `heartbeat`         | hub → caregivers, through the relay only      | `home`    | none                                                         | step 5                   |
-| `care_status`       | hub → caregivers                              | `home`    | Layer 4's live status                                        | later                    |
-| `reply`             | hub → one phone (`to`)                        | device ID | `request_id, title, body`                                    | later                    |
+| `care_status`       | hub → caregivers                              | `home`    | `activity, heart_rate, sleep, steps, no_heart_data`          | the handoff              |
+| `reply`             | hub → one phone (`to`)                        | device ID | `request_id, title, body`                                    | the handoff              |
 | `fetch`             | phone → hub, LAN only                         | device ID | `after, limit` (§4.5)                                        | step 2, filled in step 4 |
 | `unpair`            | phone → hub                                   | device ID | none                                                         | step 2                   |
-| `request`           | caregiver phone → hub                         | device ID | `request_id, kind` (`ask` or `check_now`), `text`            | later                    |
+| `request`           | caregiver phone → hub                         | device ID | `request_id, kind` (`ask` or `check_now`), `text`            | the handoff              |
 | `laptop_approval`   | caregiver phone → hub                         | device ID | `join_id, laptop_pub, name, approve`                         | step 3 (§6)              |
 | `live_view_setting` | resident phone → hub                          | device ID | `enabled`                                                    | later                    |
 | `live_view_request` | caregiver phone → hub, through the relay only | device ID | `request_id, viewer_client_id`                               | step 7                   |
+| `report`            | hub → caregivers                              | `home`    | `report_id, date, title, body`                               | the handoff              |
+| `watch_data`        | resident phone → hub, LAN only                | device ID | `heart_rate, sleep, steps` (below)                           | the handoff              |
 
 - `alert` carries Layer 4's fields (the doc's "Handoff to Layer 4"), and the hub passes them on unchanged, including Layer 4's `kind` and `severity` values, except `detected_at`, which it rewrites in UTC whole seconds with `Z` (§1). An alert with `update: true` replaces the alert with the same `alert_id`.
 - `heartbeat` tells the relay the home is reachable, every minute (every 20 seconds for the demo). It carries no judgement about monitoring and never enters the outbox, so a LAN page never holds one.
-- `care_status` is the live-status type, Layer 4's `POST /v1/status`. Its fields are set when the step that carries live status lands. The daily report gets its type in its own step.
-- Watch data (heart rate, sleep and steps) goes from a phone in resident mode to the hub on the LAN only, and the relay never carries it. Step 8 names its type, path and fields.
+- `care_status` is the live-status type, Layer 4's `POST /v1/status`, and is latest-only: the outbox keeps only the newest. `activity`, `heart_rate`, `sleep` and `steps` are each a JSON object or `null`, passed on as Layer 4 sends them, each with the time its reading was taken so the app can show its age; `no_heart_data` is true or false. The hub checks only that `heart_rate`, when present, has a whole-number `bpm`, because the app drops a status without one. The app reads `heart_rate` as `{bpm, at, trend}`, so Layer 4's live status should use those names inside `heart_rate`.
+- `reply` is Layer 4's answer to a `request` (`POST /v1/replies`). The hub remembers which phone sent each `request_id` for an hour, in memory, and seals the reply with that phone's own key with `to` its device ID, so no other phone fetches it. A reply to a request the hub doesn't remember (it restarted, or the phone was removed) gets `400`. The app doesn't decode `reply` yet: it opens every fetched message with the home key, so it drops a reply until it opens `to` messages with its own key.
+- `report` is the daily report (`POST /v1/reports`): `date` is the report's day, `YYYY-MM-DD`. The app doesn't decode `report` yet, and ignores it.
+- `request` goes to Layer 2's coordinator as `POST /v1/requests` with `{request_id, device_id, kind, text}`. `request_id` is an ID (§3's rule); `text` is at most 1,000 characters, at least one that isn't a space for `ask`, and may be `""` for `check_now`.
+- `watch_data` (heart rate, sleep and steps) goes from a phone in resident mode to the hub on the LAN only, and the relay never carries it. Its plaintext holds three lists, each possibly empty: `heart_rate: [{measured_at, bpm}]`, `sleep: [{night_of, asleep_minutes, bedtime_at, wake_at, interruptions}]` and `steps: [{measured_at, steps_today}]`, with times in UTC (§1), `night_of` a `YYYY-MM-DD` date, `bpm` and `asleep_minutes` numbers of at least 0, and `interruptions` and `steps_today` whole numbers of at least 0. The hub passes the rows on with only these fields, as `POST /v1/watch-data` with `device_id` added. The app today sends `heart_rate` with `{samples: [{t, bpm}]}` to `POST /v1/lan/heart-rate`, which gets `404`; it moves to `watch_data` on `/v1/lan/commands`.
 - Gone for good: `ack` (coherence decision 17: alerts have no acknowledge or false-alarm action), the `monitoring` type, and the heartbeat's monitoring object ("monitoring degraded" is an ordinary Layer 4 alert, decision 15).
 
 ## 4. LAN gateway (port 7480)
@@ -164,8 +169,9 @@ At Confirm the hub seals the bundle with the phone key (`kid` `pair`, associated
 7. Then the type, by path:
    - `fetch` on `/v1/lan/messages` gets the page (§4.5).
    - `unpair` on `/v1/lan/commands`: the hub marks the phone removed and answers `202 {"v":1,"accepted":true}`.
+   - `request` from a caregiver phone and `watch_data` from a resident phone, on `/v1/lan/commands`, go to Layer 2's coordinator on `127.0.0.1` at `coordinator.json`'s `client_port`, with a 2-second time limit. The hub answers `202 {"v":1,"accepted":true}` once the coordinator answers 202, `503 no_job` when it answers 503 (no job takes that kind now), and `503 coordinator_down` when it can't be reached in time or answers anything else. The other role's type gets `400 unsupported_type`, and a malformed plaintext `400 bad_request`.
    - `laptop_approval` on `/v1/lan/commands` goes to Add a laptop (§6.5).
-   - `request` and `live_view_setting` on `/v1/lan/commands` get `501 not_supported` until the step that builds each.
+   - `live_view_setting` on `/v1/lan/commands` gets `501 not_supported` until the step that builds it.
    - Anything else gets `400 unsupported_type`: `ack`, an unknown type, `fetch` on `/v1/lan/commands`, a command on `/v1/lan/messages`, or a type that travels only through the relay.
 
 Checks 2 to 7 also run for commands that reach the hub through the relay (§5), with check 7 as for `/v1/lan/commands` and one memory of message IDs per phone, so the hub answers a command the same way on either route and a request can't be replayed by switching routes.
@@ -183,7 +189,7 @@ The `fetch` plaintext carries `after`, a cursor string or `null`, and `limit`, a
 
 ### 4.6 Statuses and error codes
 
-On `/v1/lan/messages` and `/v1/lan/commands`, 403 means only that the phone is unknown or removed, because the app reads any 403 there as "This iPhone was removed from the home". A repeat is 409, a type that a later step adds is 501, and any other fault the hub finds in a request that passed the HTTP rules (§4) is 400. Every error carries the §1 error body except 408.
+On `/v1/lan/messages` and `/v1/lan/commands`, 403 means only that the phone is unknown or removed, because the app reads any 403 there as "This iPhone was removed from the home". A repeat is 409, a type that a later step adds is 501, a request the coordinator didn't take is 503, and any other fault the hub finds in a request that passed the HTTP rules (§4) is 400. Every error carries the §1 error body except 408.
 
 | Status | Code                     | Where              | Meaning                                                                                                   |
 | ------ | ------------------------ | ------------------ | --------------------------------------------------------------------------------------------------------- |
@@ -206,7 +212,9 @@ On `/v1/lan/messages` and `/v1/lan/commands`, 403 means only that the phone is u
 | 413    | `too_large`              | any POST           | The body is over 16 KiB                                                                                   |
 | 415    | `unsupported_media_type` | any POST           | The body isn't `application/json`                                                                         |
 | 500    | `internal`               | any                | Something unexpected. The hub logs the error's class, never the request                                   |
-| 501    | `not_supported`          | `/v1/lan/commands` | `request` or `live_view_setting`, before the step that builds it                                          |
+| 501    | `not_supported`          | `/v1/lan/commands` | `live_view_setting`, before the step that builds it                                                       |
+| 503    | `no_job`                 | `/v1/lan/commands` | The coordinator has no job that takes this `request` or `watch_data` now; try again later                 |
+| 503    | `coordinator_down`       | `/v1/lan/commands` | The coordinator didn't answer within 2 seconds, or answered something else; try again later               |
 
 ## 5. Relay API
 
@@ -465,7 +473,8 @@ The bridge builds this file. These points differ from the app's `docs/CONTRACTS.
 - **Name.** 1 to 64 Unicode scalars. This file: 1 to 64 characters and at most 1024 UTF-8 bytes, with no control or bidirectional formatting characters (§2.2).
 - **`ack`.** A phone → hub type. This file: gone (coherence decision 17). The hub answers `400 unsupported_type`.
 - **Heartbeat and `monitoring`.** The heartbeat carries a monitoring object, `monitoring` is a type, and the mock puts heartbeats in the LAN page. This file: the heartbeat is `{msg_id, sent_at, type}` and travels through the relay only, so a LAN page never holds one (§3). "Monitoring degraded" is a Layer 4 alert (decision 15).
-- **`heart_rate`.** `POST /v1/lan/heart-rate`. This file: watch data (heart rate, sleep and steps) comes in step 8. Until then that path gets `404 not_found`.
+- **`heart_rate`.** `POST /v1/lan/heart-rate` with `{samples: [{t, bpm}]}`. This file: `watch_data` on `POST /v1/lan/commands`, with heart rate, sleep and steps (§3). `/v1/lan/heart-rate` gets `404 not_found`.
+- **`reply`, `report` and `care_status`.** The app opens every fetched message with the home key and decodes only `alert`, `heartbeat` and `care_status`, as `{heart_rate: {bpm, at, trend}, no_heart_data}`. This file: `reply` is sealed with the asking phone's own key and has `to`, `report` is new, and `care_status` also carries `activity`, `sleep` and `steps` (§3).
 - **Relay.** AWS. This file: the team's Vultr server (§5, step 5). `relay_url` is `""` until remote access is set up.
 - **Unknown severity.** CONTRACTS.md §9 says `warning`, while its §3.1 and the app's `Severity(wire:)` say `urgent`. This file: `urgent` (§9).
 - **`v` in a plaintext.** CONTRACTS.md §1 puts `"v": 1` on every top-level object. This file: a plaintext inside a wrapper has none (§1), as the app and its vectors already do.

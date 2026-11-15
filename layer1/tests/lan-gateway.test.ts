@@ -156,8 +156,12 @@ test("a fetch's after and limit are checked", () => {
 test("unpair removes the phone (202, then 403); later types 501; others 400", async () => {
   const f = fixture();
   const send = f.pair("phone-a");
-  for (const type of ["request", "laptop_approval", "live_view_setting"]) {
+  for (const type of ["laptop_approval", "live_view_setting"]) {
     refused(await f.gateway.commands(send(type)), 501, "not_supported");
+  }
+  // Without a link to the coordinator, the handoff's types get 503, never 501 or 403.
+  for (const type of ["request", "watch_data"]) {
+    refused(await f.gateway.commands(send(type)), 503, "coordinator_down");
   }
   for (const type of ["ack", "fetch", "alert", "live_view_request", "zebra"]) {
     refused(await f.gateway.commands(send(type)), 400, "unsupported_type");

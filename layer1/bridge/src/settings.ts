@@ -319,3 +319,18 @@ export const RELAY_STOP_DEADLINE_MS = 10_000;
 /** How long the relay may take to start listening, and to finish pushes in flight when it stops. */
 export const RELAY_LISTEN_TIMEOUT_MS = 5_000;
 export const RELAY_PUSH_DRAIN_MS = 5_000;
+
+/** How long the bridge waits for Layer 2's coordinator to take a phone's request or watch data. */
+export const COORDINATOR_REQUEST_TIMEOUT_MS = 2_000;
+
+/** A caregiver's `ask` request: its text, in Unicode code points. */
+export const REQUEST_TEXT_MAX_CHARS = 1_000;
+
+/** The bridge remembers which phone sent each request for this long, and at most this many. */
+export const REQUEST_REPLY_WINDOW_MS = 60 * 60_000;
+export const REQUESTS_REMEMBERED = 1_000;
+
+/** A reply's and a daily report's title and body, in Unicode code points. */
+export const HANDOFF_TITLE_MAX_CHARS = 200;
+export const REPLY_BODY_MAX_CHARS = 4_000;
+export const REPORT_BODY_MAX_CHARS = 8_000;
