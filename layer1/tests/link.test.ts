@@ -1,10 +1,22 @@
 import assert from "node:assert/strict";
 import { rm } from "node:fs/promises";
 import { type TestContext, test } from "node:test";
-import { type AcceptedWorker, createHome } from "../bridge/src/home.ts";
+import {
+  type AcceptedWorker,
+  acceptedWorkers,
+  addAcceptedWorker,
+  createHome,
+  removeAcceptedWorker,
+} from "../bridge/src/home.ts";
 import { LanGateway } from "../bridge/src/lan-gateway.ts";
 import { linkReportInterval } from "../bridge/src/laptop.ts";
-import { type LinkReport, LinkHub, sealLinkMessage, sendLinkReport } from "../bridge/src/link.ts";
+import {
+  type LinkReport,
+  LinkHub,
+  sealLinkMessage,
+  sendLinkLeave,
+  sendLinkReport,
+} from "../bridge/src/link.ts";
 import type { LiveViewOpen } from "../bridge/src/live-view-commands.ts";
 import { LINK_CAMERA_REPORT_MS, LINK_REPORT_MS } from "../bridge/src/settings.ts";
 import { startNetworkSide } from "../bridge/src/network-server.ts";
@@ -30,11 +42,18 @@ async function linked(t: TestContext) {
   const phones = { lookup: () => ({ state: "unknown" }) as const, remove: async () => undefined };
   const gateway = new LanGateway({ homeId: home.homeId, phones, log });
   const clock = { now: Date.now() };
+  const removed: string[] = [];
   const hub = new LinkHub({
     home,
     seen: gateway,
     log,
     workers: async () => workers,
+    removeWorker: async (nodeId) => {
+      const at = workers.findIndex((entry) => entry.node_id === nodeId);
+      if (at !== -1) workers.splice(at, 1);
+      return at !== -1;
+    },
+    onRemoved: (nodeId) => removed.push(nodeId),
     now: () => clock.now,
   });
   const side = await startNetworkSide(home.hubPublicKey, hub.routes(), 0);
@@ -62,7 +81,7 @@ async function linked(t: TestContext) {
       REPORT,
       now,
     );
-  return { hub, target, workers, lines, post, sealed, token, clock };
+  return { hub, target, worker, workers, removed, lines, post, sealed, token, clock, home };
 }
 
 test("a report opens on the home laptop's side, and its sealed reply on the worker's", async (t) => {
@@ -111,6 +130,51 @@ const OPEN: LiveViewOpen = {
   signaling_url: `wss://relay.example.com/v1/live-view/sessions/${SESSION}/signal`,
   expires_at: "2999-01-01T00:00:00Z",
 };
+
+test("a link_leave takes the laptop out of the home; a forged one is refused", async (t) => {
+  const l = await linked(t);
+  await sendLinkReport(l.target, REPORT);
+  const forged = { ...l.target, tokenSha256: tokenSha256(joinToken()) };
+  assert.deepEqual(await sendLinkLeave(forged), {
+    ok: false,
+    reason: "the home laptop answered 400",
+  });
+  assert.equal(l.workers.length, 1, "a forged leave removed the laptop");
+  assert.deepEqual(await sendLinkLeave(l.target), { ok: true });
+  assert.deepEqual([l.workers.length, l.removed], [0, ["node-1"]]);
+  assert.equal(l.hub.linked().has("node-1"), false);
+  assert.ok(l.lines.includes("L1 link: node node-1 left the home"));
+  // Leaving again, once the home laptop no longer lists it, counts as told.
+  assert.deepEqual(await sendLinkLeave(l.target), { ok: true });
+  const gone = { ...l.target, hubUrl: "http://127.0.0.1:1" };
+  const unreached = await sendLinkLeave(gone);
+  assert.ok(!unreached.ok && unreached.reason.startsWith("can't reach the home laptop"));
+  const logged = l.lines.join("\n");
+  assert.ok(!logged.includes(l.token) && !logged.includes(l.target.tokenSha256));
+});
+
+test("Remove on the home laptop forgets the laptop and its queued commands", async (t) => {
+  const l = await linked(t);
+  await sendLinkReport(l.target, REPORT);
+  l.hub.queue("node-1", OPEN);
+  assert.equal(await l.hub.remove("node-1"), true);
+  assert.deepEqual([l.workers.length, l.removed], [0, ["node-1"]]);
+  assert.equal(l.hub.linked().has("node-1"), false);
+  l.workers.push(l.worker);
+  assert.deepEqual(await sendLinkReport(l.target, REPORT), { ok: true, commands: [], ignored: 0 });
+  assert.equal(await l.hub.remove("node-2"), false);
+});
+
+test("removeAcceptedWorker drops one entry from accepted-workers.json", async (t) => {
+  const l = await linked(t);
+  const other = { ...l.worker, node_id: "node-2", token_sha256: tokenSha256(joinToken()) };
+  await addAcceptedWorker(l.home, l.worker);
+  await addAcceptedWorker(l.home, other);
+  assert.equal(await removeAcceptedWorker(l.home, "node-1"), true);
+  assert.deepEqual(await acceptedWorkers(l.home), [other]);
+  assert.equal(await removeAcceptedWorker(l.home, "node-1"), false);
+  assert.deepEqual(await acceptedWorkers(l.home), [other]);
+});
 
 test("queued commands ride the laptop's next reply once, and the token is never logged", async (t) => {
   const l = await linked(t);

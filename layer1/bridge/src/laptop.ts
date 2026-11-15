@@ -28,7 +28,15 @@ import {
   type WorkerLauncherOptions,
   workerCheckCommand,
 } from "./launcher.ts";
-import { errorKind, type LinkOutcome, type LinkReport, sendLinkReport } from "./link.ts";
+import {
+  errorKind,
+  type LeaveOutcome,
+  type LinkOutcome,
+  type LinkReport,
+  type LinkTarget,
+  sendLinkLeave,
+  sendLinkReport,
+} from "./link.ts";
 import type { LinkCommand } from "./live-view-commands.ts";
 import {
   checkedName,
@@ -447,6 +455,16 @@ export function findPython(): Promise<string> {
   });
 }
 
+/** Where and as whom a joined laptop speaks over the link (§6.6). */
+function linkTarget(joined: Joined): LinkTarget {
+  return {
+    hubUrl: `http://${joined.hubAddress}`,
+    homeId: joined.homeId,
+    nodeId: joined.nodeId,
+    tokenSha256: joined.tokenSha256,
+  };
+}
+
 /** laptop.json's fields, or undefined if it isn't a joined laptop's. */
 function parseJoined(data: unknown, tokenHash: string): Joined | undefined {
   const fields = isRecord(data) ? data : {};
@@ -564,7 +582,25 @@ export class Laptop {
     return { ok: true };
   }
 
-  /** Show a new code, Join again, Cancel or Leave this home: drops the join and its files. */
+  /**
+   * Leave this home: tells the home laptop, which removes this laptop, then drops the join and its
+   * files whatever the answer. Resolves whether the home laptop was told, or why not.
+   */
+  async leave(): Promise<LeaveOutcome> {
+    const joined = this.#joined;
+    const told =
+      joined === undefined
+        ? ({ ok: true } as const)
+        : await sendLinkLeave(linkTarget(joined), this.#now);
+    const said = told.ok
+      ? "the home laptop was told"
+      : `the home laptop wasn't told: ${told.reason}`;
+    this.#log(`L1 laptop: left the home; ${said}`);
+    await this.reset();
+    return told;
+  }
+
+  /** Show a new code, Join again or Cancel: drops the join and, once joined, its files. */
   async reset(): Promise<void> {
     this.#generation += 1;
     this.#session = undefined;
@@ -884,12 +920,7 @@ export class Laptop {
     const report = async () => {
       const joined = this.#joined;
       if (joined === undefined || generation !== this.#generation) return;
-      const target = {
-        hubUrl: `http://${joined.hubAddress}`,
-        homeId: joined.homeId,
-        nodeId: joined.nodeId,
-        tokenSha256: joined.tokenSha256,
-      };
+      const target = linkTarget(joined);
       const lost = this.#liveViewLost;
       const sent = this.#report();
       const outcome = await sendLinkReport(

@@ -8,7 +8,7 @@
  */
 import { randomUUID } from "node:crypto";
 import type { AcceptedWorker, Home } from "./home.ts";
-import { AcceptedWorkersError, acceptedWorkers } from "./home.ts";
+import { AcceptedWorkersError, acceptedWorkers, removeAcceptedWorker } from "./home.ts";
 import { errorMessage } from "./json-file.ts";
 import { type LinkCommand, parseLinkCommand } from "./live-view-commands.ts";
 import { errorReply, type Reply, type Route } from "./network-server.ts";
@@ -37,7 +37,14 @@ export interface LinkHubOptions {
   readonly log?: (line: string) => void;
   /** The accepted workers; accepted-workers.json by default. */
   readonly workers?: () => Promise<AcceptedWorker[]>;
+  /** Takes a node out of the accepted workers; accepted-workers.json by default. */
+  readonly removeWorker?: (nodeId: string) => Promise<boolean>;
+  /** Told each node that left or was removed, so the join listing forgets it. */
+  readonly onRemoved?: (nodeId: string) => void;
 }
+
+/** The answer to a link_leave the hub took (§6.6). */
+const LEFT: Reply = { status: 202, body: { v: 1, accepted: true } };
 
 const REFUSED = {
   badRequest: errorReply(400, "bad_request", "The request is malformed."),
@@ -129,6 +136,8 @@ export class LinkHub {
   readonly #now: () => number;
   readonly #log: (line: string) => void;
   readonly #workers: () => Promise<AcceptedWorker[]>;
+  readonly #removeWorker: (nodeId: string) => Promise<boolean>;
+  readonly #onRemoved: (nodeId: string) => void;
   readonly #linked = new Map<string, LinkedLaptop>();
   /** Commands waiting for each laptop's next report, oldest first. */
   readonly #queued = new Map<string, LinkCommand[]>();
@@ -140,6 +149,9 @@ export class LinkHub {
     this.#now = options.now ?? Date.now;
     this.#log = options.log ?? ((line: string) => console.log(line));
     this.#workers = options.workers ?? (() => acceptedWorkers(options.home));
+    this.#removeWorker =
+      options.removeWorker ?? ((nodeId) => removeAcceptedWorker(options.home, nodeId));
+    this.#onRemoved = options.onRemoved ?? (() => undefined);
   }
 
   routes(): Route[] {
@@ -177,7 +189,28 @@ export class LinkHub {
     return this.#linked;
   }
 
-  /** A link_report: checked as §6.6 says, recorded, and answered with a sealed link_reply. */
+  /**
+   * Removes laptop `nodeId` from the home: out of accepted-workers.json, so Layer 2's coordinator
+   * refuses its token and drops its connection, and out of what the page lists. Resolves whether it
+   * was accepted; throws an AcceptedWorkersError if the file can't be read or written.
+   */
+  async remove(nodeId: string): Promise<boolean> {
+    const listed = await this.#removeWorker(nodeId);
+    this.#forget(nodeId);
+    this.#log(`L1 link: node ${nodeId} removed from the home`);
+    return listed;
+  }
+
+  #forget(nodeId: string): void {
+    this.#linked.delete(nodeId);
+    this.#queued.delete(nodeId);
+    this.#onRemoved(nodeId);
+  }
+
+  /**
+   * POST /v1/link: a link_report, recorded and answered with a sealed link_reply, or a link_leave,
+   * which removes the laptop from the home. Both are checked as §6.6 says.
+   */
   async report(body: unknown): Promise<Reply> {
     const parsed = parseWrapper(body);
     if (!parsed.ok) {
@@ -186,7 +219,9 @@ export class LinkHub {
         : REFUSED.badRequest;
     }
     const { wrapper } = parsed;
-    if (wrapper.type !== "link_report") return REFUSED.unsupportedType;
+    if (wrapper.type !== "link_report" && wrapper.type !== "link_leave") {
+      return REFUSED.unsupportedType;
+    }
     const nodeId = wrapper.envelope.kid;
     let workers: AcceptedWorker[];
     try {
@@ -210,6 +245,7 @@ export class LinkHub {
       return REFUSED.stale;
     }
     if (!this.#seen.rememberMsgId(`node:${nodeId}`, wrapper.msg_id)) return REFUSED.duplicate;
+    if (wrapper.type === "link_leave") return this.#leave(nodeId);
     const report = parseReport(plaintext.fields);
     if (report === undefined) return REFUSED.badRequest;
     if (!this.#linked.has(nodeId)) this.#log(`L1 link: node ${nodeId} linked`);
@@ -224,6 +260,20 @@ export class LinkHub {
       this.#log(`L1 link: sent node ${nodeId} ${types}`);
     }
     return { status: 200, body: reply };
+  }
+
+  /** A link_leave: the laptop left, so it is taken out of the home as Remove does. */
+  async #leave(nodeId: string): Promise<Reply> {
+    try {
+      await this.#removeWorker(nodeId);
+    } catch (error) {
+      if (!(error instanceof AcceptedWorkersError)) throw error;
+      this.#log(`L1 link: node ${nodeId} left, but couldn't be removed: ${errorMessage(error)}`);
+      return REFUSED.internal;
+    }
+    this.#forget(nodeId);
+    this.#log(`L1 link: node ${nodeId} left the home`);
+    return LEFT;
   }
 }
 
@@ -283,6 +333,36 @@ export async function sendLinkReport(
     return { ok: true, commands: valid, ignored: parsed.length - valid.length };
   }
   return { ok: false, removed: false, reason: `the home laptop answered ${response.status}` };
+}
+
+/** What telling the home laptop this laptop is leaving came to: told, or why not. */
+export type LeaveOutcome = Readonly<{ ok: true }> | Readonly<{ ok: false; reason: string }>;
+
+/**
+ * The worker laptop's side of leaving: one sealed link_leave. A 403 counts as told, since the home
+ * laptop already doesn't list this laptop.
+ */
+export async function sendLinkLeave(
+  target: LinkTarget,
+  now: () => number = Date.now,
+): Promise<LeaveOutcome> {
+  const { hubUrl, homeId, nodeId } = target;
+  const key = linkKey(target.tokenSha256, nodeId);
+  const sent = sealLinkMessage(key, { homeId, nodeId, type: "link_leave" }, {}, now());
+  let response: Response;
+  try {
+    response = await fetch(new URL("/v1/link", hubUrl), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(sent),
+      signal: AbortSignal.timeout(settings.JOIN_REQUEST_TIMEOUT_MS),
+    });
+    await response.body?.cancel();
+  } catch (error) {
+    return { ok: false, reason: `can't reach the home laptop (${errorKind(error)})` };
+  }
+  if (response.status === 202 || response.status === 403) return { ok: true };
+  return { ok: false, reason: `the home laptop answered ${response.status}` };
 }
 
 /** A fetch failure's kind, such as a timeout or ECONNREFUSED, never its URL or body. */

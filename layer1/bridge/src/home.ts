@@ -361,6 +361,26 @@ export async function addAcceptedWorker(home: Home, worker: AcceptedWorker): Pro
   });
 }
 
+/**
+ * Takes node `nodeId` out of accepted-workers.json through updateJsonFile's queue, so Layer 2's
+ * coordinator refuses its token and drops its connection. Resolves whether the node was listed; a
+ * file that breaks Layer 2's rules is left as it is and throws an AcceptedWorkersError.
+ */
+export async function removeAcceptedWorker(home: Home, nodeId: string): Promise<boolean> {
+  const file = home.acceptedWorkersFile;
+  let listed = false;
+  await updateJsonFile(file, (current) => {
+    const workers = parseAcceptedWorkers(file, current ?? { schema_version: 1, workers: [] });
+    const kept = workers.filter((worker) => worker.node_id !== nodeId);
+    listed = kept.length !== workers.length;
+    return { schema_version: 1, workers: kept };
+  }).catch((error: unknown) => {
+    if (!(error instanceof JsonFileError)) throw error;
+    throw new AcceptedWorkersError(error.message, { cause: error });
+  });
+  return listed;
+}
+
 /** coordinator.json's client_port: where the bridge posts to Layer 2's coordinator on 127.0.0.1. */
 export function readCoordinatorClientPort(stateDir: string): Promise<number> {
   const file = filesIn(stateDir).coordinatorConfigFile;

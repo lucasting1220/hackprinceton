@@ -3,7 +3,7 @@ import { createSecretKey, randomBytes } from "node:crypto";
 import { copyFile, mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { test } from "node:test";
-import { acceptedWorkers, createHome } from "../bridge/src/home.ts";
+import { acceptedWorkers, addAcceptedWorker, createHome } from "../bridge/src/home.ts";
 import { readWorkerStatus, workerFiles } from "../bridge/src/laptop.ts";
 import type { LinkReport } from "../bridge/src/link.ts";
 import type { BrowserProcess } from "../bridge/src/live-sender.ts";
@@ -202,7 +202,8 @@ test("a laptop joins: Join a home, a caregiver's approval over the LAN gateway, 
 
   // The link: the home laptop's page shows what the worker laptop reports.
   await waitFor(() => state.link.linked().get(nodeId)?.state === "connected", 5_000);
-  assert.ok((await hub.page.get("/")).page.includes(`Node <code>${nodeId}</code>: connected`));
+  const listedOnHub = `Kitchen laptop, node <code>${nodeId}</code>: connected`;
+  assert.ok((await hub.page.get("/")).page.includes(listedOnHub));
   const hubDevices = (await hub.page.get("/devices")).page;
   const listed = `<span class="dot ok"></span><div class="device-text"><div>Kitchen laptop</div><div class="muted">node <code>${nodeId}</code>, connected`;
   assert.ok(hubDevices.includes(listed), hubDevices);
@@ -269,15 +270,29 @@ test("a laptop joins: Join a home, a caregiver's approval over the LAN gateway, 
   const rejoined = await pageWith(again.page, "/", "<p>Joined</p>");
   assert.match(rejoined, /<a href="\/join\/leave">Leave this home<\/a>/);
   const confirm = (await again.page.get("/join/leave")).page;
-  assert.match(confirm, /<form method="post" action="\/join\/reset">/);
+  assert.match(confirm, /<form method="post" action="\/join\/leave">/);
   assert.match(confirm, /<button>Leave this home<\/button>/);
-  assert.equal((await again.page.post("/join/reset")).statusCode, 303);
+  assert.equal((await again.page.post("/join/leave")).statusCode, 303);
   await pageWith(again.page, "/join", 'action="/join/start"');
   for (const file of [files.laptop, files.config, files.token]) {
     await assert.rejects(stat(file), { code: "ENOENT" }, `${file} survived leaving`);
   }
   const left = await readWorkerStatus(files.status);
   assert.ok(left.ok && left.state === "none", "the status file survived leaving");
+  // The home laptop was told: it no longer accepts the token or lists the laptop.
+  assert.deepEqual(await acceptedWorkers(home), []);
+  assert.equal(state.link.linked().has(nodeId), false);
+  assert.ok(!(await hub.page.get("/")).page.includes(nodeId), "the home laptop still lists it");
+  // Remove on the home laptop's page, for a laptop that can't leave by itself.
+  const lost = { node_id: "lost-node", display_name: "Lost laptop", token_sha256: "0".repeat(64) };
+  await addAcceptedWorker(home, lost);
+  const listing = (await hub.page.get("/")).page;
+  assert.ok(listing.includes("Lost laptop, node <code>lost-node</code>: not reporting"), listing);
+  assert.match(listing, /action="\/laptops\/remove">.*name="node_id" value="lost-node"/);
+  const removed = await hub.page.post("/laptops/remove", { node_id: "lost-node" });
+  assert.equal(removed.statusCode, 303);
+  assert.deepEqual(await acceptedWorkers(home), []);
+  assert.ok(!(await hub.page.get("/")).page.includes("lost-node"), "Remove left it listed");
   assert.equal((await again.page.get("/join/leave")).statusCode, 303, "leave without a home");
 
   for (const line of [...hub.lines, ...laptop.lines, ...again.lines]) {
