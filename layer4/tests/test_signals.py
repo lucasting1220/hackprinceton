@@ -1,10 +1,11 @@
+import time
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta, timezone, tzinfo
 from typing import cast
 
 import pytest
 
-from layer4.settings import RuleThresholds
+from layer4.settings import EARLIEST_SIGNAL_TIME, LATEST_SIGNAL_TIME, RuleThresholds
 from layer4.signals import FallSignal, HeartRateSignal, HelpSignal, MonitoringSignal
 
 AT = datetime(2026, 11, 14, 3, 12, tzinfo=UTC)
@@ -179,10 +180,35 @@ def test_monitoring_order_is_checked_in_utc_across_a_clock_change(
         lambda moment: HelpSignal(is_call_for_help=True, detected_at=moment),
         lambda moment: HeartRateSignal(bpm=80, measured_at=moment),
         lambda moment: MonitoringSignal(what_stopped="camera", stopped_at=moment, checked_at=AT),
+        lambda moment: MonitoringSignal(what_stopped="camera", stopped_at=AT, checked_at=moment),
     ],
-    ids=["fall", "help", "heart_rate", "monitoring"],
+    ids=["fall", "help", "heart_rate", "monitoring_stopped_at", "monitoring_checked_at"],
 )
 def test_time_outside_the_utc_range_is_rejected(build: Callable[[datetime], object]) -> None:
     year_one_east_of_utc = datetime.min.replace(tzinfo=timezone(timedelta(hours=5)))
     with pytest.raises(ValueError, match="out of range"):
         build(year_one_east_of_utc)
+
+
+@pytest.mark.parametrize(
+    "moment",
+    [
+        datetime(1960, 1, 1, tzinfo=UTC),
+        datetime(1970, 1, 1, 12, 0, tzinfo=UTC),
+        datetime(3500, 1, 1, tzinfo=UTC),
+        datetime(9999, 12, 31, 23, 30, tzinfo=UTC),
+    ],
+    ids=["1960", "first_day_of_1970", "3500", "end_of_9999"],
+)
+def test_time_outside_the_signal_range_is_rejected(moment: datetime) -> None:
+    with pytest.raises(ValueError, match="out of range"):
+        FallSignal(confidence=0.9, detected_at=moment)
+
+
+@pytest.mark.parametrize(
+    "moment",
+    [EARLIEST_SIGNAL_TIME - timedelta(hours=12), LATEST_SIGNAL_TIME + timedelta(hours=14)],
+    ids=["earliest_seen_from_utc_minus_12", "latest_seen_from_utc_plus_14"],
+)
+def test_the_os_clock_reaches_the_signal_range_from_any_zone(moment: datetime) -> None:
+    assert time.localtime(moment.timestamp()).tm_year in (1970, 2999, 3000)

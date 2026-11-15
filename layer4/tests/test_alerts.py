@@ -1,6 +1,8 @@
 from dataclasses import fields
 from datetime import UTC, datetime, timedelta, timezone
 
+import pytest
+
 from layer4.alerts import Alert, AlertKind, Severity, format_date, format_time, new_alert
 
 EST = timezone(timedelta(hours=-5))
@@ -53,3 +55,8 @@ def test_two_alerts_get_different_ids() -> None:
 def test_alert_fields_match_the_layer1_alert_message() -> None:
     names = [field.name for field in fields(Alert)]
     assert names == ["alert_id", "kind", "severity", "detected_at", "title", "body", "update"]
+
+
+def test_new_alert_rejects_a_time_without_a_zone() -> None:
+    with pytest.raises(ValueError, match="detected_at"):
+        new_alert(AlertKind.FALL, datetime(2026, 11, 14, 3, 12), "Possible fall", "body")

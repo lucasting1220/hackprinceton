@@ -6,7 +6,7 @@ All methods run on the coordinator's one event loop, so nothing here locks.
 import logging
 import time
 from collections import deque
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Literal
@@ -14,6 +14,7 @@ from typing import Literal
 from layer2 import settings
 from layer2.contracts import (
     ApiState,
+    DroppedWork,
     Hello,
     JobEntry,
     JobStatus,
@@ -21,6 +22,7 @@ from layer2.contracts import (
     MissingItem,
     StatusMessage,
 )
+from layer2.coordinator.plan import LaptopView
 
 log = logging.getLogger(__name__)
 
@@ -38,6 +40,7 @@ class _Entry[C]:
     last_status_at: datetime
     missing: list[MissingItem] = field(default_factory=list)
     jobs: list[JobStatus] = field(default_factory=list)
+    memory_free_gb: float = 0.0
     connection: C | None = None
     replacements: deque[float] = field(default_factory=deque)
     warned_at: float | None = None
@@ -122,13 +125,38 @@ class Registry[C]:
         entry.last_status_at = self._now()
         entry.missing = list(message.missing)
         entry.jobs = list(message.jobs)
+        entry.memory_free_gb = message.memory_free_gb
 
     def leave(self, node_id: str, connection: C) -> None:
         """The connection closed. The laptop stays listed with its last status time."""
         if self.is_current(node_id, connection):
             self._laptops[node_id].connection = None
 
-    def api_state(self) -> ApiState:
+    def connected(self) -> list[LaptopView]:
+        """Laptops with a current connection, for the planner. Memory is 0 until the first
+        status arrives."""
+        return [
+            LaptopView(
+                node_id=node_id,
+                sensors=frozenset(entry.sensors),
+                memory_free_gb=entry.memory_free_gb,
+            )
+            for node_id, entry in self._laptops.items()
+            if entry.connection is not None
+        ]
+
+    def known(self) -> set[str]:
+        return set(self._laptops)
+
+    def job_reports(self) -> dict[str, list[JobStatus]]:
+        """The latest jobs each connected laptop reported."""
+        return {
+            node_id: list(entry.jobs)
+            for node_id, entry in self._laptops.items()
+            if entry.connection is not None
+        }
+
+    def api_state(self, dropped: Iterable[DroppedWork] = ()) -> ApiState:
         return ApiState(
             schema_version=1,
             updated_at=self._now(),
@@ -147,5 +175,5 @@ class Registry[C]:
                 for node_id, entry in self._laptops.items()
                 for job in entry.jobs
             ],
-            dropped=[],
+            dropped=list(dropped),
         )

@@ -28,6 +28,7 @@ from layer2 import settings
 from layer2.contracts import (
     Hello,
     MissingItem,
+    Reply,
     Sensors,
     Specs,
     StartMessage,
@@ -40,6 +41,7 @@ from layer2.contracts import (
 from layer2.files import ConfigError, load_config
 from layer2.specs import collect_specs, collect_tools, missing_items
 from layer2.tokens import is_well_formed
+from layer2.worker.gateway import Relay
 from layer2.worker.jobs import JobControl
 
 log = logging.getLogger(__name__)
@@ -48,7 +50,7 @@ WorkerState = Literal["connected", "rejected", "disconnected"]
 Report = Callable[[WorkerState, list[MissingItem]], Awaitable[None]]
 Outcome = Literal["stopped", "rejected"]
 
-_Order = TypeAdapter[StartMessage | StopMessage](StartMessage | StopMessage)
+_Order = TypeAdapter[StartMessage | StopMessage | Reply](StartMessage | StopMessage | Reply)
 _Welcome = TypeAdapter[WelcomeAccepted | WelcomeRejected](WelcomeAccepted | WelcomeRejected)
 _GB = 2**30
 # ValueError: websockets raises it for a URL with a bad port; Layer 1 may fix the file later.
@@ -72,6 +74,7 @@ async def run_worker(
     report: Report,
     stop: asyncio.Event,
     jobs: JobControl | None = None,
+    relay: Relay | None = None,
 ) -> Outcome:
     """Connect, report and reconnect until `stop` is set ("stopped") or the coordinator
     rejects this laptop ("rejected"). Returns within a few seconds of `stop` being set, after
@@ -81,7 +84,7 @@ async def run_worker(
     Wi-Fi drop. The coordinator sends what to run again when the worker rejoins.
     """
     try:
-        return await _run(config_path, token, report, stop, jobs)
+        return await _run(config_path, token, report, stop, jobs, relay)
     finally:
         if jobs is not None:
             await jobs.stop_all()
@@ -93,6 +96,7 @@ async def _run(
     report: Report,
     stop: asyncio.Event,
     jobs: JobControl | None,
+    relay: Relay | None,
 ) -> Outcome:
 
     async def tell(state: WorkerState, missing: list[MissingItem]) -> None:
@@ -117,7 +121,7 @@ async def _run(
             except ConfigError as error:
                 log.warning("L2 worker: cannot read the config, will retry: %s", error)
             else:
-                session = _session(config_path, config, token, specs, missing, tell, jobs)
+                session = _session(config_path, config, token, specs, missing, tell, jobs, relay)
                 await _until_stopped(session, stop)
             if stop.is_set():
                 break
@@ -155,6 +159,7 @@ async def _session(
     missing: list[MissingItem],
     tell: Report,
     jobs: JobControl | None,
+    relay: Relay | None,
 ) -> None:
     """One connection. Returns when it drops; raises _RejectedError on rejection."""
     try:
@@ -164,16 +169,22 @@ async def _session(
             close_timeout=settings.WORKER_CLOSE_TIMEOUT_S,
             ping_interval=settings.WS_PING_INTERVAL_S,
             ping_timeout=settings.WORKER_PING_TIMEOUT_S,
-            max_size=settings.WS_MAX_MESSAGE_BYTES,
+            max_size=settings.WORKER_MAX_MESSAGE_BYTES,  # event log replies can be large
             proxy=None,  # the coordinator is on the local network; never go through a proxy
         ) as connection:
             await _join(connection, config, token, specs)
             log.info("L2 worker: connected to %s", config.coordinator_url)
             await tell("connected", missing)
-            await _first_to_end(
-                _send_status(connection, config_path, missing, tell, jobs),
-                _receive_orders(connection, jobs),
-            )
+            if relay is not None:
+                relay.attach(connection)
+            try:
+                await _first_to_end(
+                    _send_status(connection, config_path, missing, tell, jobs),
+                    _receive_orders(connection, jobs, relay),
+                )
+            finally:
+                if relay is not None:
+                    relay.detach()
     except _NETWORK_ERRORS as error:
         log.info(
             "L2 worker: not connected to %s (%s)", config.coordinator_url, type(error).__name__
@@ -226,9 +237,11 @@ async def _first_to_end(*parts: Awaitable[None]) -> None:
         task.result()
 
 
-async def _receive_orders(connection: ClientConnection, jobs: JobControl | None) -> None:
-    """Act on `start` and `stop` until the connection closes. A bad message is logged once
-    per connection and ignored."""
+async def _receive_orders(
+    connection: ClientConnection, jobs: JobControl | None, relay: Relay | None
+) -> None:
+    """Act on `start` and `stop`, and pass each `reply` to the relay, until the connection
+    closes. A bad message is logged once per connection and ignored."""
     logged_bad = False
     async for text in connection:
         try:
@@ -238,10 +251,13 @@ async def _receive_orders(connection: ClientConnection, jobs: JobControl | None)
                 logged_bad = True
                 log.warning(
                     "L2 worker: ignored a message from the coordinator that is not "
-                    "start or stop; further ones are not logged"
+                    "start, stop or reply; further ones are not logged"
                 )
             continue
-        if jobs is None:
+        if isinstance(order, Reply):
+            if relay is not None:
+                relay.resolve(order)
+        elif jobs is None:
             log.warning("L2 worker: this worker runs no jobs; ignored %s %s", order.type, order.job)
         elif isinstance(order, StartMessage):
             await jobs.start(order.job)

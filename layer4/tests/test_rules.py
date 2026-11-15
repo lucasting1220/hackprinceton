@@ -4,7 +4,7 @@ import pytest
 
 from layer4.alerts import AlertKind
 from layer4.rules import decide
-from layer4.settings import RuleThresholds
+from layer4.settings import EARLIEST_SIGNAL_TIME, LATEST_SIGNAL_TIME, RuleThresholds
 from layer4.signals import FallSignal, HeartRateSignal, HelpSignal, MonitoringSignal, Signal
 
 EST = timezone(timedelta(hours=-5))
@@ -105,3 +105,21 @@ def test_monitoring_wait_is_measured_in_utc_across_a_clock_change(
     assert checked.astimezone(UTC) - stopped.astimezone(UTC) == timedelta(minutes=20)
     signal = MonitoringSignal(what_stopped="camera", stopped_at=stopped, checked_at=checked)
     assert decide(signal, DEFAULTS, EST) is not None
+
+
+@pytest.mark.parametrize(
+    "moment", [EARLIEST_SIGNAL_TIME, LATEST_SIGNAL_TIME], ids=["earliest", "latest"]
+)
+@pytest.mark.parametrize(
+    "tz",
+    [None, timezone(timedelta(hours=-12)), timezone(timedelta(hours=14))],
+    ids=["laptop_zone", "utc_minus_12", "utc_plus_14"],
+)
+def test_alert_text_works_at_the_ends_of_the_signal_range(
+    moment: datetime, tz: timezone | None
+) -> None:
+    for signal in (
+        FallSignal(confidence=0.9, detected_at=moment),
+        HeartRateSignal(bpm=200, measured_at=moment),
+    ):
+        assert decide(signal, DEFAULTS, tz) is not None

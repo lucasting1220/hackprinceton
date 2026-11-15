@@ -1,17 +1,22 @@
 """The coordinator's two web apps.
 
 Control app (WebSocket /ws on 0.0.0.0:listen_port): workers join with `hello` and report with
-`status`. Dashboard app (127.0.0.1:dashboard_port): the dashboard page and GET /api/state.
+`status`; a connection's first status re-plans, and each status is answered with the `start`
+and `stop` orders that worker needs (coordinator/plan.py). Jobs reach the event log through
+their worker with `log_append` and `log_read`, and read the home's state with `state_read`,
+each answered with a `reply`. Dashboard app
+(127.0.0.1:dashboard_port): the dashboard page and GET /api/state.
 Neither ever logs a token, a whole `hello` or raw text a client chose.
 """
 
 import asyncio
 import logging
 from pathlib import Path
+from typing import Annotated
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse, JSONResponse
-from pydantic import ValidationError
+from pydantic import Field, TypeAdapter, ValidationError
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 from starlette.websockets import WebSocketDisconnected
 
@@ -20,11 +25,18 @@ from layer2.contracts import (
     AcceptedWorkers,
     CoordinatorConfig,
     Hello,
+    LogAppend,
+    LoggedEvent,
+    LogRead,
+    Reply,
+    StateRead,
     StatusMessage,
     WelcomeAccepted,
     WelcomeRejected,
 )
 from layer2.coordinator.dashboard import PAGE
+from layer2.coordinator.event_log import EventLog, EventTooLargeError
+from layer2.coordinator.plan import Placement
 from layer2.coordinator.registry import Registry
 from layer2.files import ConfigError, load_json_model
 from layer2.tokens import find_node_id
@@ -80,7 +92,13 @@ async def _close_quietly(socket: WebSocket, code: int, reason: str = "") -> None
         return
 
 
-def create_control_app(config: CoordinatorConfig, registry: Registry[WebSocket]) -> FastAPI:
+def create_control_app(
+    config: CoordinatorConfig,
+    registry: Registry[WebSocket],
+    placement: Placement | None = None,
+    events: EventLog | None = None,
+) -> FastAPI:
+    plan = placement if placement is not None else Placement(lambda: [])
     app = FastAPI(openapi_url=None, docs_url=None, redoc_url=None)
     accepted_file = Path(config.accepted_workers_file)
 
@@ -136,7 +154,7 @@ def create_control_app(config: CoordinatorConfig, registry: Registry[WebSocket])
             )
             await socket.send_text(welcome.model_dump_json())
             log.info("L2 coordinator: laptop %s joined", node_id)
-            await _receive_status(socket, node_id, registry)
+            await _receive(socket, node_id, registry, plan, events)
         finally:
             if registry.is_current(node_id, socket):
                 registry.leave(node_id, socket)
@@ -145,17 +163,30 @@ def create_control_app(config: CoordinatorConfig, registry: Registry[WebSocket])
     return app
 
 
-async def _receive_status(socket: WebSocket, node_id: str, registry: Registry[WebSocket]) -> None:
-    """Record status messages until the connection closes. Bad messages are ignored, and
-    logged once per connection."""
+_FromWorker = TypeAdapter[StatusMessage | LogAppend | LogRead | StateRead](
+    Annotated[StatusMessage | LogAppend | LogRead | StateRead, Field(discriminator="type")]
+)
+
+
+async def _receive(
+    socket: WebSocket,
+    node_id: str,
+    registry: Registry[WebSocket],
+    placement: Placement,
+    events: EventLog | None,
+) -> None:
+    """Handle a worker's messages until the connection closes: each status is recorded and
+    answered with the orders this worker needs; each event log request gets a reply. Bad
+    messages are ignored, and logged once per connection."""
     logged_bad = False
+    planned = False
     try:
         while True:
             text = await _receive_text(socket)
             try:
                 if text is None:
                     raise ValueError("binary message")
-                message = StatusMessage.model_validate_json(text)
+                message = _FromWorker.validate_json(text)
             except (ValidationError, ValueError) as error:
                 if not logged_bad:
                     logged_bad = True
@@ -167,19 +198,78 @@ async def _receive_status(socket: WebSocket, node_id: str, registry: Registry[We
                         detail,
                     )
                 continue
+            if not registry.is_current(node_id, socket):
+                continue
+            if isinstance(message, StateRead):
+                state = registry.api_state(placement.plan.dropped)
+                reply = Reply(type="reply", schema_version=1, id=message.id, ok=True, state=state)
+                await socket.send_text(reply.model_dump_json(exclude_none=True))
+                continue
+            if not isinstance(message, StatusMessage):
+                reply = await _answer(message, events)
+                await socket.send_text(reply.model_dump_json(exclude_none=True))
+                continue
             registry.status(node_id, socket, message)
+            if not planned:
+                planned = True  # its memory is known now, so the plan can use this laptop
+                placement.request_replan(lambda: (registry.connected(), registry.known()))
+            for order in placement.orders(node_id, registry.job_reports()):
+                log.info("L2 coordinator: %s job %s on %s", order.type, order.job, node_id)
+                await socket.send_text(order.model_dump_json())
     except (WebSocketDisconnect, WebSocketDisconnected):
         return
 
 
-def create_dashboard_app(registry: Registry[WebSocket]) -> FastAPI:
+async def _answer(request: LogAppend | LogRead, events: EventLog | None) -> Reply:
+    def failed(error: str) -> Reply:
+        return Reply(type="reply", schema_version=1, id=request.id, ok=False, error=error)
+
+    if events is None:
+        return failed("this coordinator keeps no event log")
+    try:
+        if isinstance(request, LogAppend):
+            await asyncio.to_thread(events.append, request.event)
+            return Reply(type="reply", schema_version=1, id=request.id, ok=True)
+        if request.since is not None:
+            found = await asyncio.to_thread(events.since, request.since)
+        else:
+            assert request.day is not None  # LogRead checks exactly one is given
+            found = await asyncio.to_thread(events.day, request.day)
+    except EventTooLargeError as error:
+        return failed(str(error))
+    except OSError as error:
+        log.error("L2 coordinator: event log error: %s", error.strerror or type(error).__name__)
+        return failed("the event log could not be read or written")
+    kept, truncated = _fit(found)
+    return Reply(
+        type="reply", schema_version=1, id=request.id, ok=True, events=kept, truncated=truncated
+    )
+
+
+def _fit(events: list[LoggedEvent]) -> tuple[list[LoggedEvent], bool]:
+    """The newest events whose JSON fits in REPLY_MAX_BYTES, oldest first."""
+    kept: list[LoggedEvent] = []
+    size = 0
+    for event in reversed(events):
+        size += len(event.model_dump_json().encode("utf-8")) + 1
+        if size > settings.REPLY_MAX_BYTES:
+            break
+        kept.append(event)
+    kept.reverse()
+    return kept, len(kept) < len(events)
+
+
+def create_dashboard_app(
+    registry: Registry[WebSocket], placement: Placement | None = None
+) -> FastAPI:
     app = FastAPI(openapi_url=None, docs_url=None, redoc_url=None)
     # Only this machine may read it, by address: a web page using DNS rebinding cannot.
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=["127.0.0.1", "localhost"])
 
     @app.get("/api/state")
     async def api_state() -> JSONResponse:
-        return JSONResponse(registry.api_state().model_dump(mode="json"))
+        dropped = placement.plan.dropped if placement is not None else ()
+        return JSONResponse(registry.api_state(dropped).model_dump(mode="json"))
 
     @app.get("/")
     async def page() -> HTMLResponse:
