@@ -47,3 +47,8 @@ export const BRIDGE_LOCAL_PORT = 7470;
 
 /** coordinator.json's bridge_url: where the coordinator sends Layer 1's messages for phones. */
 export const BRIDGE_URL = `http://127.0.0.1:${BRIDGE_LOCAL_PORT}`;
+
+/** The default state folder: ~/Library/Application Support/Debbie, or %LOCALAPPDATA%\Debbie. */
+export const MACOS_APP_DATA_DIRS = ["Library", "Application Support"] as const;
+export const WINDOWS_APP_DATA_ENV = "LOCALAPPDATA";
+export const STATE_DIR_NAME = "Debbie";
