@@ -376,3 +376,12 @@ export const WATCH_DATA_SCHEMA_VERSION = 1;
 /** The range every watch reading's time must fall in (contracts/README.md, what Layer 4 accepts). */
 export const WATCH_READING_EARLIEST_AT = "1970-01-02T00:00:00Z";
 export const WATCH_READING_LATEST_AT = "2999-12-31T00:00:00Z";
+
+/** The network test (npm run net:test): how long it waits for the bridge's GET /v1/hello. */
+export const NETWORK_TEST_HELLO_TIMEOUT_MS = 3_000;
+
+/** The network test: how long it waits for a TCP connection to the coordinator's worker port. */
+export const NETWORK_TEST_COORDINATOR_TIMEOUT_MS = 3_000;
+
+/** The network test: how long it waits for the relay's GET /healthz, over the internet. */
+export const NETWORK_TEST_RELAY_TIMEOUT_MS = 10_000;
