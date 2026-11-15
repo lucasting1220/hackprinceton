@@ -20,9 +20,11 @@ import {
 import { ApnsClient } from "./apns.ts";
 import { loadRelayConfig, missingPushSetup, type RelayConfig } from "./config.ts";
 import { createHubSocket } from "./hub-socket.ts";
-import { createPhoneApi } from "./phone-api.ts";
+import { isSignalPath, LiveViewSessions } from "./live-view.ts";
+import { createPhoneApi, SignInLimiter, signIn } from "./phone-api.ts";
 import { Pusher } from "./push.ts";
 import { RelayStore } from "./store.ts";
+import { TurnSecretError, TurnServers } from "./turn.ts";
 import { Watchdog } from "./watchdog.ts";
 
 /** The signals that stop the relay: systemd's stop, and Ctrl+C when run by hand. */
@@ -106,6 +108,29 @@ async function closeServer(server: http.Server): Promise<boolean> {
   return false;
 }
 
+/**
+ * coturn's servers for live view, from relay.json's turn block. Without the block, or with a secret
+ * file that can't be read, live view offers no STUN or TURN server; the relay runs on and says so.
+ */
+async function loadTurn(
+  config: RelayConfig,
+  log: (line: string) => void,
+): Promise<TurnServers | undefined> {
+  if (config.turn === undefined) {
+    log(
+      "L1 relay: no turn block in relay.json, so live view works only when both ends share a network",
+    );
+    return undefined;
+  }
+  try {
+    return await TurnServers.load(config.turn);
+  } catch (error) {
+    if (!(error instanceof TurnSecretError)) throw error;
+    log(`L1 relay: live view has no TURN server: ${error.message}`);
+    return undefined;
+  }
+}
+
 /** Starts the relay with `config`; it runs until its stop file appears, SIGTERM, or `stop`. */
 export async function startRelay(
   config: RelayConfig,
@@ -127,24 +152,47 @@ export async function startRelay(
   });
   const pusher = new Pusher({ store, sender: apns, log });
   const watchdog = new Watchdog({ store, pusher, config, log });
+  const turn = await loadTurn(config, log);
+  let liveView: LiveViewSessions | undefined;
   const hub = createHubSocket({
     store,
     log,
     onContact: (homeId) => watchdog.contact(homeId),
     onStored: (homeId, wrapper, seq) =>
       pusher.delivered(homeId, wrapper, { seq, duplicate: false }),
+    onLiveView: (homeId, frame) =>
+      frame.type === "live_view_answer"
+        ? liveView?.hubAnswered(homeId, frame)
+        : liveView?.hubEnded(homeId, frame),
+    onDisconnect: (homeId) => liveView?.hubDisconnected(homeId),
+  });
+  liveView = new LiveViewSessions({
+    hub,
+    log,
+    signIn: (headers) => {
+      const signed = signIn(store, headers);
+      return signed.ok ? { ok: true, deviceId: signed.device.deviceId } : { ok: false };
+    },
+    ...(turn === undefined ? {} : { turn }),
   });
   const server = createPhoneApi({
     store,
     config,
     log,
     commands: hub,
+    liveView,
+    limiter: new SignInLimiter(),
     onUnpair: (homeId, deviceId) => hub.phoneUnpaired(homeId, deviceId),
   });
-  server.on("upgrade", (request, socket, head) => hub.handleUpgrade(request, socket, head));
+  server.on("upgrade", (request, socket, head) => {
+    const { pathname } = new URL(request.url ?? "/", "http://relay.invalid");
+    if (isSignalPath(pathname)) liveView?.handleUpgrade(request, socket, head);
+    else hub.handleUpgrade(request, socket, head);
+  });
   try {
     await listen(server, config.listen_port);
   } catch (error) {
+    liveView.close();
     hub.close();
     store.close();
     throw error;
@@ -173,6 +221,7 @@ export async function startRelay(
     for (const [signal, handler] of signalHandlers) process.off(signal, handler);
     log(`L1 relay: ${reason}; stopping`);
     watchdog.stop();
+    liveView?.close();
     hub.close();
     if (!(await closeServer(server))) {
       log("L1 relay: phone requests still open at the deadline were cut off");

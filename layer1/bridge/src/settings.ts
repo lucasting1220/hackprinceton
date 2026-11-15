@@ -233,6 +233,25 @@ export const RELAY_HUB_SILENT_CLOSE_MS = 40_000;
 /** How long a phone's command waits at the relay for the hub's answer before 504 hub_timeout. */
 export const RELAY_COMMAND_TIMEOUT_MS = 5_000;
 
+/** Live view (phone-hub.md §7): the paths at the relay. */
+export const LIVE_VIEW_PATH = "/v1/live-view";
+/** How long one live view session lasts, and its TURN login with it: a setting, not a limit. */
+export const LIVE_VIEW_SESSION_MS = 5 * 60_000;
+/** How long a session may take to become ready: the hub's answer and the sender's sign-in. */
+export const LIVE_VIEW_START_WAIT_MS = 30_000;
+/** How long an ended session still answers its status, so the phone can read why it ended. */
+export const LIVE_VIEW_ENDED_KEPT_MS = 10 * 60_000;
+/** The sender's token for the session's signaling: random bytes. */
+export const LIVE_VIEW_SENDER_TOKEN_BYTES = 32;
+/** The sender's first signaling message, with its token, must arrive within this time. */
+export const LIVE_VIEW_HELLO_TIMEOUT_MS = 5_000;
+/** The largest signaling message: an SDP offer with its candidates fits several times over. */
+export const LIVE_VIEW_SIGNAL_MAX_BYTES = 16 * 1024;
+/** Messages one signaling socket may send in a session; a runaway peer is cut off after them. */
+export const LIVE_VIEW_SIGNAL_MESSAGES_MAX = 1_000;
+/** The signaling socket's close codes: the session ended, a newer socket replaced it, or refused. */
+export const LIVE_VIEW_CLOSE = { ended: 4000, replaced: 4001, refused: 4003 } as const;
+
 /** Apple's push service for each APNs environment (phone-hub.md §8). */
 export const APNS_ORIGINS = {
   production: "https://api.push.apple.com",

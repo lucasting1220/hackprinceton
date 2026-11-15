@@ -67,7 +67,7 @@ Check: `ssh "$RELAY" 'cat /opt/debbie/DEPLOYED_COMMIT; ls /opt/debbie/layer1/rel
 
 ## 4. relay.json (first deploy, or when `relay.example.json` gains a field)
 
-The example becomes `/etc/debbie-relay/relay.json`, readable by the relay's group only. The Key ID comes from the file on the server. Replace `<bundle ID>` and `<team ID>` with the app's bundle ID and Apple team ID from the debbie-ios project's signing settings.
+The example becomes `/etc/debbie-relay/relay.json`, readable by the relay's group only. Its `turn` block (live view, build step 7) names the TURN secret, which systemd hands the relay from `/etc/debbie/turn-secret` through the unit's second `LoadCredential` line, so step 5 installs the unit again whenever it changes. The Key ID comes from the file on the server. Replace `<bundle ID>` and `<team ID>` with the app's bundle ID and Apple team ID from the debbie-ios project's signing settings.
 
 ```sh
 ssh "$RELAY" 'sudo install -m 0640 -o root -g debbie-relay /opt/debbie/layer1/relay/deploy/relay.example.json /etc/debbie-relay/relay.json && sudo sed -i "s/KEYID00000/$(sudo cat /etc/debbie/apns-key-id)/g; s/com\.example\.debbie/<bundle ID>/; s/TEAMID0000/<team ID>/" /etc/debbie-relay/relay.json'

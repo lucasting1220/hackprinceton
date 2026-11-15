@@ -22,6 +22,13 @@ export interface ApnsConfig {
   readonly keys: Readonly<Partial<Record<Environment, ApnsKey>>>;
 }
 
+/** The team's coturn (phone-hub.md §7): where it listens, and the file holding its shared secret. */
+export interface TurnConfig {
+  readonly host: string;
+  readonly port: number;
+  readonly secret_file: string;
+}
+
 export interface RelayConfig {
   readonly schema_version: number;
   readonly listen_port: number;
@@ -31,6 +38,8 @@ export interface RelayConfig {
   readonly hub_silent_limit_s: number;
   readonly watchdog_tick_s: number;
   readonly apns?: ApnsConfig;
+  /** Without it, live view offers no STUN or TURN server, so it works only on one network. */
+  readonly turn?: TurnConfig;
 }
 
 /** A relay.json that can't be used. The message names the file and the field, never a value. */
@@ -79,7 +88,7 @@ export function parseRelayConfig(value: unknown, file: string): RelayConfig {
     }
     return found;
   };
-  const { schema_version: schemaVersion, public_url: publicUrl, apns } = value;
+  const { schema_version: schemaVersion, public_url: publicUrl, apns, turn } = value;
   if (schemaVersion !== RELAY_CONFIG_SCHEMA_VERSION) {
     fail("schema_version", `must be ${RELAY_CONFIG_SCHEMA_VERSION}`);
   }
@@ -103,7 +112,8 @@ export function parseRelayConfig(value: unknown, file: string): RelayConfig {
     hub_silent_limit_s: silentLimit,
     watchdog_tick_s: integer("watchdog_tick_s", 1, 3_600),
   };
-  if (apns === undefined) return config;
+  const withTurn = turn === undefined ? config : { ...config, turn: parseTurn(turn, fail) };
+  if (apns === undefined) return withTurn;
   if (!isRecord(apns)) return fail("apns", "must be an object");
   const { topic, team_id: teamId, keys } = apns;
   if (typeof topic !== "string" || topic === "") return fail("apns.topic", "must be a bundle ID");
@@ -125,7 +135,25 @@ export function parseRelayConfig(value: unknown, file: string): RelayConfig {
       key_file: absolute(key, "key_file", `apns.keys.${env}.key_file`),
     };
   }
-  return { ...config, apns: { topic, team_id: teamId, keys: parsedKeys } };
+  return { ...withTurn, apns: { topic, team_id: teamId, keys: parsedKeys } };
+}
+
+/** A DNS name or an IPv4 address: what coturn's ICE URLs carry. */
+const TURN_HOST = /^[A-Za-z0-9.-]{1,253}$/;
+
+function parseTurn(turn: unknown, fail: (field: string, rule: string) => never): TurnConfig {
+  if (!isRecord(turn)) return fail("turn", "must be an object");
+  const { host, port, secret_file: secretFile } = turn;
+  if (typeof host !== "string" || !TURN_HOST.test(host)) {
+    return fail("turn.host", "must be a host name or an IPv4 address");
+  }
+  if (typeof port !== "number" || !Number.isInteger(port) || port < 1 || port > 65_535) {
+    return fail("turn.port", "must be a whole number from 1 to 65535");
+  }
+  if (typeof secretFile !== "string" || !path.isAbsolute(secretFile)) {
+    return fail("turn.secret_file", "must be an absolute path");
+  }
+  return { host, port, secret_file: secretFile };
 }
 
 /** Whether pushes to this environment are set up. A missing key turns them off, never the relay. */

@@ -14,6 +14,9 @@ ExecStart=/opt/node/bin/node /opt/debbie/layer1/relay/src/main.ts --config /etc/
 # The APNs key stays root-only in /etc/debbie; systemd hands the relay a copy only it can read, at
 # /run/credentials/debbie-relay.service/apns-key.p8, which relay.json's key_file names.
 LoadCredential=apns-key.p8:/etc/debbie/apns-key.p8
+# The TURN shared secret (coturn's static-auth-secret) the same way, for live view's 5-minute TURN
+# logins: /run/credentials/debbie-relay.service/turn-secret, which relay.json's turn block names.
+LoadCredential=turn-secret:/etc/debbie/turn-secret
 # The database and the stop file, both under /var/lib/debbie-relay (mode 0700).
 StateDirectory=debbie-relay
 StateDirectoryMode=0700

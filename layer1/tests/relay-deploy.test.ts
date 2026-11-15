@@ -83,6 +83,21 @@ describe("relay deploy files", () => {
     }
   });
 
+  test("the unit hands the relay the TURN secret at the path relay.json's turn block names", () => {
+    const credentials = unitValues("LoadCredential").map((value) => value.split(":"));
+    const file = config.turn?.secret_file ?? "";
+    const name = path.posix.basename(file);
+    assert.equal(file, `/run/credentials/debbie-relay.service/${name}`);
+    assert.ok(
+      credentials.some(([one, source]) => one === name && source === "/etc/debbie/turn-secret"),
+    );
+  });
+
+  test("relay.json's turn block names coturn's host and port", () => {
+    assert.equal(config.turn?.host, new URL(config.public_url).hostname);
+    assert.match(turn, new RegExp(`^listening-port=${config.turn?.port}$`, "m"));
+  });
+
   test("coturn uses a shared secret for the relay's realm, and the template holds no secret", () => {
     assert.match(turn, /^use-auth-secret$/m);
     assert.match(turn, new RegExp(`^realm=${new URL(config.public_url).hostname}$`, "m"));

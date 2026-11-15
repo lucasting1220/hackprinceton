@@ -19,5 +19,10 @@
         "key_file": "/run/credentials/debbie-relay.service/apns-key.p8"
       }
     }
+  },
+  "turn": {
+    "host": "relay.144-202-5-15.sslip.io",
+    "port": 3478,
+    "secret_file": "/run/credentials/debbie-relay.service/turn-secret"
   }
 }

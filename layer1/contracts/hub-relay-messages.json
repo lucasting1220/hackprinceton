@@ -17,7 +17,10 @@
           "credential_sha256": "31d09f8d3942d55641b599a34d3e6da15a0d8901f7b6485547e1f92d76950302",
           "removed": false
         },
-        { "device_id": "3c2b1a09-8f7e-4d6c-b5a4-938271605f4e", "removed": true }
+        {
+          "device_id": "3c2b1a09-8f7e-4d6c-b5a4-938271605f4e",
+          "removed": true
+        }
       ]
     },
     {
@@ -37,8 +40,17 @@
         }
       }
     },
-    { "type": "ack", "v": 1, "msg_id": "m1" },
-    { "type": "nack", "v": 1, "msg_id": "m1", "error": "storage" },
+    {
+      "type": "ack",
+      "v": 1,
+      "msg_id": "m1"
+    },
+    {
+      "type": "nack",
+      "v": 1,
+      "msg_id": "m1",
+      "error": "storage"
+    },
     {
       "type": "command",
       "v": 1,
@@ -56,8 +68,57 @@
         }
       }
     },
-    { "type": "command_result", "v": 1, "msg_id": "m5", "status": 202, "code": null },
-    { "type": "command_result", "v": 1, "msg_id": "m6", "status": 400, "code": "stale" },
-    { "type": "phone_unpaired", "v": 1, "device_id": "0f9e8d7c-6b5a-4938-8271-605f4e3d2c1b" }
+    {
+      "type": "command_result",
+      "v": 1,
+      "msg_id": "m5",
+      "status": 202,
+      "code": null
+    },
+    {
+      "type": "command_result",
+      "v": 1,
+      "msg_id": "m6",
+      "status": 400,
+      "code": "stale"
+    },
+    {
+      "type": "phone_unpaired",
+      "v": 1,
+      "device_id": "0f9e8d7c-6b5a-4938-8271-605f4e3d2c1b"
+    },
+    {
+      "type": "live_view_start",
+      "v": 1,
+      "session_id": "5d6e7f80-91a2-4b3c-8d4e-5f60718293a4",
+      "from": "0f9e8d7c-6b5a-4938-8271-605f4e3d2c1b",
+      "wrapper": {
+        "v": 1,
+        "msg_id": "m7",
+        "type": "live_view_request",
+        "sent_at": "2026-11-14T15:20:00Z",
+        "envelope": {
+          "v": 1,
+          "kid": "0f9e8d7c-6b5a-4938-8271-605f4e3d2c1b",
+          "n": "BQUFBQUFBQUFBQUF",
+          "c": "szyY5X30mWud256-h1T_iDV5lIzfQvWc97GHaQPyVYVEI4YUZhKD5goY7XTPxJEe-sRQ0OJxv1BM1nVxR_Q_X0J3ecZm9WT1zM13--Fdi74"
+        }
+      },
+      "expires_at": "2026-11-14T15:25:00Z",
+      "sender_token": "EXAMPLE_sender_token_not_a_real_one_0000000"
+    },
+    {
+      "type": "live_view_answer",
+      "v": 1,
+      "session_id": "5d6e7f80-91a2-4b3c-8d4e-5f60718293a4",
+      "accepted": true,
+      "reason": null
+    },
+    {
+      "type": "live_view_end",
+      "v": 1,
+      "session_id": "5d6e7f80-91a2-4b3c-8d4e-5f60718293a4",
+      "reason": "stopped"
+    }
   ]
 }
