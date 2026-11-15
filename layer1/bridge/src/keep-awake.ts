@@ -52,6 +52,12 @@ export function keepAwakeCommand(platform: string, pid: number): KeepAwakeComman
   return undefined;
 }
 
+/** What the setup page says about keep-awake: on, turned off for this run, or why it can't be. */
+export type KeepAwakeStatus =
+  | Readonly<{ state: "on" }>
+  | Readonly<{ state: "off" }>
+  | Readonly<{ state: "problem"; problem: string }>;
+
 export interface KeepAwakeOptions {
   /** process.platform by default; tests pass another. */
   readonly platform?: string;
@@ -71,6 +77,7 @@ export class KeepAwake {
   #child: ChildProcess | undefined;
   #problem: string | undefined;
   #stopping = false;
+  #turnedOff = false;
 
   private constructor(log: (line: string) => void) {
     this.#log = log;
@@ -92,6 +99,21 @@ export class KeepAwake {
   /** Why this laptop may sleep while the bridge runs, or undefined while the helper holds it. */
   problem(): string | undefined {
     return this.#problem;
+  }
+
+  /** On, turned off for this run on the setup page, or its problem. */
+  status(): KeepAwakeStatus {
+    if (this.#turnedOff) return { state: "off" };
+    const problem = this.#problem;
+    return problem === undefined ? { state: "on" } : { state: "problem", problem };
+  }
+
+  /** The setup page's Turn off: ends the helper for this run; the next start keeps awake again. */
+  async turnOff(): Promise<void> {
+    if (this.#turnedOff) return;
+    this.#turnedOff = true;
+    this.#log("L1 keep-awake: turned off on the setup page for this run");
+    await this.stop();
   }
 
   /** The helper's process ID while it runs. */

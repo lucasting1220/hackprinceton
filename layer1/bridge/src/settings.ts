@@ -392,3 +392,24 @@ export const NETWORK_TEST_COORDINATOR_TIMEOUT_MS = 3_000;
 
 /** The network test: how long it waits for the relay's GET /healthz, over the internet. */
 export const NETWORK_TEST_RELAY_TIMEOUT_MS = 10_000;
+
+/** Layer 3's project folder in the repository, and its capture program, whose list and check modes Check sensors runs. */
+export const LAYER3_PROJECT_DIR = "layer3";
+export const LAYER3_CAPTURE_MODULE = "layer3.capture_job";
+
+/** The device list's and device check's `schema_version` (contracts/device-list.json and device-check.json). */
+export const DEVICE_LIST_SCHEMA_VERSION = 1;
+export const DEVICE_CHECK_SCHEMA_VERSION = 1;
+
+/** How long the device list may run (the contract: within 10 s), and the device check (a caller allows 20 s). */
+export const DEVICE_LIST_TIMEOUT_MS = 10_000;
+export const DEVICE_CHECK_TIMEOUT_MS = 20_000;
+
+/** The most standard output kept from the device list or check; one JSON object is far smaller. */
+export const DEVICE_OUTPUT_MAX_BYTES = 256 * 1024;
+
+/** Check this laptop: Layer 2 needs at least this much memory on a worker, in GiB. */
+export const WORKER_MIN_MEMORY_GB = 16;
+
+/** Check this laptop: below this much free disk, in GiB, the page warns. */
+export const LAPTOP_LOW_DISK_GB = 10;
