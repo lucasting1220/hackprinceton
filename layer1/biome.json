@@ -6,6 +6,7 @@
   "linter": {
     "enabled": true,
     "rules": {
+      "complexity": { "noVoid": "error" },
       "correctness": { "useImportExtensions": "error" },
       "nursery": { "noFloatingPromises": "error", "noMisusedPromises": "error" },
       "style": { "useNodejsImportProtocol": "error" },

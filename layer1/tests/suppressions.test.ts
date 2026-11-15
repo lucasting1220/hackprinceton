@@ -18,9 +18,9 @@ const forbidden = [
 test("no file suppresses a type check or a lint rule (CLAUDE.md section 5)", () => {
   const found: string[] = [];
   for (const file of layer1Files()) {
-    const lines = readFileSync(path.join(layer1, file), { encoding: "utf8" }).split("\n");
-    for (const [index, line] of lines.entries()) {
-      const token = forbidden.find((suppression) => line.toLowerCase().includes(suppression));
+    const text = readFileSync(path.join(layer1, file), { encoding: "utf8" }).toLowerCase();
+    for (const [index, line] of text.split("\n").entries()) {
+      const token = forbidden.find((suppression) => line.includes(suppression));
       if (token !== undefined) {
         found.push(`${file}:${index + 1} uses ${token}`);
       }
