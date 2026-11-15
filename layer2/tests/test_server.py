@@ -266,14 +266,16 @@ def test_dashboard_page_shows_each_laptop_as_one_card(dashboard: TestClient) -> 
     page = dashboard.get("/").text
     assert "/api/state" in page and "/api/hardware" in page
     for part in (
-        "RAM",
-        "CPU",
-        "Jobs",
-        "No jobs yet",
-        "laptops reporting",
-        "<svg",
-        "createElementNS",
+        "Memory",
+        "Processor",
+        "No jobs on this laptop",
+        "laptops online",
+        "memory pooled across the home",
+        "jobs running",
+        "Work not placed",
+        "createElementNS(SVG",
     ):
-        assert part in page or part.replace("<svg", "svg") in page
+        assert part in page
+    assert "cluster" not in page.lower(), "CLAUDE.md: say home, not cluster"
     assert "__" not in page.split("<script>")[1], "a placeholder was left unfilled"
     assert "<script src" not in page, "the page must work without internet"

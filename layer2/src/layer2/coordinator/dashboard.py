@@ -1,6 +1,7 @@
-"""The coordinator's dashboard page: one card per laptop with its hardware, RAM and CPU use
-(bars and a two-minute chart), and the jobs placed on it, plus a cluster summary and the work
-that could not be placed.
+"""The coordinator's dashboard page, built to be shown to judges on a projector: headline tiles
+(laptops online, memory pooled, jobs running, work not placed), one card per laptop with its
+hardware, RAM and CPU use (bars and a two-minute chart) and the jobs placed on it, and the work
+that could not be placed. Light, large type; read-only.
 
 It reads /api/state (the Layer 1 contract: status, jobs, dropped work) and /api/hardware
 (Layer 2 only: specs and load) every DASHBOARD_POLL_S, never starting a poll before the last
