@@ -169,8 +169,8 @@ Nothing on the network side can confirm a pairing or post an alert. Those happen
 1. The coordinator's setup page shows a pairing QR code (format in "Phone ↔ hub messages"): the bridge's network addresses, the hub's public key and a one-time secret. It expires after 10 minutes and is used up once the pairing is confirmed.
 2. The app asks for Local Network access first. It then scans the code, makes its own key pair, and sends its public key, a name (for example "Caregiver's iPhone") and its role, with a proof that it saw the QR code.
 3. The laptop and the phone show the same 4-digit code, and the person at the laptop clicks **Confirm**. Only someone at the coordinator laptop can confirm.
-4. The bridge sends back, encrypted with the phone's own key: the home ID, a device ID and device credential, the relay's address and, for caregivers, the home key.
-5. The hub tells the relay about the new phone (device ID, role and a hash of its credential) over its own relay connection. From then on, the relay accepts that phone. A phone paired before the hub has a relay connection (before build step 5, or while the hub is offline) is registered when the hub next connects: on every connection, the hub first sends the relay its full list of paired phones, and the relay replaces that home's list with it, so a phone removed while the hub was offline is dropped too. Later changes follow on the same connection.
+4. The bridge sends back, encrypted with the phone's own key: the home ID, a device ID and device credential, the phone's role, the relay's address (empty until remote access is set up), for caregivers the home key, the home's name, and the bridge's network addresses, starting with the one this phone reached. Like every plaintext (see "Freshness" in "Phone ↔ hub messages") it also carries `msg_id` and `sent_at`, plus the format version `v`. The app needs every one of these fields except the home key.
+5. The hub tells the relay about the new phone (device ID, role and a hash of its credential) over its own relay connection. From then on, the relay accepts that phone. A phone paired before the hub has a relay connection (before build step 5, or while the hub is offline) is registered when the hub next connects: on every connection, and after every pairing or removal, the hub sends the relay its full list of paired phones. The relay keeps each listed phone as it is, push registration included, and revokes any phone missing from the list or marked removed, so a phone removed while the hub was offline is dropped too. A revoked phone stays revoked.
 6. The phone keeps its keys and credential in a Keychain access group shared with its notification extension, readable after the first unlock, so the extension can decrypt alerts while the phone is locked.
 
 ### Add a laptop
@@ -224,7 +224,7 @@ These are proposals for Lucas: he can rename any field or change any behaviour, 
   "home_id": "home-uuid",
   "node_id": "node-uuid",
   "display_name": "Kitchen laptop",
-  "coordinator_url": "ws://192.168.1.20:7443",
+  "coordinator_url": "ws://192.168.1.20:7443/ws",
   "token_file": "/abs/path/worker-token",
   "camera": "j5create USB HD Webcam",
   "mic": "j5create USB HD Webcam",
@@ -248,7 +248,7 @@ These are proposals for Lucas: he can rename any field or change any behaviour, 
 - **Stop file.** When it appears, the program stops its jobs and exits within 10 seconds; after that, Layer 1 ends the process.
 - **Dashboard JSON** (ask L5): `GET http://127.0.0.1:7450/api/state` returns `{"updated_at": "…", "laptops": [{"node_id": "…", "display_name": "…", "last_status_at": "…", "sensors": ["camera", "mic"], "missing": []}], "jobs": [{"job": "fall_model", "node_id": "…", "state": "running"}], "dropped": [{"work": "…", "reason": "…"}]}`, using Layer 2's job names and its `dropped` list. The hub connector uses it only to find the camera laptop and to show which laptops are connected; it makes no judgement about monitoring.
 - **Transport.** Workers reach the coordinator over plain WebSocket on the demo network (see Question 1 about which network). TLS with a pinned certificate is for after the hackathon, at Lucas's discretion.
-- **Network changes.** If the coordinator's address changes, for example after switching to the hotspot, the worker bridges find it again by mDNS and rewrite `coordinator_url`, and the worker picks it up on its next retry (ask L4). If mDNS fails, the person types the new address on the worker's setup page. The laptop keeps its node ID and token.
+- **Network changes.** If the coordinator's address changes, for example after switching to the hotspot, the worker bridges find it again by mDNS and rewrite `coordinator_url`, keeping its `/ws` path, and the worker picks it up on its next retry (ask L4). If mDNS fails, the person types the new address on the worker's setup page. The laptop keeps its node ID and token.
 
 ## Handoff to Layer 4
 
