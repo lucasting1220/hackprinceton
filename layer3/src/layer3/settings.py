@@ -53,3 +53,6 @@ AUDIO_HOST_INTERFACES: dict[str, str] = {
     "Darwin": "Core Audio",
     "Windows": "Windows WASAPI",
 }
+
+# The host interface that converts a mic's own rate only when it is asked to.
+AUDIO_INTERFACE_NEEDING_CONVERT_REQUEST: str = "Windows WASAPI"

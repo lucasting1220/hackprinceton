@@ -6,6 +6,9 @@ in the settings module.
 
 The reader thread here is a copy of the one in camera.py, kept separate by the
 Layer 3 owner's decision. A fix to one reader has to be made in the other.
+
+The audio library is loaded inside the reader thread, so its start-up, which
+scans the audio devices, falls under the open time limit too.
 """
 
 import logging
@@ -19,7 +22,6 @@ from datetime import UTC, datetime
 from typing import Protocol
 
 import numpy as np
-import sounddevice
 from numpy.typing import NDArray
 
 from layer3 import settings
@@ -34,9 +36,10 @@ type Samples = NDArray[np.int16]
 
 @dataclass(frozen=True, eq=False)
 class AudioChunk:
-    """Half a second of mic audio exactly as the audio library delivered it.
+    """One chunk of mic audio exactly as the audio library delivered it.
 
-    samples is 8,000 rows by 1 column of 16-bit signed integers at 16 kHz.
+    samples has CHUNK_SAMPLES rows by settings.AUDIO_CHANNELS columns, of the type
+    settings.AUDIO_SAMPLE_TYPE, at settings.AUDIO_SAMPLE_RATE samples a second.
     captured_at is in UTC, from the capturing laptop's clock, taken when the read
     of the chunk returned, so it marks the chunk's end.
     overflowed is true when the audio system reported that audio was lost just
@@ -55,6 +58,18 @@ class ListedMic:
     name: str
     index: int
     default_sample_rate: float
+
+
+class _Stream(Protocol):
+    """The audio library's input stream, as the real source uses it."""
+
+    def start(self) -> None: ...
+
+    def read(self, frames: int) -> tuple[Samples, bool]: ...
+
+    def stop(self) -> None: ...
+
+    def close(self) -> None: ...
 
 
 class AudioSource(Protocol):
@@ -97,16 +112,23 @@ def utc_now() -> datetime:
 
 def list_mics() -> list[ListedMic]:
     """List the audio inputs the operating system reports, in this system's host interface."""
-    system = platform.system()
-    interface = settings.AUDIO_HOST_INTERFACES.get(system)
-    if interface is None:
-        raise MicNotFound(f"no audio host interface is set for {system}")
+    interface = _host_interface()
+    import sounddevice
+
     hosts = sounddevice.query_hostapis()
     return [
         ListedMic(device["name"], index, float(device["default_samplerate"]))
         for index, device in enumerate(sounddevice.query_devices())
         if device["max_input_channels"] > 0 and hosts[device["hostapi"]]["name"] == interface
     ]
+
+
+def _host_interface() -> str:
+    system = platform.system()
+    interface = settings.AUDIO_HOST_INTERFACES.get(system)
+    if interface is None:
+        raise MicNotFound(f"no audio host interface is set for {system}")
+    return interface
 
 
 def find_mic(name: str, listed: Sequence[ListedMic]) -> ListedMic:
@@ -124,18 +146,24 @@ class _SoundDeviceSource:
 
     def __init__(self, listed: ListedMic) -> None:
         self._listed: ListedMic = listed
-        self._stream: sounddevice.InputStream | None = None
+        self._stream: _Stream | None = None
         self._chunk_samples: int = 0
 
     def open(self, sample_rate: int, channels: int, chunk_samples: int) -> None:
+        import sounddevice
+
         self._chunk_samples = chunk_samples
-        stream = sounddevice.InputStream(
+        converts_on_request = _host_interface() == settings.AUDIO_INTERFACE_NEEDING_CONVERT_REQUEST
+        stream: _Stream = sounddevice.InputStream(
             samplerate=sample_rate,
             blocksize=chunk_samples,
             device=self._listed.index,
             channels=channels,
             dtype=settings.AUDIO_SAMPLE_TYPE,
             dither_off=True,
+            extra_settings=(
+                sounddevice.WasapiSettings(auto_convert=True) if converts_on_request else None
+            ),
         )
         self._stream = stream
         stream.start()
@@ -339,6 +367,7 @@ class _Reader:
                     logger.warning("L3 capture: mic %r lost audio before this chunk", listed.name)
                 self._hand_over(AudioChunk(samples, self._clock(), overflowed))
         except MicError as error:
+            logger.error("L3 capture: reading mic %r stopped: %s", self._mic, error)
             self._hand_over(error)
         except Exception as error:
             logger.error("L3 capture: reading mic %r failed: %r", self._mic, error)

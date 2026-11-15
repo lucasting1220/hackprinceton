@@ -18,15 +18,15 @@ class ConfigError(Exception):
 
 def load_camera(config_path: Path) -> str | None:
     """Return the camera's name exactly as written, or None when there is none or it is declined."""
-    return _load_sensor(config_path, CAMERA_FIELD)
+    return _load_sensor(config_path, FIELDS_READ)
 
 
 def load_mic(config_path: Path) -> str | None:
     """Return the mic's name exactly as written, or None when there is none or it was declined."""
-    return _load_sensor(config_path, MIC_FIELD)
+    return _load_sensor(config_path, MIC_FIELDS_READ)
 
 
-def _load_sensor(config_path: Path, sensor_field: str) -> str | None:
+def _load_sensor(config_path: Path, fields_read: tuple[str, ...]) -> str | None:
     """Read one sensor's name. The file is UTF-8 with an optional byte-order mark, as in Layer 2."""
     try:
         text = config_path.read_text(encoding="utf-8-sig")
@@ -38,7 +38,8 @@ def _load_sensor(config_path: Path, sensor_field: str) -> str | None:
         raise ConfigError(f"{config_path} is not valid JSON: {error}") from error
     if not isinstance(config, dict):
         raise ConfigError(f"{config_path} must hold one JSON object")
-    for field in (SCHEMA_VERSION_FIELD, sensor_field):
+    sensor_field = fields_read[-1]
+    for field in fields_read:
         if field not in config:
             raise ConfigError(f"{config_path} has no {field!r} field")
 

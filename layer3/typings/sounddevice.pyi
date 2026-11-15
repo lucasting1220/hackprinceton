@@ -3,30 +3,40 @@
 tests/test_mic.py checks this file against the installed library with mypy.stubtest.
 """
 
-from typing import TypedDict
+from typing import TypedDict, overload
 
 import numpy as np
 from numpy.typing import NDArray
 
 class _Device(TypedDict):
     name: str
-    index: int
     hostapi: int
     max_input_channels: int
-    max_output_channels: int
     default_samplerate: float
 
 class _HostApi(TypedDict):
     name: str
-    devices: list[int]
-    default_input_device: int
-    default_output_device: int
 
-class PortAudioError(Exception): ...
 class DeviceList(tuple[_Device, ...]): ...
 
-def query_devices(device: int | str | None = None, kind: str | None = None) -> DeviceList: ...
-def query_hostapis(index: int | None = None) -> tuple[_HostApi, ...]: ...
+class WasapiSettings:
+    def __init__(
+        self,
+        exclusive: bool = False,
+        auto_convert: bool = False,
+        explicit_sample_format: bool = False,
+    ) -> None: ...
+
+@overload
+def query_devices(device: None = None, kind: None = None) -> DeviceList: ...
+@overload
+def query_devices(device: int | str, kind: str | None = None) -> _Device: ...
+@overload
+def query_devices(device: None = None, *, kind: str) -> _Device: ...
+@overload
+def query_hostapis(index: None = None) -> tuple[_HostApi, ...]: ...
+@overload
+def query_hostapis(index: int) -> _HostApi: ...
 
 class InputStream:
     def __init__(
@@ -37,7 +47,7 @@ class InputStream:
         channels: int | None = None,
         dtype: str | None = None,
         latency: float | str | None = None,
-        extra_settings: object | None = None,
+        extra_settings: WasapiSettings | None = None,
         callback: object | None = None,
         finished_callback: object | None = None,
         clip_off: bool | None = None,

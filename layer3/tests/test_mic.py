@@ -15,8 +15,9 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+import sounddevice
 
-from layer3 import audio_reader, mic, settings
+from layer3 import audio_reader, mic, settings, worker_config
 from layer3.mic import (
     AudioChunk,
     ListedMic,
@@ -34,6 +35,7 @@ BUILT_IN = ListedMic("MacBook Air Microphone", 1, 48000.0)
 SHORT_TIMEOUT: float = 0.1
 WAIT_LIMIT: float = 2.0
 IDLE_READ_SECONDS: float = 0.005
+LISTED_WEBCAM_MIC_INDEX: int = 2
 LAYER_DIRECTORY: Path = Path(__file__).resolve().parents[1]
 
 
@@ -54,8 +56,10 @@ class FakeSource:
         open_error: OSError | None = None,
         read_error: OSError | None = None,
         close_error: OSError | None = None,
+        block_from_read: int = 1,
     ) -> None:
         self.chunks: list[Samples] = list(chunks)
+        self.block_from_read: int = block_from_read
         self.overflow_on: Sequence[int] = overflow_on
         self.open_gate: threading.Event | None = open_gate
         self.read_gate: threading.Event | None = read_gate
@@ -76,7 +80,7 @@ class FakeSource:
         self.opened_with = (sample_rate, channels, chunk_samples)
 
     def read(self) -> tuple[Samples, bool]:
-        if self.read_gate is not None:
+        if self.read_gate is not None and self.reads + 1 >= self.block_from_read:
             if not self.read_gate.is_set():
                 self.read_waiting.set()
             self.read_gate.wait(WAIT_LIMIT)
@@ -154,6 +158,8 @@ def test_the_mic_with_exactly_that_name_is_opened_with_the_format_from_settings(
     ("wanted", "listed", "problem"),
     [
         ("Audio", (WEBCAM_MIC, BUILT_IN), "was not found"),
+        ("audio streaming", (WEBCAM_MIC, BUILT_IN), "was not found"),
+        (" Audio Streaming ", (WEBCAM_MIC, BUILT_IN), "was not found"),
         (WEBCAM_MIC.name, (), "mics found: none"),
         (
             WEBCAM_MIC.name,
@@ -180,35 +186,29 @@ def test_no_single_match_is_mic_not_found_and_nothing_is_opened(
 def fake_library_listing(monkeypatch: pytest.MonkeyPatch) -> None:
     interface = settings.AUDIO_HOST_INTERFACES[platform.system()]
     devices = [
+        {"name": "Speakers", "hostapi": 0, "max_input_channels": 0, "default_samplerate": 48000.0},
         {
-            "name": "Audio Streaming",
-            "hostapi": 0,
-            "max_input_channels": 1,
-            "default_samplerate": 16000.0,
-        },
-        {
-            "name": "MacBook Air Microphone",
-            "hostapi": 0,
-            "max_input_channels": 1,
-            "default_samplerate": 48000.0,
-        },
-        {
-            "name": "MacBook Air Speakers",
-            "hostapi": 0,
-            "max_input_channels": 0,
-            "default_samplerate": 48000.0,
-        },
-        {
-            "name": "Audio Streaming",
+            "name": WEBCAM_MIC.name,
             "hostapi": 1,
             "max_input_channels": 1,
             "default_samplerate": 16000.0,
         },
+        {
+            "name": WEBCAM_MIC.name,
+            "hostapi": 0,
+            "max_input_channels": 1,
+            "default_samplerate": 16000.0,
+        },
+        {
+            "name": BUILT_IN.name,
+            "hostapi": 0,
+            "max_input_channels": 1,
+            "default_samplerate": 48000.0,
+        },
     ]
-    monkeypatch.setattr(mic.sounddevice, "query_devices", lambda: devices)
-    monkeypatch.setattr(
-        mic.sounddevice, "query_hostapis", lambda: ({"name": interface}, {"name": "Other"})
-    )
+    hosts = ({"name": interface}, {"name": "Other"})
+    monkeypatch.setattr(sounddevice, "query_devices", lambda: devices)
+    monkeypatch.setattr(sounddevice, "query_hostapis", lambda: hosts)
 
 
 def test_listing_mics_keeps_only_inputs_of_this_systems_host_interface(
@@ -216,7 +216,10 @@ def test_listing_mics_keeps_only_inputs_of_this_systems_host_interface(
 ) -> None:
     fake_library_listing(monkeypatch)
 
-    assert mic.list_mics() == [WEBCAM_MIC, BUILT_IN]
+    assert mic.list_mics() == [
+        ListedMic(WEBCAM_MIC.name, LISTED_WEBCAM_MIC_INDEX, 16000.0),
+        ListedMic(BUILT_IN.name, 3, 48000.0),
+    ]
 
 
 def test_listing_mics_on_a_system_with_no_host_interface_set_is_mic_not_found(
@@ -430,12 +433,10 @@ def test_no_first_chunk_within_the_open_time_limit_is_mic_open_failed() -> None:
 
 def test_a_read_that_blocks_after_the_first_chunk_is_mic_read_timed_out() -> None:
     gate = threading.Event()
-    gate.set()
-    source = FakeSource([samples(1)], read_gate=gate)
+    source = FakeSource([samples(1)], read_gate=gate, block_from_read=2)
 
     with closing(stream(source, chunk_timeout=SHORT_TIMEOUT)) as chunk_stream:
         next(chunk_stream)
-        gate.clear()
         assert source.read_waiting.wait(WAIT_LIMIT)
         started = time.monotonic()
         with pytest.raises(MicReadTimedOut, match="no chunk arrived within 0.1 seconds"):
@@ -504,11 +505,9 @@ def test_stopping_while_a_read_blocks_returns_in_time_and_says_the_call_has_not_
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     gate = threading.Event()
-    gate.set()
-    source = FakeSource([samples(1)], read_gate=gate)
+    source = FakeSource([samples(1)], read_gate=gate, block_from_read=2)
     chunk_stream = stream(source, chunk_timeout=SHORT_TIMEOUT)
     next(chunk_stream)
-    gate.clear()
     assert source.read_waiting.wait(WAIT_LIMIT)
     started = time.monotonic()
 
@@ -567,7 +566,8 @@ def streams(monkeypatch: pytest.MonkeyPatch) -> list[FakeStream]:
         made.append(FakeStream(**options))
         return made[-1]
 
-    monkeypatch.setattr(mic.sounddevice, "InputStream", make)
+    monkeypatch.setattr(sounddevice, "InputStream", make)
+    monkeypatch.setattr(mic.platform, "system", lambda: "Darwin")
     return made
 
 
@@ -585,6 +585,7 @@ def test_the_real_source_opens_the_device_in_the_format_asked_with_dither_off(
         "channels": 1,
         "dtype": "int16",
         "dither_off": True,
+        "extra_settings": None,
     }
     assert streams[0].calls == ["start"]
 
@@ -629,7 +630,7 @@ def test_chunks_with_its_defaults_lists_opens_and_stamps_in_utc(
     assert chunk.overflowed is True
     assert chunk.captured_at.utcoffset() == timedelta(0)
     assert before <= chunk.captured_at <= datetime.now(UTC)
-    assert streams[0].options["device"] == WEBCAM_MIC.index
+    assert streams[0].options["device"] == LISTED_WEBCAM_MIC_INDEX
     assert streams[0].calls[-2:] == ["stop", "close"]
 
 
@@ -691,12 +692,25 @@ def test_reader_exits_0_after_reading_chunks_and_says_which_were_all_zeros(
     assert "read 2 chunks over 0.5 seconds from the first chunk, 2.0 per second" in caplog.text
 
 
-def test_reader_with_no_mic_configured_opens_nothing_and_never_loads_the_mic_code(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+def test_reader_with_no_mic_configured_never_imports_the_mic_code_or_the_audio_library(
+    tmp_path: Path,
 ) -> None:
-    monkeypatch.setitem(sys.modules, "layer3.mic", None)
+    script = (
+        "import sys; from layer3 import audio_reader; code = audio_reader.main(sys.argv[1:]); "
+        "loaded = 'layer3.mic' in sys.modules or 'sounddevice' in sys.modules; "
+        "sys.exit(9 if loaded else code)"
+    )
 
-    assert audio_reader.main(write_config(tmp_path, None)) == 0
+    done = subprocess.run(
+        [sys.executable, "-c", script, *write_config(tmp_path, None)],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        timeout=120,
+        check=False,
+    )
+
+    assert done.returncode == 0, done.stderr
 
 
 @pytest.mark.parametrize(
@@ -727,3 +741,162 @@ def test_reader_refuses_a_run_length_that_is_not_a_finite_number_of_0_or_more(
         audio_reader.main([*write_config(tmp_path, WEBCAM_MIC.name), "--seconds", seconds])
 
     assert stopped.value.code == 2
+
+
+def test_listing_that_finds_no_host_interface_reaches_the_caller_as_mic_not_found() -> None:
+    def no_interface() -> Sequence[ListedMic]:
+        raise MicNotFound("no audio host interface is set for Plan 9")
+
+    with pytest.raises(MicNotFound, match="Plan 9"):
+        next(stream(FakeSource([samples()]), mics=no_interface))
+
+    assert reader_thread_ended()
+
+
+def test_an_audio_library_that_cannot_be_loaded_is_mic_open_failed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setitem(sys.modules, "sounddevice", None)
+
+    with pytest.raises(MicOpenFailed, match="opening the mic failed") as failure:
+        next(chunks(WEBCAM_MIC.name))
+
+    assert isinstance(failure.value.__cause__, ImportError)
+    assert reader_thread_ended()
+
+
+def test_on_windows_the_real_source_asks_the_system_to_convert_the_rate(
+    streams: list[FakeStream], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    asked: list[dict[str, bool]] = []
+
+    def fake_wasapi_settings(**options: bool) -> str:
+        asked.append(options)
+        return "wasapi settings"
+
+    monkeypatch.setattr(mic.platform, "system", lambda: "Windows")
+    monkeypatch.setattr(sounddevice, "WasapiSettings", fake_wasapi_settings)
+
+    mic.sound_device_source(WEBCAM_MIC).open(16000, 1, 8000)
+
+    assert asked == [{"auto_convert": True}]
+    assert streams[0].options["extra_settings"] == "wasapi settings"
+
+
+def test_a_first_chunk_in_another_format_is_mic_format_mismatch_and_is_logged(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    source = FakeSource([samples(count=4000)])
+
+    with (
+        caplog.at_level(logging.ERROR, logger=mic.logger.name),
+        pytest.raises(MicFormatMismatch, match=r"shape \(4000, 1\)"),
+    ):
+        next(stream(source))
+
+    assert "shape (4000, 1)" in caplog.text
+    assert source.closed.wait(WAIT_LIMIT)
+    assert reader_thread_ended()
+
+
+def test_the_first_chunk_shares_the_open_time_limit_instead_of_getting_its_own() -> None:
+    open_gate = threading.Event()
+    source = FakeSource(open_gate=open_gate, read_gate=threading.Event())
+    release = threading.Timer(0.6, open_gate.set)
+    release.start()
+    started = time.monotonic()
+
+    with pytest.raises(MicOpenFailed, match="no first chunk within 1 seconds"):
+        next(stream(source, open_timeout=1.0))
+
+    # gstack-timing-ok: a first chunk with its own limit would take 1.6 s, not about 1 s
+    assert time.monotonic() - started < 1.45
+    release.join()
+    assert source.read_gate is not None
+    source.read_gate.set()
+    assert source.closed.wait(WAIT_LIMIT)
+    assert reader_thread_ended()
+
+
+def test_stopping_while_the_queue_is_full_closes_the_mic_and_ends_the_thread(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    source = FakeSource([samples(1)], overflow_on=(2,))
+
+    with caplog.at_level(logging.WARNING, logger=mic.logger.name):
+        chunk_stream = stream(source)
+        next(chunk_stream)
+        deadline = time.monotonic() + WAIT_LIMIT
+        while not warnings_about(caplog, "is behind") and time.monotonic() < deadline:
+            time.sleep(0.01)
+        chunk_stream.close()
+
+    assert warnings_about(caplog, "is behind")
+    assert source.closed.is_set()
+    assert source.close_calls == 1
+    assert reader_thread_ended()
+
+
+def test_stopping_after_a_read_raised_returns_with_the_mic_closed_exactly_once() -> None:
+    source = FakeSource([samples(1)], read_error=OSError("device unplugged"))
+    chunk_stream = stream(source)
+    next(chunk_stream)
+    assert source.closed.wait(WAIT_LIMIT)
+
+    chunk_stream.close()
+
+    assert reader_thread_ended()
+    assert source.close_calls == 1
+
+
+def test_a_read_that_raises_is_still_reported_when_closing_the_mic_raises_too() -> None:
+    source = FakeSource(
+        [samples(1)],
+        read_error=OSError("device unplugged"),
+        close_error=OSError("close failed"),
+    )
+
+    with closing(stream(source)) as chunk_stream:
+        next(chunk_stream)
+        with pytest.raises(MicReadFailed, match="device unplugged"):
+            next(chunk_stream)
+
+    assert reader_thread_ended()
+
+
+def chunk_every_half_second(now: list[float]) -> Callable[[str], Generator[AudioChunk, None, None]]:
+    def fake_chunks(wanted: str) -> Generator[AudioChunk, None, None]:
+        while True:
+            yield AudioChunk(samples(1), mic.utc_now(), False)
+            now[0] += 0.5
+
+    return fake_chunks
+
+
+@pytest.mark.parametrize(("run_length", "chunks_read"), [(["--seconds", "0"], 1), ([], 11)])
+def test_reader_stops_after_one_chunk_for_0_seconds_and_runs_5_seconds_by_default(
+    run_length: list[str],
+    chunks_read: int,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    now = [100.0]
+    monkeypatch.setattr(mic, "chunks", chunk_every_half_second(now))
+    monkeypatch.setattr(audio_reader, "monotonic", lambda: now[0])
+
+    with caplog.at_level(logging.INFO, logger=audio_reader.logger.name):
+        assert audio_reader.main([*write_config(tmp_path, WEBCAM_MIC.name), *run_length]) == 0
+
+    assert f"read {chunks_read} chunks over" in caplog.text
+
+
+def test_the_fields_read_lists_are_what_the_config_loader_requires(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config_path = tmp_path / "worker.json"
+    config_path.write_text(json.dumps({"schema_version": 1, "mic": None}), encoding="utf-8")
+    monkeypatch.setattr(worker_config, "MIC_FIELDS_READ", ("schema_version", "home_id", "mic"))
+
+    with pytest.raises(worker_config.ConfigError, match="home_id"):
+        worker_config.load_mic(config_path)
