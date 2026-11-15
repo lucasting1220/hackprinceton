@@ -40,6 +40,7 @@ class CoordinatorConfig(Strict):
     dashboard_port: Port
     client_port: Port
     ollama_url: str
+    bridge_url: str
     accepted_workers_file: str
     state_dir: str
     stop_file: str
