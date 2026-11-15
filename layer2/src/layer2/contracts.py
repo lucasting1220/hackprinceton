@@ -258,6 +258,17 @@ class LogRead(Strict):
         return self
 
 
+class PhoneSend(Strict):
+    """Worker to coordinator, for a job's to_phone() call: hand `body` to Layer 1's bridge at
+    /v1/<kind>. Internal to Layer 2; the body's fields belong to Layers 1 and 4."""
+
+    type: Literal["phone_send"]
+    schema_version: Literal[1]
+    id: RequestId
+    kind: Literal["alerts", "replies", "status", "reports"]
+    body: dict[str, JsonValue]
+
+
 class StateRead(Strict):
     """Worker to coordinator, for a job's status() call: the same data as /api/state.
     Internal to Layer 2."""
