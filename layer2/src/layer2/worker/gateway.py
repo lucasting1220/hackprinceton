@@ -8,6 +8,9 @@ LAYER2_GATEWAY_TOKEN. Requests:
     {"token": "...", "type": "log_append", "event": {...}}
     {"token": "...", "type": "log_read", "since": "<ISO time>"}   or   "day": "YYYY-MM-DD"
     {"token": "...", "type": "state_read"}   (answer: "state", the /api/state data)
+    {"token": "...", "type": "phone_send", "kind": "alerts", "body": {...}}   (to Layer 1's bridge)
+    {"token": "...", "type": "receive", "kind": "requests" | "watch-data", "wait_s": 25}
+        (from the bridge: subscribes this worker, then answers "message": {...} or null)
     {"token": "...", "type": "ask", "prompt": "...", "quality": "quick" | "deep"}
 
 Answers: {"ok": true, "truncated": false}, with "events": [...] for a read (truncated is true
@@ -31,7 +34,16 @@ from websockets.asyncio.client import ClientConnection
 from websockets.exceptions import ConnectionClosed
 
 from layer2 import settings
-from layer2.contracts import LogAppend, LogRead, Reply, StateRead
+from layer2.contracts import (
+    Deliver,
+    InboundKind,
+    LogAppend,
+    LogRead,
+    PhoneSend,
+    Reply,
+    StateRead,
+    Subscribe,
+)
 from layer2.ollama import ModelError, generate
 
 log = logging.getLogger(__name__)
@@ -44,14 +56,53 @@ class NotConnectedError(Exception):
 
 
 class Relay:
-    """Requests from jobs, sent on the coordinator connection of the moment."""
+    """Requests from jobs, sent on the coordinator connection of the moment; and the bridge's
+    messages for jobs on this worker, kept per kind until a job takes them."""
 
     def __init__(self) -> None:
         self._connection: ClientConnection | None = None
         self._pending: dict[str, asyncio.Future[Reply]] = {}
+        self._subscribed: set[InboundKind] = set()
+        self._inbox: dict[InboundKind, asyncio.Queue[dict[str, Any]]] = {}
 
     def attach(self, connection: ClientConnection) -> None:
         self._connection = connection
+
+    async def resubscribe(self) -> None:
+        """Tell a new connection which kinds this worker's jobs take."""
+        for kind in sorted(self._subscribed):
+            await self._send_subscribe(kind)
+
+    async def subscribe(self, kind: InboundKind) -> None:
+        """A job here takes `kind`. Sent now if connected, and again after each reconnect."""
+        if kind in self._subscribed:
+            return
+        self._subscribed.add(kind)
+        await self._send_subscribe(kind)
+
+    async def _send_subscribe(self, kind: InboundKind) -> None:
+        connection = self._connection
+        if connection is None:
+            return  # sent by resubscribe() once connected
+        message = Subscribe(type="subscribe", schema_version=1, kind=kind)
+        with contextlib.suppress(ConnectionClosed):
+            await connection.send(message.model_dump_json())
+
+    def deliver(self, message: Deliver) -> None:
+        """Keep a message from the bridge until a job takes it; the oldest goes when full."""
+        queue = self._inbox.setdefault(message.kind, asyncio.Queue())
+        if queue.qsize() >= settings.INBOX_MAX_MESSAGES:
+            queue.get_nowait()
+            log.warning("L2 worker: no job took %s in time; dropped the oldest", message.kind)
+        queue.put_nowait(message.body)
+
+    async def take(self, kind: InboundKind, wait_s: float) -> dict[str, Any] | None:
+        """The next message of `kind`, waiting up to `wait_s`; None if none came."""
+        queue = self._inbox.setdefault(kind, asyncio.Queue())
+        try:
+            return await asyncio.wait_for(queue.get(), wait_s)
+        except TimeoutError:
+            return None
 
     def detach(self) -> None:
         self._connection = None
@@ -86,7 +137,8 @@ class Relay:
             self._pending.pop(request_id, None)
 
 
-_REQUESTS: dict[str, type[LogAppend] | type[LogRead] | type[StateRead]] = {
+_REQUESTS: dict[str, type[LogAppend] | type[LogRead] | type[StateRead] | type[PhoneSend]] = {
+    "phone_send": PhoneSend,
     "log_append": LogAppend,
     "log_read": LogRead,
     "state_read": StateRead,
@@ -139,8 +191,10 @@ class Gateway:
             return {"ok": False, "error": "wrong or missing token"}
         if request.get("type") == "ask":
             return await self._ask(request)
+        if request.get("type") == "receive":
+            return await self._receive(request)
         if request.get("type") not in _REQUESTS:
-            return {"ok": False, "error": "type must be log_append, log_read, state_read or ask"}
+            return {"ok": False, "error": "unknown request type"}
         try:
             reply = await self._relay.ask(request)
         except ValidationError:
@@ -152,6 +206,16 @@ class Gateway:
         return reply.model_dump(
             mode="json", exclude={"type", "schema_version", "id"}, exclude_none=True
         )
+
+    async def _receive(self, request: dict[str, Any]) -> dict[str, Any]:
+        kind, wait_s = request.get("kind"), request.get("wait_s", 0)
+        if kind not in ("requests", "watch-data"):
+            return {"ok": False, "error": "kind must be requests or watch-data"}
+        if not isinstance(wait_s, int | float) or isinstance(wait_s, bool) or wait_s < 0:
+            return {"ok": False, "error": "wait_s must be a number of seconds"}
+        await self._relay.subscribe(kind)
+        message = await self._relay.take(kind, min(float(wait_s), settings.RECEIVE_MAX_WAIT_S))
+        return {"ok": True, "message": message}
 
     async def _ask(self, request: dict[str, Any]) -> dict[str, Any]:
         prompt, quality = request.get("prompt"), request.get("quality")

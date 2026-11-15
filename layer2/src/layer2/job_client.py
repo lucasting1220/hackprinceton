@@ -10,14 +10,19 @@ started. Plain blocking Python with no dependencies beyond the standard library.
     answer = layer2.ask("Rewrite this alert: ...", quality="quick")
 
     home = layer2.status()     # the same data as the coordinator's /api/state
+    layer2.to_phone("alerts", {...})   # to Layer 1's bridge: alerts, replies, status, reports
+    layer2.on_request(handle)          # each request from a phone, forever (Layer 4)
+    reading = layer2.receive("watch-data")   # the next watch reading or None (Layer 3)
 
-So far: the event log, ask() and status(). fan_out(), feed(), to_phone() and on_request() come
-with later build steps.
+So far: the event log, ask(), status(), to_phone(), receive() and on_request(). fan_out() and
+feed() come with later build steps.
 """
 
 import json
 import os
 import socket
+import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import date, datetime
 from typing import Any, Literal
@@ -73,6 +78,35 @@ class Layer2:
             request["day"] = day.isoformat()
         events: list[dict[str, Any]] = self._call(request).get("events", [])
         return events
+
+    def to_phone(
+        self, kind: Literal["alerts", "replies", "status", "reports"], message: dict[str, Any]
+    ) -> None:
+        """Hand one message for the caregiver's phone to Layer 1's bridge (POST /v1/<kind>),
+        through the coordinator. Returns once the bridge has accepted it; raises Layer2Error
+        if it could not be delivered, so the caller can retry."""
+        self._call({"type": "phone_send", "kind": kind, "body": message})
+
+    def receive(
+        self, kind: Literal["requests", "watch-data"], wait_s: float = 25.0
+    ) -> dict[str, Any] | None:
+        """The next message from Layer 1's bridge of this kind, waiting up to `wait_s` (at most
+        30 s); None if none came. The first call makes this job the one that takes `kind`."""
+        reply = self._call({"type": "receive", "kind": kind, "wait_s": wait_s}, wait_s + 10.0)
+        message: dict[str, Any] | None = reply.get("message")
+        return message
+
+    def on_request(self, handle: Callable[[dict[str, Any]], None]) -> None:
+        """Call `handle` with each request from a phone, forever. A Layer2Error (for example
+        while the worker reconnects) is retried after a short pause."""
+        while True:
+            try:
+                message = self.receive("requests")
+            except Layer2Error:
+                time.sleep(1.0)
+                continue
+            if message is not None:
+                handle(message)
 
     def status(self) -> dict[str, Any]:
         """Which laptops the coordinator knows (with `last_status_at`, so a quiet one can be

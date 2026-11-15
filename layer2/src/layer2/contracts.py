@@ -190,6 +190,7 @@ JobName = Annotated[str, Field(pattern=r"^[a-z][a-z0-9_]{0,63}$")]
 class JobStatus(Strict):
     job: JobName
     state: Literal["starting", "running", "restarting"]
+    restarts: Annotated[int, Field(ge=0, strict=True)] = 0
 
 
 class StatusMessage(Strict):
@@ -258,6 +259,41 @@ class LogRead(Strict):
         return self
 
 
+class PhoneSend(Strict):
+    """Worker to coordinator, for a job's to_phone() call: hand `body` to Layer 1's bridge at
+    /v1/<kind>. Internal to Layer 2; the body's fields belong to Layers 1 and 4."""
+
+    type: Literal["phone_send"]
+    schema_version: Literal[1]
+    id: RequestId
+    kind: Literal["alerts", "replies", "status", "reports"]
+    body: dict[str, JsonValue]
+
+
+InboundKind = Literal["requests", "watch-data"]
+"""What Layer 1's bridge posts to the coordinator: requests from phones (for Layer 4) and watch
+readings (for Layer 3)."""
+
+
+class Subscribe(Strict):
+    """Worker to coordinator: a job on this worker takes `kind` from the bridge. The latest
+    subscriber of a kind gets it. Internal to Layer 2."""
+
+    type: Literal["subscribe"]
+    schema_version: Literal[1]
+    kind: InboundKind
+
+
+class Deliver(Strict):
+    """Coordinator to worker: one message from the bridge, for the job that subscribed to
+    `kind`. Internal to Layer 2; the body's fields belong to Layers 1, 3 and 4."""
+
+    type: Literal["deliver"]
+    schema_version: Literal[1]
+    kind: InboundKind
+    body: dict[str, JsonValue]
+
+
 class StateRead(Strict):
     """Worker to coordinator, for a job's status() call: the same data as /api/state.
     Internal to Layer 2."""
@@ -311,3 +347,31 @@ class HardwareState(Strict):
     schema_version: Literal[1]
     updated_at: UtcDatetime
     laptops: list[LaptopHardware]
+
+
+class JobHealth(Strict):
+    """One job on the dashboard's details. Internal to Layer 2."""
+
+    job: str
+    node_id: str
+    state: str
+    restarts: int
+
+
+class PlannerDecision(Strict):
+    """The latest re-plan, on the dashboard. Internal to Layer 2."""
+
+    made_by: Literal["ai", "rules"]
+    why: Annotated[str, Field(max_length=600)]
+    decided_at: UtcDatetime
+    moved: list[str]
+
+
+class DashboardDetails(Strict):
+    """GET /api/details on the dashboard port: what the page shows beyond /api/state and
+    /api/hardware. Internal to Layer 2: Layer 1 reads only /api/state."""
+
+    schema_version: Literal[1]
+    updated_at: UtcDatetime
+    jobs: list[JobHealth]
+    planner: PlannerDecision | None = None

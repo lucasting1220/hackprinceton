@@ -38,13 +38,14 @@ def choose_plan(
     known: set[str],
     previous: Plan,
     planner_log: Path | None = None,
-) -> tuple[Plan, str]:
-    """The AI's plan if it passes every check, else the rule-based plan. Returns the plan and
-    which planner made it ("ai" or "rules"). Blocks for up to PLANNER_TIMEOUT_S."""
+) -> tuple[Plan, str, str]:
+    """The AI's plan if it passes every check, else the rule-based plan. Returns the plan,
+    which planner made it ("ai" or "rules"), and why: the AI's one-line reasoning, or the
+    reason it fell back. Blocks for up to PLANNER_TIMEOUT_S."""
     fallback = rule_plan(needs, connected, known, previous)
     if not needs or not connected:
-        return fallback, "rules"
-    prompt = _prompt(needs, connected, previous)
+        return fallback, "rules", "nothing to place yet"
+    prompt = planner_prompt(needs, connected, previous)
     try:
         text = generate(
             ollama_url,
@@ -57,12 +58,12 @@ def choose_plan(
     except (ModelError, PlanError) as error:
         _note(planner_log, f"rule-based plan used: {error}")
         log.info("L2 coordinator: planner fell back to the rule-based plan: %s", error)
-        return fallback, "rules"
+        return fallback, "rules", f"the AI planner's answer was not used: {error}"
     _note(planner_log, f"AI plan used: {json.dumps(plan.jobs, sort_keys=True)}; {reasoning}")
-    return plan, "ai"
+    return plan, "ai", reasoning
 
 
-def _prompt(needs: list[JobNeed], connected: list[LaptopView], previous: Plan) -> str:
+def planner_prompt(needs: list[JobNeed], connected: list[LaptopView], previous: Plan) -> str:
     facts = {
         "laptops": [
             {

@@ -3,7 +3,7 @@
   "home_id": "home-uuid",
   "node_id": "node-uuid",
   "display_name": "Kitchen laptop",
-  "coordinator_url": "ws://192.168.1.20:7443",
+  "coordinator_url": "ws://192.168.1.20:7443/ws",
   "token_file": "/abs/path/worker-token",
   "camera": "j5create USB HD Webcam",
   "mic": "j5create USB HD Webcam",

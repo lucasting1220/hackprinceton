@@ -36,6 +36,7 @@ class _Job:
     spec: JobSpec
     state: JobState
     task: "asyncio.Task[None] | None" = None
+    restarts: int = 0
 
 
 class JobRunner:
@@ -46,6 +47,11 @@ class JobRunner:
 
     def states(self) -> dict[str, JobState]:
         return {name: job.state for name, job in self._jobs.items()}
+
+    def restarts(self) -> dict[str, int]:
+        """How many times each job has exited (or failed to start) and been restarted since
+        it was last started by the coordinator."""
+        return {name: job.restarts for name, job in self._jobs.items()}
 
     async def start(self, spec: JobSpec) -> None:
         """Start the job, or do nothing if it is already running with the same spec. A
@@ -78,6 +84,7 @@ class JobRunner:
             job.state = "starting"
             await self._run_once(job, env)
             job.state = "restarting"
+            job.restarts += 1
             await asyncio.sleep(settings.JOB_RESTART_DELAY_S)
 
     async def _run_once(self, job: _Job, env: dict[str, str]) -> None:
@@ -153,4 +160,8 @@ class JobControl:
         await self._runner.stop_all()
 
     def statuses(self) -> list[JobStatus]:
-        return [JobStatus(job=name, state=state) for name, state in self._runner.states().items()]
+        restarts = self._runner.restarts()
+        return [
+            JobStatus(job=name, state=state, restarts=restarts.get(name, 0))
+            for name, state in self._runner.states().items()
+        ]
