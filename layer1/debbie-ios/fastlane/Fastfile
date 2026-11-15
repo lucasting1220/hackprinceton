@@ -1,0 +1,296 @@
+# Debbie delivery lanes. Run them only through tools/ci/fl (stdin closed, redacted logs, time limit,
+# pinned bundle). Rules: KICKOFF_PROMPT.md §3 and §7; research note 12; CRAFT.md §8; D-026–D-028.
+require "securerandom"
+require "yaml"
+opt_out_usage
+default_platform(:ios)
+
+ROOT = File.expand_path("..", __dir__)
+# DEMO_IOS_VERSION is not a credential (brief §3): when it is missing, the lanes warn and carry on.
+REQUIRED = %w[ASC_KEY_ID ASC_ISSUER_ID ASC_KEY_PATH APPLE_TEAM_ID BUNDLE_ID].freeze
+SIGNING_DIR = File.join(ROOT, ".signing")
+KEYCHAIN = File.join(SIGNING_DIR, "debbie-signing.keychain-db")
+IPA = File.join(ROOT, "build", "ipa", "Debbie.ipa")
+# The API key values are taken out of the environment as soon as the Fastfile loads, so no child process
+# inherits them: xcodebuild records its whole environment in DerivedData's build description, where
+# tools/ci/check-logs.sh found them after the first archive (15:38). They are passed only as arguments.
+unless defined?(SECRETS)
+  SECRETS = %w[ASC_KEY_ID ASC_ISSUER_ID ASC_KEY_PATH].to_h { |k| [k, ENV.delete(k)] }.freeze
+  # tools/ci/fl exports the Gemini key only so its redactor knows the value. Nothing here needs it:
+  # make-local-config.sh reads gemini.env itself, so gym and altool never inherit it.
+  ENV.delete("GEMINI_API_KEY")
+end
+
+def cred(name)
+  SECRETS.key?(name) ? SECRETS[name] : ENV[name]
+end
+
+# Presence only. Values are never printed (brief §3).
+def credentials_report
+  (REQUIRED + ["DEMO_IOS_VERSION"]).map { |k| [k, !cred(k).to_s.strip.empty?] }.to_h
+end
+
+def credentials!
+  missing = REQUIRED.select { |k| cred(k).to_s.strip.empty? }
+  unless missing.empty?
+    UI.user_error!("BLOCKED: ~/.config/debbie-ios/asc.env is missing #{missing.join(', ')} " \
+                   "(names only shown). See README › Ship to TestFlight. Nothing was registered, signed or uploaded.")
+  end
+  key = File.expand_path(cred("ASC_KEY_PATH"))
+  UI.user_error!("BLOCKED: ASC_KEY_PATH does not point to a readable file") unless File.file?(key) && File.readable?(key)
+  key
+end
+
+def api_key!(key_path)
+  app_store_connect_api_key(key_id: cred("ASC_KEY_ID"), issuer_id: cred("ASC_ISSUER_ID"),
+                            key_filepath: key_path, duration: 1200, in_house: false)
+end
+
+def deployment_target
+  YAML.load_file(File.join(ROOT, "project.yml")).dig("options", "deploymentTarget", "iOS").to_s
+end
+
+# Brief §7: the minimum iOS must not be above the demo iPhone's version.
+def demo_ios_problem
+  demo = ENV["DEMO_IOS_VERSION"].to_s.strip
+  return nil if demo.empty?
+  target = deployment_target
+  begin
+    return nil if Gem::Version.new(demo) >= Gem::Version.new(target)
+  rescue ArgumentError
+    return "DEMO_IOS_VERSION must be a version number such as 26.1"
+  end
+  "the demo iPhone runs iOS #{demo}, below the app's minimum iOS #{target}: lower the deployment target first (D-005 lists the iOS 18 option)"
+end
+
+def check_demo_ios!
+  if ENV["DEMO_IOS_VERSION"].to_s.strip.empty?
+    UI.important("DEMO_IOS_VERSION is not set: carrying on (brief §3). The app needs iOS #{deployment_target} or later.")
+  elsif (problem = demo_ios_problem)
+    UI.user_error!("BLOCKED: #{problem}. Nothing was uploaded.")
+  else
+    UI.message("Demo iPhone iOS #{ENV['DEMO_IOS_VERSION']} ≥ minimum iOS #{deployment_target}")
+  end
+end
+
+# Brief §7: prefer the internal group with automatic distribution.
+def internal_group(app, includes: nil)
+  groups = app.get_beta_groups(includes: includes).select(&:is_internal_group)
+  groups.find(&:has_access_to_all_builds) || groups.first
+end
+
+def lock_down_signing_dir
+  return unless File.directory?(SIGNING_DIR)
+  File.chmod(0o700, SIGNING_DIR)
+  Dir.glob(File.join(SIGNING_DIR, "*")).each { |f| File.chmod(0o600, f) if File.file?(f) }
+end
+
+platform :ios do
+  desc "Read-only checks (brief §7 Preflight; note 12 R17). Prints names, counts and states — never secrets."
+  lane :preflight do
+    report = { "credentials_present" => credentials_report }
+    UI.message("asc.env names present: " + report["credentials_present"].map { |k, v| "#{k}=#{v ? 'yes' : 'NO'}" }.join(", "))
+    key = credentials!
+    api_key!(key)
+    blockers = []
+    bundle_id = ENV["BUNDLE_ID"]
+    report["minimum_ios"] = deployment_target
+    if (problem = demo_ios_problem) then blockers << problem end
+    app = Spaceship::ConnectAPI::App.find(bundle_id)
+    report["app_record"] = app ? "present" : "MISSING"
+    blockers << "no App Store Connect app record for the bundle ID (the owner creates it)" unless app
+    [bundle_id, "#{bundle_id}.NotificationService"].each do |identifier|
+      bid = Spaceship::ConnectAPI::BundleId.find(identifier)
+      report["bundle_id #{identifier}"] = bid ? bid.get_capabilities.map(&:capability_type).sort : "not registered"
+    end
+    certs = Spaceship::ConnectAPI::Certificate.all(filter: { certificateType: "DISTRIBUTION,IOS_DISTRIBUTION" })
+    report["distribution_certificates"] = certs.count
+    if app
+      groups = app.get_beta_groups(includes: "betaTesters").select(&:is_internal_group)
+      report["internal_groups"] = groups.map do |g|
+        { "name" => g.name, "automatic_distribution" => g.has_access_to_all_builds,
+          "testers" => (g.beta_testers || []).count }
+      end
+      blockers << "no internal TestFlight group (the owner creates one and adds themselves)" if groups.empty?
+      report["latest_testflight_build"] = latest_testflight_build_number(app_identifier: bundle_id, initial_build_number: 0)
+    end
+    report["xcode"] = sh("xcodebuild -version | head -1", log: false).strip
+    report["dedicated_keychain"] = File.exist?(KEYCHAIN) ? "present" : "absent"
+    report["blockers"] = blockers
+    FileUtils.mkdir_p(File.join(ROOT, "build"))
+    File.write(File.join(ROOT, "build", "preflight.json"), JSON.pretty_generate(report))
+    UI.success("Preflight report written to build/preflight.json")
+    report.each { |k, v| UI.message("#{k}: #{v}") }
+    UI.user_error!("Preflight found blockers: #{blockers.join('; ')}") unless blockers.empty?
+  end
+
+  desc "Generate, lint, contract vectors, mock-home smoke test, package unit tests, UI main path, mock-home UI tests (none skipped), warnings"
+  lane :test do
+    sim = ENV["DEBBIE_TEST_SIM"] || "Debbie SE"
+    Dir.chdir(ROOT) do
+      sh("xcodegen generate --quiet")
+      sh("tools/ci/lint.sh")
+      sh("node tools/contracts/verify-vectors.mjs")
+      sh("node MockHome/smoke.mjs")
+      Dir.chdir("Packages/DebbieKit") do
+        sh("../../tools/ci/xcb.sh package-tests 1500 -scheme DebbieKit-Package -destination 'platform=iOS Simulator,name=#{sim}' " \
+           "-derivedDataPath ../../build/DD-pkg test")
+      end
+      sh("tools/ci/check-warnings.sh logs/package-tests.log")
+      sh("tools/ci/xcb.sh ui-tests 1500 -project Debbie.xcodeproj -scheme Debbie -destination 'platform=iOS Simulator,name=#{sim}' " \
+         "-derivedDataPath build/DD -only-testing:DebbieUITests/MainPathUITests test")
+      sh("tools/ci/check-warnings.sh logs/ui-tests.log")
+      # The mock-home UI tests (unpair, Add a Laptop's camera, LAN-to-relay fallback) on a mock of their own; fails on any skip.
+      sh("tools/ci/mock-ui-tests.sh '#{sim}'")
+      sh("tools/ci/check-warnings.sh logs/mock-ui-tests.log")
+    end
+  end
+
+  desc "Debug Simulator build, unsigned Release device build, Release cleanliness, demo removable by one setting, no warnings"
+  lane :build do
+    Dir.chdir(ROOT) do
+      sh("xcodegen generate --quiet")
+      sh("tools/ci/xcb.sh build-debug-sim 1500 -project Debbie.xcodeproj -scheme Debbie -configuration Debug " \
+         "-destination 'generic/platform=iOS Simulator' -derivedDataPath build/DD build")
+      sh("tools/ci/check-warnings.sh logs/build-debug-sim.log")
+      sh("tools/ci/xcb.sh build-release-device 1500 -project Debbie.xcodeproj -scheme Debbie -configuration Release " \
+         "-destination 'generic/platform=iOS' -derivedDataPath build/DDR CODE_SIGNING_ALLOWED=NO build")
+      sh("tools/ci/check-warnings.sh logs/build-release-device.log")
+      sh("tools/ci/check-release-clean.sh build/DDR/Build/Products/Release-iphoneos/Debbie.app")
+      # The demo home is removed by one build setting (DEMO_HOME.md): prove it.
+      sh("tools/ci/xcb.sh build-release-nodemo 1500 -project Debbie.xcodeproj -scheme Debbie -configuration Release " \
+         "-destination 'generic/platform=iOS' -derivedDataPath build/DDN CODE_SIGNING_ALLOWED=NO 'SWIFT_ACTIVE_COMPILATION_CONDITIONS=' build")
+      sh("tools/ci/check-release-clean.sh build/DDN/Build/Products/Release-iphoneos/Debbie.app --expect-no-demo")
+    end
+  end
+
+  desc "Archive, sign (dedicated keychain, API key only), validate, upload for INTERNAL testing only"
+  lane :beta do
+    key = credentials!
+    check_demo_ios!
+    api_key = api_key!(key)
+    bundle_id = ENV["BUNDLE_ID"]
+    Dir.chdir(ROOT) do
+      sh("tools/ci/make-local-config.sh")
+      sh("xcodegen generate --quiet")
+    end
+    app = Spaceship::ConnectAPI::App.find(bundle_id)
+    UI.user_error!("BLOCKED: no App Store Connect app record for the bundle ID (the owner creates it; nothing uploaded)") unless app
+    group = internal_group(app)
+    UI.user_error!("BLOCKED: no internal TestFlight group (the owner creates one; nothing uploaded)") unless group
+    latest = latest_testflight_build_number(api_key: api_key, app_identifier: bundle_id, initial_build_number: 0)
+    build_number = Integer(latest.to_s.split(".").first) + 1
+
+    # Identifiers and capabilities: only BUNDLE_ID and BUNDLE_ID.NotificationService; enable, never disable (brief §3).
+    # create_capability is the public POST /v1/bundleIdCapabilities; update_capability needs a web session.
+    caps = { bundle_id => %w[PUSH_NOTIFICATIONS USERNOTIFICATIONS_TIMESENSITIVE HEALTHKIT],
+             "#{bundle_id}.NotificationService" => [] }
+    caps.each do |identifier, wanted|
+      bid = Spaceship::ConnectAPI::BundleId.find(identifier)
+      unless bid
+        UI.message("registering #{identifier}")
+        bid = Spaceship::ConnectAPI::BundleId.create(name: "Debbie #{identifier.split('.').last}", platform: "IOS", identifier: identifier)
+      end
+      have = bid.get_capabilities.map(&:capability_type)
+      (wanted - have).each { |cap| UI.message("enabling #{cap} on #{identifier}"); bid.create_capability(cap) }
+    end
+
+    # Dedicated keychain, appended to the search list; the default keychain is never changed (brief §3).
+    FileUtils.mkdir_p(SIGNING_DIR)
+    lock_down_signing_dir
+    pw_file = File.join(SIGNING_DIR, "keychain-password")
+    File.write(pw_file, SecureRandom.hex(24), perm: 0o600) unless File.exist?(pw_file)
+    pw = File.read(pw_file).strip
+    unless File.exist?(KEYCHAIN)
+      create_keychain(path: KEYCHAIN, password: pw, default_keychain: false, unlock: true, timeout: 3600,
+                      lock_when_sleeps: false, add_to_search_list: true)
+    end
+    unlock_keychain(path: KEYCHAIN, password: pw, add_to_search_list: true, set_default: false)
+    # Point every certificate check at the dedicated keychain, so nothing lists or imports into the login keychain.
+    ENV["CER_KEYCHAIN_PATH"] = KEYCHAIN
+    get_certificates(api_key: api_key, development: false, keychain_path: KEYCHAIN, keychain_password: pw,
+                     output_path: SIGNING_DIR)
+    cert_id = lane_context[SharedValues::CERT_CERTIFICATE_ID]
+    UI.user_error!("no certificate ID from get_certificates") if cert_id.to_s.empty?
+    lock_down_signing_dir
+    profiles = {}
+    [bundle_id, "#{bundle_id}.NotificationService"].each do |identifier|
+      # Only the certificate created above, and only profiles this lane named (brief §3: signing items it creates).
+      # App Store profile is sigh's default; passing adhoc: false and development: false together is refused.
+      get_provisioning_profile(api_key: api_key, app_identifier: identifier,
+                               cert_id: cert_id, skip_certificate_verification: true,
+                               provisioning_name: "Debbie AppStore #{identifier}", ignore_profiles_with_different_name: true,
+                               output_path: SIGNING_DIR, filename: "#{identifier}.mobileprovision")
+      profiles[identifier] = lane_context[SharedValues::SIGH_NAME]
+    end
+    lock_down_signing_dir
+
+    begin
+      # Manual signing per target, on the freshly generated project; the ensure block regenerates it,
+      # so the committed Debbie.xcodeproj is never left with the owner's signing settings.
+      { "Debbie" => bundle_id, "DebbieNotificationService" => "#{bundle_id}.NotificationService" }.each do |target, identifier|
+        update_code_signing_settings(path: File.join(ROOT, "Debbie.xcodeproj"), use_automatic_signing: false, targets: [target],
+                                     build_configurations: ["Release"], team_id: ENV["APPLE_TEAM_ID"],
+                                     code_sign_identity: "Apple Distribution", profile_name: profiles[identifier])
+      end
+      # fastlane runs actions one directory above the current one, so every path here is absolute.
+      build_app(project: File.join(ROOT, "Debbie.xcodeproj"), scheme: "Debbie", configuration: "Release", clean: true,
+                derived_data_path: File.join(ROOT, "build", "DD-archive"),
+                output_directory: File.dirname(IPA), buildlog_path: File.join(ROOT, "logs"),
+                archive_path: File.join(ROOT, "build", "Debbie.xcarchive"), export_method: "app-store",
+                xcargs: "CURRENT_PROJECT_VERSION=#{build_number} OTHER_CODE_SIGN_FLAGS='--keychain #{KEYCHAIN}'",
+                export_options: { signingStyle: "manual", provisioningProfiles: profiles, uploadSymbols: true,
+                                  manageAppVersionAndBuildNumber: false, teamID: ENV["APPLE_TEAM_ID"] })
+    ensure
+      Dir.chdir(ROOT) { sh("xcodegen generate --quiet") }
+    end
+    Dir.chdir(ROOT) { sh("tools/ci/validate-ipa.sh build/ipa/Debbie.ipa #{build_number}") }
+
+    # Upload with altool, which reads the key where it is (--p8-file-path). fastlane's pilot would write a
+    # temporary copy of the .p8 for altool, which the brief forbids (D-027). Internal testing only: nothing is
+    # submitted for review and no export-compliance answer is sent (Info.plist answers it).
+    UI.message("Uploading build #{build_number} for internal testing")
+    sh("xcrun", "altool", "--upload-package", IPA, "--api-key", cred("ASC_KEY_ID"), "--api-issuer", cred("ASC_ISSUER_ID"),
+       "--p8-file-path", key)
+    auto = group.has_access_to_all_builds ? "automatic distribution" : "NOT automatic: beta_notes adds the build to it"
+    UI.success("Uploaded build #{build_number} for internal testing (group '#{group.name}', #{auto}). " \
+               "After processing: tools/ci/fl build_status build:#{build_number}, then tools/ci/fl beta_notes build:#{build_number}.")
+  end
+
+  desc "Read-only: the processing state of an uploaded build"
+  lane :build_status do |options|
+    api_key!(credentials!)
+    app = Spaceship::ConnectAPI::App.find(ENV["BUNDLE_ID"])
+    UI.user_error!("no App Store Connect app record for the bundle ID") unless app
+    build = Spaceship::ConnectAPI::Build.all(app_id: app.id, build_number: options[:build].to_s).first
+    if build
+      UI.success("build #{options[:build]}: #{build.processing_state} (uploaded #{build.uploaded_date})")
+    else
+      UI.important("build #{options[:build]} not visible yet (App Store Connect is still receiving it)")
+    end
+  end
+
+  desc "After processing: attach the What to Test notes, and add the build to the internal group if it isn't automatic"
+  lane :beta_notes do |options|
+    api_key!(credentials!)
+    app = Spaceship::ConnectAPI::App.find(ENV["BUNDLE_ID"])
+    UI.user_error!("no App Store Connect app record for the bundle ID") unless app
+    number = options[:build].to_s
+    build = Spaceship::ConnectAPI::Build.all(app_id: app.id, build_number: number).first
+    UI.user_error!("build #{number} not found yet; try again once App Store Connect shows it") unless build
+    UI.user_error!("build #{number} is #{build.processing_state}; try again once it is VALID") unless build.processing_state == "VALID"
+    notes = File.read(File.join(ROOT, "fastlane", "what-to-test.txt"))
+    loc = build.get_beta_build_localizations.find { |l| l.locale == "en-US" }
+    if loc
+      Spaceship::ConnectAPI.patch_beta_build_localizations(localization_id: loc.id, attributes: { whatsNew: notes })
+    else
+      Spaceship::ConnectAPI.post_beta_build_localizations(build_id: build.id, attributes: { locale: "en-US", whatsNew: notes })
+    end
+    group = internal_group(app)
+    if group && !group.has_access_to_all_builds
+      build.add_beta_groups(beta_groups: [group]) # brief §3: MAY add builds to an existing internal group
+      UI.message("added build #{number} to internal group '#{group.name}'")
+    end
+    UI.success("What to Test attached to build #{number}")
+  end
+end

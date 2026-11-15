@@ -1,0 +1,10 @@
+Debbie, build 8 (iPhone only): the device-bug fixes from build 7, made safer after their review.
+• Unpair: Settings › Unpair This iPhone says "Unpairing…" and takes at most about four seconds. With the laptop on, the first screen comes back clean. With the laptop off, it says the laptop couldn't be told and how to remove this iPhone there (on the laptop's setup page, under Phones, press Remove).
+• If you removed the iPhone on the laptop first, unpairing on the iPhone no longer claims the laptop wasn't told.
+• Add a Laptop: the camera appears in the sheet. Pointing it at the wrong code (for example the pairing code) shows a message and the camera keeps looking, so you can then scan the right code without reopening the sheet.
+• To test with your laptop: pair; unpair with the laptop on (no warning); pair again, switch the laptop off, unpair (the warning); pair again and try Add a Laptop, first at the wrong code, then the right one.
+Known issues in this build:
+• Push notifications don't arrive yet: the app doesn't register its push token with the relay.
+• Swiping from the left edge doesn't go back from an alert; use the Back button.
+• Live video from a real camera isn't in this build (every live-view state is, in the demo).
+• Debbie's answers are written on the iPhone until a Gemini key is added.

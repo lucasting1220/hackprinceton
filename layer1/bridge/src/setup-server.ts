@@ -13,7 +13,11 @@ import { devicesPage } from "./devices-page.ts";
 import { type Html, html, page, STYLE_PATH, withDashboardLink } from "./html.ts";
 import { JoinPage, laptopsSection } from "./join-page.ts";
 import { errorMessage } from "./json-file.ts";
+import type { KeepAwakeStatus } from "./keep-awake.ts";
+import { type LaptopFacts, laptopCheckSection, readLaptopFacts } from "./laptop-check.ts";
 import { Laptop, type LaptopOptions } from "./laptop.ts";
+import type { LiveViewConsent } from "./live-view-consent.ts";
+import { LiveViewPage } from "./live-view-page.ts";
 import { CoordinatorLauncher, type CoordinatorStatus } from "./launcher.ts";
 import { readJsonBody } from "./network-server.ts";
 import type { PhoneAccess } from "./phone-access.ts";
@@ -53,8 +57,18 @@ export interface SetupServerOptions {
   readonly laptop?: Omit<LaptopOptions, "stateDir" | "repoRoot">;
   /** The words after "Remote access: " (step 5's relay link); "not set up" without it. */
   readonly remoteAccess?: () => string;
-  /** Why this laptop may sleep while the bridge runs (keep-awake.ts), or undefined. */
-  readonly keepAwakeProblem?: () => string | undefined;
+  /** Keep-awake (keep-awake.ts) once it has started: its state, and the page's Turn off. */
+  readonly keepAwake?: () => KeepAwakeSwitch | undefined;
+  /** Check this laptop's facts; this laptop's own by default, and tests pass others. */
+  readonly laptopFacts?: () => Promise<LaptopFacts>;
+  /** The resident's live view consent once the home is ready, for the Live view switch (step 7). */
+  readonly liveView?: () => LiveViewConsent | undefined;
+}
+
+/** What the setup page needs of keep-awake. */
+export interface KeepAwakeSwitch {
+  status(): KeepAwakeStatus;
+  turnOff(): Promise<void>;
 }
 
 /** A page route's answer: a page with its status, a 303 to `redirect`, or the stylesheet. */
@@ -104,10 +118,11 @@ async function machineBody(request: IncomingMessage): Promise<MachineReply | { b
   return machineRefusal(read.reply.status, String(code));
 }
 
-const welcomePage = (token: string) =>
+const welcomePage = (token: string, laptopCheck: Html) =>
   page(
     "Welcome",
-    html`<section class="panel"><h2>A new home</h2>
+    html`${panel(laptopCheck)}
+<section class="panel"><h2>A new home</h2>
 <p class="muted">Make this laptop the home laptop, which the other laptops and the caregivers' phones join.</p>
 <form method="post" action="/home">
 <input type="hidden" name="token" value="${token}"><button>Create a home</button></form></section>
@@ -117,6 +132,18 @@ const welcomePage = (token: string) =>
     undefined,
     { lead: html`<div class="sub">Set up Debbie on this laptop</div>`, grid: true },
   );
+
+/** The keep-awake notice at the top of the page: on, with Turn off; off for this run; or why not. */
+function keepAwakeNotice(status: KeepAwakeStatus, token: string): Html {
+  if (status.state === "problem") {
+    return html`<p>Keep awake: ${status.problem} Keep its lid open and keep it plugged in.</p>`;
+  }
+  if (status.state === "off") {
+    return html`<p>Keep awake: off for this run, so this laptop may sleep and stop watching the home. Start the bridge again to turn it back on.</p>`;
+  }
+  return html`<p>Keep awake: on. This laptop and its screen stay awake while the bridge runs. Keep its lid open and keep it plugged in.</p>
+<form method="post" action="/keep-awake/off"><input type="hidden" name="token" value="${token}"><button>Turn off keep-awake for this run</button></form>`;
+}
 const problemPage = (message: string) => page("Setup problem", html`<p>${message}</p>`);
 const RELOAD_PAGE = page(
   "Reload this page",
@@ -198,8 +225,9 @@ export async function startSetupServer(options: SetupServerOptions) {
   const pairingPage = new PairingPage(options.phoneAccess ?? (() => undefined), token);
   const alerts = new AlertIntake({ ready: options.homeAlerts ?? (() => undefined), log });
   const handoff = new HandoffIntake({ ready: options.homeAlerts ?? (() => undefined), log });
+  const liveViewPage = new LiveViewPage(options.liveView ?? (() => undefined), token);
   const homeSections = () =>
-    html`${panel(pairingPage.phonesSection())}${panel(alerts.section())}${panel(handoff.section())}`;
+    html`${panel(pairingPage.phonesSection())}${panel(liveViewPage.section())}${panel(alerts.section())}${panel(handoff.section())}`;
   let launcher: CoordinatorLauncher | undefined;
   let closed = false;
   // Add a laptop (step 3). The role lock (A4): a laptop joining a home can't create one, and the
@@ -237,20 +265,31 @@ export async function startSetupServer(options: SetupServerOptions) {
     if (!closed) await options.onHomeReady?.(home);
   }
 
-  /** The page for what the state folder holds, under keep-awake's problem if there is one. */
+  /** The page for what the state folder holds, under keep-awake's notice once it has started. */
   async function currentPage(): Promise<string> {
     const shown = await stateFolderPage();
-    const problem = options.keepAwakeProblem?.();
-    if (problem === undefined) return shown;
-    const notice = html`<p>Keep awake: ${problem}</p>`;
+    const status = options.keepAwake?.()?.status();
+    if (status === undefined) return shown;
+    const notice = keepAwakeNotice(status, token);
     return shown.replace("</h1>\n", () => `</h1>\n${notice.text}\n`);
   }
+
+  async function turnOffKeepAwake(): Promise<PageReply> {
+    await options.keepAwake?.()?.turnOff();
+    return { redirect: "/" };
+  }
+
+  const laptopFacts = options.laptopFacts ?? (() => readLaptopFacts(stateDir));
 
   /** The page for what the state folder holds: no home, the home, or why it cannot be read. */
   async function stateFolderPage(): Promise<string> {
     try {
       const home = await loadHome(stateDir);
-      if (home === undefined) return joinPage.currentPage() ?? welcomePage(token);
+      if (home === undefined) {
+        return (
+          joinPage.currentPage() ?? welcomePage(token, laptopCheckSection(await laptopFacts()))
+        );
+      }
       return homeView(home);
     } catch (error) {
       if (!(error instanceof HomeError)) throw error;
@@ -316,10 +355,12 @@ export async function startSetupServer(options: SetupServerOptions) {
     { method: "GET", path: "/devices", guard: "view", handle: devicesReply },
     { method: "GET", path: "/home", guard: "view", handle: showPage },
     { method: "POST", path: "/home", guard: "form", handle: createHomeReply },
+    { method: "POST", path: "/keep-awake/off", guard: "form", handle: turnOffKeepAwake },
     ...pairingPage.routes(),
     alerts.route(),
     ...joinPage.routes(),
     ...handoff.routes(),
+    ...liveViewPage.routes(),
   ];
 
   function refuse(why: string): PageReply {

@@ -10,6 +10,7 @@ import { HubJoin } from "./hub-join.ts";
 import { errorMessage } from "./json-file.ts";
 import { LanGateway, type OpenedRequest } from "./lan-gateway.ts";
 import { LinkHub } from "./link.ts";
+import type { LiveViewConsent } from "./live-view-consent.ts";
 import { lanAddresses, type NetworkSide, startNetworkSide } from "./network-server.ts";
 import type { MessageSource } from "./outbox.ts";
 import { Pairing } from "./pairing.ts";
@@ -29,6 +30,8 @@ export interface PhoneAccessOptions {
   readonly handoff?: PhoneHandoff;
   /** The pairing bundle's relay_url, from relay-credential.json; empty without one (step 5). */
   readonly relayUrl?: string;
+  /** The resident's live view consent, which the phone's `live_view_setting` changes (step 7). */
+  readonly liveView?: LiveViewConsent;
 }
 
 /** What the pairing page reads: the parts while the network side runs, or why it doesn't. */
@@ -143,8 +146,13 @@ export class PhoneAccess {
 
   async #listen(pairing: Pairing, phones: PhoneRegistry, join: HubJoin): Promise<void> {
     const port = this.#options.port ?? settings.BRIDGE_NETWORK_PORT;
-    const { outbox, handoff } = this.#options;
-    const handlers = { laptop_approval: (request: OpenedRequest) => join.approve(request) };
+    const { outbox, handoff, liveView } = this.#options;
+    const handlers = {
+      laptop_approval: (request: OpenedRequest) => join.approve(request),
+      ...(liveView === undefined
+        ? {}
+        : { live_view_setting: (request: OpenedRequest) => liveView.handle(request) }),
+    };
     const gateway = new LanGateway({
       homeId: this.#home.homeId,
       phones,

@@ -1,0 +1,75 @@
+# ---- Secrets: never commit (CLAUDE.md "Security") ----
+*.p8
+*.p12
+*.pfx
+*.cer
+*.certSigningRequest
+*.mobileprovision
+*.provisionprofile
+*.keychain
+*.keychain-db
+*.pem
+*.key
+asc.env
+*.env
+.env*
+!.env.example
+fastlane/report.xml
+fastlane/README.md.bak
+fastlane/.env*
+fastlane/*.json
+!fastlane/*.example.json
+**/AuthKey_*
+**/secrets/
+**/*.secret
+**/*credential*
+!**/*credential*.swift
+!**/*Credential*.swift
+.signing/
+signing/
+
+# ---- Xcode / SwiftPM ----
+build/
+DerivedData/
+*.xcuserstate
+xcuserdata/
+*.xcscmblueprint
+*.xccheckout
+.swiftpm/
+.build/
+Packages/.build/
+*.ipa
+*.dSYM.zip
+*.dSYM
+*.xcresult
+*.xcarchive
+fastlane/test_output/
+fastlane/Preview.html
+fastlane/screenshots/**/*.png
+Debbie.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/configuration/
+
+# ---- Tooling ----
+vendor/bundle/
+.bundle/
+node_modules/
+__pycache__/
+*.pyc
+.venv/
+.DS_Store
+*.swp
+.tmp/
+tmp/
+logs/
+Config/Local.xcconfig
+.signing/
+scratch/
+
+# ---- Screen-gate raw exports: keep only the named screenshots (tools/screens/tour.sh) ----
+Design/reviews/screens/raw/*/*
+!Design/reviews/screens/raw/*/[0-9][0-9]-*.png
+# ---- Mock home runtime output (encrypted push samples) ----
+MockHome/out/
+
+# Designer kit archive for sending (the folder itself is committed)
+DesignerKit.zip
+DesignerKit-*.zip

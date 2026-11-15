@@ -1,0 +1,593 @@
+{
+  "tokens": {
+    "bg.canvas": {
+      "role": "Screen background",
+      "light": "#FFFFFF",
+      "dark": "#0E1412",
+      "lightHC": "#FFFFFF",
+      "darkHC": "#000000"
+    },
+    "bg.surface": {
+      "role": "Cards, sheets",
+      "light": "#EEF3F0",
+      "dark": "#212B27",
+      "lightHC": "#E8EEEA",
+      "darkHC": "#1E2723"
+    },
+    "bg.sunken": {
+      "role": "Wells",
+      "light": "#E8EFEB",
+      "dark": "#0A0F0D",
+      "lightHC": "#E3EBE7",
+      "darkHC": "#000000"
+    },
+    "text.primary": {
+      "role": "Primary text",
+      "light": "#14201B",
+      "dark": "#EAF2EE",
+      "lightHC": "#000000",
+      "darkHC": "#FFFFFF"
+    },
+    "text.secondary": {
+      "role": "Secondary text",
+      "light": "#3F4D47",
+      "dark": "#B4C2BB",
+      "lightHC": "#26312C",
+      "darkHC": "#D7E2DC"
+    },
+    "text.tertiary": {
+      "role": "Placeholders",
+      "light": "#5E6B65",
+      "dark": "#93A29B",
+      "lightHC": "#3A4641",
+      "darkHC": "#BCC9C2"
+    },
+    "mint.fill": {
+      "role": "Signature mint",
+      "light": "#6CDCB0",
+      "dark": "#6CDCB0",
+      "lightHC": "#6CDCB0",
+      "darkHC": "#8EEBC6"
+    },
+    "mint.tint": {
+      "role": "Calm tint",
+      "light": "#DDF5EA",
+      "dark": "#123026",
+      "lightHC": "#D2F1E3",
+      "darkHC": "#1C4536"
+    },
+    "text.onMint": {
+      "role": "Text on mint",
+      "light": "#06392A",
+      "dark": "#06392A",
+      "lightHC": "#00241A",
+      "darkHC": "#00241A"
+    },
+    "accent.text": {
+      "role": "Mint companion text",
+      "light": "#0A6B4D",
+      "dark": "#6CDCB0",
+      "lightHC": "#00523A",
+      "darkHC": "#8EEBC6"
+    },
+    "ok.icon": {
+      "role": "OK glyph",
+      "light": "#0A6B4D",
+      "dark": "#6CDCB0",
+      "lightHC": "#00523A",
+      "darkHC": "#8EEBC6"
+    },
+    "ok.tint": {
+      "role": "OK tint",
+      "light": "#DDF5EA",
+      "dark": "#123026",
+      "lightHC": "#D2F1E3",
+      "darkHC": "#1C4536"
+    },
+    "caution.fill": {
+      "role": "Caution fill",
+      "light": "#F2A93B",
+      "dark": "#F2A93B",
+      "lightHC": "#F2A93B",
+      "darkHC": "#FFCB66"
+    },
+    "caution.tint": {
+      "role": "Caution surface",
+      "light": "#FFF0D2",
+      "dark": "#3A2C0E",
+      "lightHC": "#FFEBC4",
+      "darkHC": "#45330F"
+    },
+    "caution.text": {
+      "role": "Caution text",
+      "light": "#7A4A00",
+      "dark": "#F6C35E",
+      "lightHC": "#5C3700",
+      "darkHC": "#FFD68A"
+    },
+    "text.onCaution": {
+      "role": "Text on caution",
+      "light": "#2E1C00",
+      "dark": "#2E1C00",
+      "lightHC": "#1F1300",
+      "darkHC": "#1F1300"
+    },
+    "urgent.fill": {
+      "role": "Urgent fill",
+      "light": "#C2182B",
+      "dark": "#D42A3C",
+      "lightHC": "#A00E1F",
+      "darkHC": "#A8101F"
+    },
+    "text.onUrgent": {
+      "role": "Text on urgent",
+      "light": "#FFFFFF",
+      "dark": "#FFFFFF",
+      "lightHC": "#FFFFFF",
+      "darkHC": "#FFFFFF"
+    },
+    "urgent.border": {
+      "role": "Urgent border",
+      "light": "#C2182B",
+      "dark": "#FF8A92",
+      "lightHC": "#A00E1F",
+      "darkHC": "#FFB3B9"
+    },
+    "urgent.tint": {
+      "role": "Urgent tint",
+      "light": "#FCE6E8",
+      "dark": "#45161B",
+      "lightHC": "#FADADD",
+      "darkHC": "#561A21"
+    },
+    "urgent.text": {
+      "role": "Urgent text",
+      "light": "#A3121F",
+      "dark": "#FF8A92",
+      "lightHC": "#850A17",
+      "darkHC": "#FFB3B9"
+    },
+    "live.fill": {
+      "role": "Live badge",
+      "light": "#3446C8",
+      "dark": "#3446C8",
+      "lightHC": "#3446C8",
+      "darkHC": "#3446C8"
+    },
+    "text.onLive": {
+      "role": "Text on live",
+      "light": "#FFFFFF",
+      "dark": "#FFFFFF",
+      "lightHC": "#FFFFFF",
+      "darkHC": "#FFFFFF"
+    },
+    "live.border": {
+      "role": "Live outline",
+      "light": "#FFFFFF",
+      "dark": "#FFFFFF",
+      "lightHC": "#FFFFFF",
+      "darkHC": "#FFFFFF"
+    },
+    "live.scrim": {
+      "role": "Live background",
+      "light": "#0B0F0D",
+      "dark": "#0B0F0D",
+      "lightHC": "#000000",
+      "darkHC": "#000000"
+    },
+    "separator": {
+      "role": "Hairlines",
+      "light": "#D3DDD8",
+      "dark": "#2E3934",
+      "lightHC": "#7D8B84",
+      "darkHC": "#8A9891"
+    },
+    "border.control": {
+      "role": "Control outlines",
+      "light": "#7B8A83",
+      "dark": "#7F8E87",
+      "lightHC": "#3A4641",
+      "darkHC": "#C3CFC9"
+    },
+    "mint.fill.pressed": {
+      "role": "Signature mint, pressed (lighter, keeps text.onMint >= 7:1)",
+      "light": "#7DE3BC",
+      "dark": "#86E8C3",
+      "lightHC": "#7DE3BC",
+      "darkHC": "#9DEFD0"
+    },
+    "urgent.fill.pressed": {
+      "role": "Urgent fill, pressed",
+      "light": "#A31326",
+      "dark": "#BE2234",
+      "lightHC": "#8C0D1B",
+      "darkHC": "#93101D"
+    },
+    "surface.pressed": {
+      "role": "Quiet button / row pressed background",
+      "light": "#E2E9E5",
+      "dark": "#28322E",
+      "lightHC": "#DCE4DF",
+      "darkHC": "#2A3530"
+    },
+    "fill.disabled": {
+      "role": "Disabled control fill",
+      "light": "#DDE5E1",
+      "dark": "#26302B",
+      "lightHC": "#D3DCD7",
+      "darkHC": "#2C3631"
+    },
+    "label.disabled": {
+      "role": "Disabled control label (>= 3:1 on fill.disabled)",
+      "light": "#63706A",
+      "dark": "#909E98",
+      "lightHC": "#4A5651",
+      "darkHC": "#AEBBB5"
+    },
+    "focus.ring": {
+      "role": "Keyboard / Switch Control focus ring",
+      "light": "#0A6B4D",
+      "dark": "#6CDCB0",
+      "lightHC": "#00523A",
+      "darkHC": "#8EEBC6"
+    }
+  },
+  "pairings": [
+    {
+      "fg": "text.primary",
+      "bg": "bg.canvas",
+      "min": 7,
+      "use": "Body and headings on the screen background"
+    },
+    {
+      "fg": "text.primary",
+      "bg": "bg.surface",
+      "min": 7,
+      "use": "Body and headings on cards and sheets"
+    },
+    {
+      "fg": "text.secondary",
+      "bg": "bg.canvas",
+      "min": 7,
+      "use": "Timestamps, metadata on the background"
+    },
+    {
+      "fg": "text.secondary",
+      "bg": "bg.surface",
+      "min": 7,
+      "use": "Timestamps, metadata on cards"
+    },
+    {
+      "fg": "text.tertiary",
+      "bg": "bg.surface",
+      "min": 4.5,
+      "min_hc": 7,
+      "use": "Placeholders and hints on cards (never essential)"
+    },
+    {
+      "fg": "text.tertiary",
+      "bg": "bg.canvas",
+      "min": 4.5,
+      "min_hc": 7,
+      "use": "Placeholders and hints on the background"
+    },
+    {
+      "fg": "text.onMint",
+      "bg": "mint.fill",
+      "min": 7,
+      "use": "Primary button label; text on the mint hero"
+    },
+    {
+      "fg": "text.primary",
+      "bg": "mint.tint",
+      "min": 7,
+      "use": "Text on calm/OK rows"
+    },
+    {
+      "fg": "accent.text",
+      "bg": "bg.canvas",
+      "min": 4.5,
+      "min_hc": 7,
+      "use": "Mint-family links and icon-buttons on the background"
+    },
+    {
+      "fg": "accent.text",
+      "bg": "bg.surface",
+      "min": 4.5,
+      "min_hc": 7,
+      "use": "Mint-family links and icon-buttons on cards"
+    },
+    {
+      "fg": "accent.text",
+      "bg": "mint.tint",
+      "min": 4.5,
+      "min_hc": 7,
+      "use": "Mint-family text on calm rows"
+    },
+    {
+      "fg": "ok.icon",
+      "bg": "bg.surface",
+      "min": 3,
+      "min_hc": 4.5,
+      "use": "Healthy status glyph on cards"
+    },
+    {
+      "fg": "ok.icon",
+      "bg": "ok.tint",
+      "min": 3,
+      "min_hc": 4.5,
+      "use": "Healthy status glyph on calm rows"
+    },
+    {
+      "fg": "caution.text",
+      "bg": "bg.surface",
+      "min": 4.5,
+      "min_hc": 7,
+      "use": "Attention glyph and emphasis on cards"
+    },
+    {
+      "fg": "caution.text",
+      "bg": "bg.canvas",
+      "min": 4.5,
+      "min_hc": 7,
+      "use": "Attention glyph and emphasis on the background"
+    },
+    {
+      "fg": "caution.text",
+      "bg": "caution.tint",
+      "min": 4.5,
+      "min_hc": 7,
+      "use": "Attention glyph on the degraded / can't-reach-home surface"
+    },
+    {
+      "fg": "text.primary",
+      "bg": "caution.tint",
+      "min": 7,
+      "use": "Text on the degraded / can't-reach-home surface"
+    },
+    {
+      "fg": "text.onCaution",
+      "bg": "caution.fill",
+      "min": 7,
+      "use": "Label on a small attention badge"
+    },
+    {
+      "fg": "urgent.text",
+      "bg": "bg.surface",
+      "min": 4.5,
+      "min_hc": 7,
+      "use": "Urgent glyph and words on cards (after acknowledgement)"
+    },
+    {
+      "fg": "urgent.text",
+      "bg": "bg.canvas",
+      "min": 4.5,
+      "min_hc": 7,
+      "use": "Urgent glyph and words on the background"
+    },
+    {
+      "fg": "urgent.text",
+      "bg": "urgent.tint",
+      "min": 4.5,
+      "min_hc": 7,
+      "use": "Urgent glyph on acknowledged-alert history rows"
+    },
+    {
+      "fg": "text.primary",
+      "bg": "urgent.tint",
+      "min": 7,
+      "use": "Text on acknowledged-alert history rows"
+    },
+    {
+      "fg": "text.onUrgent",
+      "bg": "urgent.fill",
+      "min": 4.5,
+      "min_hc": 7,
+      "use": "Label on the newest unacknowledged urgent alert"
+    },
+    {
+      "fg": "urgent.border",
+      "bg": "bg.surface",
+      "min": 3,
+      "min_hc": 4.5,
+      "use": "Urgent banner outline on cards (dark-mode separation)"
+    },
+    {
+      "fg": "urgent.border",
+      "bg": "bg.canvas",
+      "min": 3,
+      "min_hc": 4.5,
+      "use": "Urgent banner outline on the background"
+    },
+    {
+      "fg": "text.onLive",
+      "bg": "live.fill",
+      "min": 4.5,
+      "min_hc": 7,
+      "use": "\"LIVE\" badge label and countdown"
+    },
+    {
+      "fg": "live.border",
+      "bg": "live.scrim",
+      "min": 3,
+      "min_hc": 4.5,
+      "use": "Live badge outline on the always-dark live screen"
+    },
+    {
+      "fg": "text.onLive",
+      "bg": "live.scrim",
+      "min": 7,
+      "use": "Live-view chrome text on the dark scrim"
+    },
+    {
+      "fg": "border.control",
+      "bg": "bg.surface",
+      "min": 3,
+      "min_hc": 4.5,
+      "use": "Text-field and toggle outlines; IC button borders on cards"
+    },
+    {
+      "fg": "border.control",
+      "bg": "bg.canvas",
+      "min": 3,
+      "min_hc": 4.5,
+      "use": "Control outlines on the background"
+    },
+    {
+      "fg": "text.onMint",
+      "bg": "mint.fill.pressed",
+      "min": 7,
+      "use": "Pressed primary button label"
+    },
+    {
+      "fg": "text.onUrgent",
+      "bg": "urgent.fill.pressed",
+      "min": 4.5,
+      "min_hc": 7,
+      "use": "Pressed urgent button label"
+    },
+    {
+      "fg": "text.primary",
+      "bg": "surface.pressed",
+      "min": 7,
+      "use": "Pressed quiet button / row"
+    },
+    {
+      "fg": "accent.text",
+      "bg": "surface.pressed",
+      "min": 4.5,
+      "min_hc": 7,
+      "use": "Pressed quiet button label"
+    },
+    {
+      "fg": "label.disabled",
+      "bg": "fill.disabled",
+      "min": 3,
+      "min_hc": 4.5,
+      "use": "Disabled control label"
+    },
+    {
+      "fg": "focus.ring",
+      "bg": "bg.canvas",
+      "min": 3,
+      "min_hc": 4.5,
+      "use": "Focus ring"
+    },
+    {
+      "fg": "focus.ring",
+      "bg": "bg.surface",
+      "min": 3,
+      "min_hc": 4.5,
+      "use": "Focus ring on cards"
+    },
+    {
+      "fg": "text.primary",
+      "bg": "bg.sunken",
+      "min": 7,
+      "min_hc": 7,
+      "use": "Primary text on bg.sunken"
+    },
+    {
+      "fg": "text.secondary",
+      "bg": "bg.sunken",
+      "min": 7,
+      "min_hc": 7,
+      "use": "Secondary text on bg.sunken"
+    },
+    {
+      "fg": "text.secondary",
+      "bg": "mint.tint",
+      "min": 7,
+      "min_hc": 7,
+      "use": "Secondary text on mint.tint"
+    },
+    {
+      "fg": "text.secondary",
+      "bg": "caution.tint",
+      "min": 7,
+      "min_hc": 7,
+      "use": "Secondary text on caution.tint"
+    },
+    {
+      "fg": "text.secondary",
+      "bg": "urgent.tint",
+      "min": 7,
+      "min_hc": 7,
+      "use": "Secondary text on urgent.tint"
+    },
+    {
+      "fg": "text.secondary",
+      "bg": "surface.pressed",
+      "min": 7,
+      "min_hc": 7,
+      "use": "Secondary text on surface.pressed"
+    },
+    {
+      "fg": "accent.text",
+      "bg": "bg.sunken",
+      "min": 4.5,
+      "min_hc": 7,
+      "use": "Mint-family interactive text on bg.sunken"
+    },
+    {
+      "fg": "accent.text",
+      "bg": "caution.tint",
+      "min": 4.5,
+      "min_hc": 7,
+      "use": "Mint-family interactive text on caution.tint"
+    },
+    {
+      "fg": "accent.text",
+      "bg": "urgent.tint",
+      "min": 4.5,
+      "min_hc": 7,
+      "use": "Mint-family interactive text on urgent.tint"
+    },
+    {
+      "fg": "text.tertiary",
+      "bg": "bg.sunken",
+      "min": 4.5,
+      "min_hc": 7,
+      "use": "text.tertiary on wells"
+    },
+    {
+      "fg": "border.control",
+      "bg": "bg.sunken",
+      "min": 3,
+      "min_hc": 4.5,
+      "use": "border.control on wells"
+    },
+    {
+      "fg": "focus.ring",
+      "bg": "bg.sunken",
+      "min": 3,
+      "min_hc": 4.5,
+      "use": "focus.ring on wells"
+    }
+  ],
+  "distinct": {
+    "min_delta_e2000": 17,
+    "pairs": [
+      [
+        "mint.fill",
+        "urgent.fill"
+      ],
+      [
+        "mint.fill",
+        "caution.fill"
+      ],
+      [
+        "mint.fill",
+        "live.fill"
+      ],
+      [
+        "caution.fill",
+        "urgent.fill"
+      ],
+      [
+        "urgent.fill",
+        "live.fill"
+      ]
+    ]
+  }
+}

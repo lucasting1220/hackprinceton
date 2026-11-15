@@ -1,0 +1,4 @@
+#include "Base.xcconfig"
+DEBBIE_APS_ENVIRONMENT = development
+// The on-device demo home: remove this one line to build without it (DEMO_HOME.md).
+SWIFT_ACTIVE_COMPILATION_CONDITIONS = $(inherited) DEBUG DEBBIE_DEMO_HOME

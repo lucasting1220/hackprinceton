@@ -88,7 +88,7 @@ The hub and the relay check the shape before anything else: `v` is 1; `type` mat
 | `unpair`            | phone → hub                                   | device ID | none                                                         | step 2                   |
 | `request`           | caregiver phone → hub                         | device ID | `request_id, kind` (`ask` or `check_now`), `text`            | the handoff              |
 | `laptop_approval`   | caregiver phone → hub                         | device ID | `join_id, laptop_pub, name, approve`                         | step 3 (§6)              |
-| `live_view_setting` | resident phone → hub                          | device ID | `enabled`                                                    | later                    |
+| `live_view_setting` | resident phone → hub                          | device ID | `enabled`                                                    | step 7                   |
 | `live_view_request` | caregiver phone → hub, through the relay only | device ID | `request_id, viewer_client_id`                               | step 7                   |
 | `report`            | hub → caregivers                              | `home`    | `report_id, date, title, body`                               | the handoff              |
 | `watch_data`        | phone in resident mode → hub, LAN only        | device ID | `heart_rate, sleep, steps` (below)                           | the handoff              |
@@ -171,7 +171,7 @@ At Confirm the hub seals the bundle with the phone key (`kid` `pair`, associated
    - `unpair` on `/v1/lan/commands`: the hub marks the phone removed and answers `202 {"v":1,"accepted":true}`.
    - `request` from a caregiver phone and `watch_data` from a resident phone or a caregiver phone in resident mode, on `/v1/lan/commands`, go to Layer 2's coordinator on `127.0.0.1` at `coordinator.json`'s `client_port`, with a 2-second time limit. The hub answers `202 {"v":1,"accepted":true}` once the coordinator answers 202, `503 no_job` when it answers 503 (no job takes that kind now), and `503 coordinator_down` when it can't be reached in time or answers anything else. A `request` from a resident phone gets `400 unsupported_type`, and a malformed plaintext `400 bad_request`.
    - `laptop_approval` on `/v1/lan/commands` goes to Add a laptop (§6.5).
-   - `live_view_setting` on `/v1/lan/commands` gets `501 not_supported` until the step that builds it.
+   - `live_view_setting` on `/v1/lan/commands` sets the resident's live view consent (step 7). `enabled` is `true` or `false`, else `400 bad_request`; a caregiver's phone gets `400 forbidden`, because the consent is the resident's. The hub saves it in `live-view.json` in its state folder, where it survives a restart, and answers `202 {"v":1,"accepted":true}`, or `500 internal` when it can't save it, keeping the old setting. It starts off, and the coordinator's setup page has the same switch.
    - Anything else gets `400 unsupported_type`: `ack`, an unknown type, `fetch` on `/v1/lan/commands`, a command on `/v1/lan/messages`, or a type that travels only through the relay.
 
 Checks 2 to 7 also run for commands that reach the hub through the relay (§5), with check 7 as for `/v1/lan/commands` and one memory of message IDs per phone, so the hub answers a command the same way on either route and a request can't be replayed by switching routes.
@@ -212,7 +212,7 @@ On `/v1/lan/messages` and `/v1/lan/commands`, 403 means only that the phone is u
 | 413    | `too_large`              | any POST           | The body is over 16 KiB                                                                                   |
 | 415    | `unsupported_media_type` | any POST           | The body isn't `application/json`                                                                         |
 | 500    | `internal`               | any                | Something unexpected. The hub logs the error's class, never the request                                   |
-| 501    | `not_supported`          | `/v1/lan/commands` | `live_view_setting`, before the step that builds it                                                       |
+| 501    | `not_supported`          | `/v1/lan/commands` | A type a later step builds, on a hub that doesn't have it yet                                             |
 | 503    | `no_job`                 | `/v1/lan/commands` | The coordinator has no job that takes this `request` or `watch_data` now; try again later                 |
 | 503    | `coordinator_down`       | `/v1/lan/commands` | The coordinator didn't answer within 2 seconds, or answered something else; try again later               |
 

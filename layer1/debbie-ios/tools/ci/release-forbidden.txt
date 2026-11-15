@@ -1,0 +1,24 @@
+# Extended regexes that must never match a Release binary (brief §3: mocks, debug menus,
+# fixtures and test hooks stay out of Release). Every Debug-only type and string uses one of
+# these markers on purpose (CRAFT.md §8). The on-device demo home is the one allowed exception:
+# it is checked separately with --expect-no-demo on a Release build made with the flag off.
+DebbieDebugTools
+DeveloperMenu
+DeveloperSettings
+DebbieFixture
+DebbieTestHook
+DEBBIE-DEBUG-CANARY
+MockHome
+DebbieTransportOverride
+127\.0\.0\.1:748[01]
+\(Debug\)
+DEBBIE_DEBUG_QR
+DEBBIE_REDUCE_MOTION
+DEBBIE_TRANSPORT[^_]
+DEBBIE_ASSISTANT
+DEBBIE_FAKE_CAMERA
+DEBBIE_INTRO
+DEBBIE_RESET
+DEBBIE_MOCK_PORT_BASE
+DebbieGallery
+DEBBIE_GALLERY

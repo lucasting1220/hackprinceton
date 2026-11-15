@@ -1,6 +1,6 @@
 # Layer 1: join and connect
 
-This is the bridge that runs on every laptop in a Debbie home. It serves the setup page, pairs laptops and phones, and starts Layer 2's programs. On the coordinator laptop it also connects the home to the relay. The design is in `docs/layer1-join-and-connect.md`, and the team rules are in `CLAUDE.md`. The iPhone app lives in the separate `debbie-ios` project.
+This is the bridge that runs on every laptop in a Debbie home. It serves the setup page, pairs laptops and phones, and starts Layer 2's programs. On the coordinator laptop it also connects the home to the relay. The design is in `docs/layer1-join-and-connect.md`, and the team rules are in `CLAUDE.md`. The iPhone app is developed in its own `debbie-ios` repository, and a copy of it is in `debbie-ios/` here (see "The iPhone app" below).
 
 ## Requirements
 
@@ -30,6 +30,20 @@ On a laptop with no home, the setup page's Join a home asks for the home laptop'
 `npm start` runs the bridge: it serves the setup page, opens it in the default browser and starts the home's coordinator. Pass `npm start -- --state-dir <absolute folder>` to use a state folder other than this system's default. To stop the bridge, press Ctrl+C, or create an empty file named `bridge.stop` in its state folder, which works on every system and from scripts. Once a home exists, the bridge also listens on port 7480 on every network interface, where phones pair and then reach the home over home Wi-Fi; the setup page's Pair a phone button shows the QR code. Either way it closes port 7480 and the setup page, stops the coordinator, removes `bridge.stop` and exits.
 
 Remote access goes through the relay. On the coordinator laptop, before pairing phones, pipe the relay's `admin provision` output into `node bridge/src/relay-credential.ts import [--state-dir <folder>]`, which saves `relay-credential.json` owner-only in the state folder, then restart the bridge. With that file the bridge keeps a link to the relay open, sends it the phone list, the saved alerts and a heartbeat every 20 seconds, answers phones' commands that come through it, and gives newly paired phones the relay's address; the setup page's Remote access line shows the link's state. A phone paired before the file existed must pair again to reach home away from Wi-Fi.
+
+## The iPhone app
+
+`debbie-ios/` is a copy of the iPhone app, taken from its own repository at commit `6178e83` on 2026-11-15, so the whole team can read and build it. The app is still developed in its own repository, so this copy does not update by itself, and a change made here does not reach the app: tell the Layer 1 owner instead. To build and test it, follow `debbie-ios/README.md`. Without a `Config/Local.xcconfig`, which holds the bundle ID, team ID and Gemini key and is never committed, it builds for the Simulator with a placeholder bundle ID.
+
+The copy leaves out the designer kit (`DesignerKit/`) and the review screenshots, renders and recordings (`Design/reviews/`), because the team rules keep recordings and screenshots out of this repository, and everything the app's own `.gitignore` keeps out, such as signing files, keys, build output and logs. The app's `CLAUDE.md` is kept as `debbie-ios/APP_CLAUDE.md` so that Claude Code sessions in this repository don't load it as instructions: its rules (commit only locally, never push, treat this repository as read-only) belong to the app's own repository. Biome skips `debbie-ios/` because it can't check Swift and Xcode writes the app's JSON files in its own style; the app's own checks are `tools/ci/fl test` and `tools/ci/fl build`.
+
+To refresh the copy, run this from `layer1/` on a new `l1/` branch, then update the commit named above:
+
+```sh
+rm -rf debbie-ios && mkdir debbie-ios
+git -C <the debbie-ios folder> archive HEAD -- . ':(exclude)DesignerKit' ':(exclude)Design/reviews' | tar -x -C debbie-ios
+mv debbie-ios/CLAUDE.md debbie-ios/APP_CLAUDE.md
+```
 
 ## What lint does not catch
 
