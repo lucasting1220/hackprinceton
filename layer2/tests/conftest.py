@@ -12,9 +12,16 @@ from typing import Any
 
 import pytest
 
+from layer2 import settings
 from layer2.coordinator.main import main as coordinator_main
 
 CONTRACTS = Path(__file__).resolve().parents[2] / "contracts"
+
+
+@pytest.fixture(autouse=True)
+def no_real_gemini_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Tests never reach the real Gemini with a key from the shell running them."""
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
 
 
 def contract(name: str) -> dict[str, Any]:
@@ -48,6 +55,58 @@ def ollama_url() -> Iterator[str]:
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     yield f"http://127.0.0.1:{server.server_address[1]}"
+    server.shutdown()
+    server.server_close()
+    thread.join()
+
+
+class FakeGemini(BaseHTTPRequestHandler):
+    """Answers like Gemini's generateContent. Set `text` (the answer), or `status` and `body`
+    for a refusal, and `delay` to answer late; `seen` holds each request's path, key and
+    body."""
+
+    text = "ok"
+    status = 200
+    body: bytes | None = None
+    delay = 0.0
+    seen: list[dict[str, Any]] = []
+
+    def do_POST(self) -> None:
+        request = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+        type(self).seen.append(
+            {"path": self.path, "key": self.headers.get("x-goog-api-key"), "body": request}
+        )
+        time.sleep(self.delay)
+        reply = self.body
+        if reply is None:
+            reply = json.dumps(
+                {"candidates": [{"content": {"role": "model", "parts": [{"text": self.text}]}}]}
+            ).encode()
+        try:
+            self.send_response(self.status)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(reply)))
+            self.end_headers()
+            self.wfile.write(reply)
+        except OSError:
+            pass  # the caller gave up waiting
+
+    def log_message(self, format: str, *args: object) -> None:
+        return
+
+
+@pytest.fixture
+def fake_gemini(monkeypatch: pytest.MonkeyPatch) -> Iterator[type[FakeGemini]]:
+    """A local server standing in for Gemini; settings.GEMINI_URL points at it."""
+
+    class handler(FakeGemini):
+        seen: list[dict[str, Any]] = []
+
+    server = HTTPServer(("127.0.0.1", 0), handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    monkeypatch.setattr(settings, "GEMINI_URL", f"http://127.0.0.1:{server.server_address[1]}")
+    yield handler
     server.shutdown()
     server.server_close()
     thread.join()

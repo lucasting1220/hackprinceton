@@ -32,10 +32,14 @@ EVENT_READ_LIMIT: Final = 10_000
 REPLY_MAX_BYTES: Final = 900 * 1024
 WORKER_MAX_MESSAGE_BYTES: Final = 1024 * 1024
 GATEWAY_REPLY_TIMEOUT_S: Final = 10.0
-QUICK_MODEL: Final = "llama3.1:8b"  # open: Layer 1 ask L9 (model tags)
 ASK_TIMEOUT_S: Final = 120.0
 ASK_MAX_PROMPT_CHARS: Final = 32_000
-PLANNER_MODEL: Final = "qwen2.5:3b"  # open: Layer 1 ask L9 (model tags)
+GEMINI_URL: Final = "https://generativelanguage.googleapis.com"
+GEMINI_KEY_FILE: Final = "gemini-api-key"  # in the coordinator's state folder
+# Stable models on Google's model list, Nov 15 2026.
+PLANNER_MODEL: Final = "gemini-3.5-flash-lite"
+QUICK_MODEL: Final = "gemini-3.5-flash-lite"
+DEEP_MODEL: Final = "gemini-3.8-flash"
 PLANNER_TIMEOUT_S: Final = 20.0
 PLAN_MEMORY_HEADROOM_GB: Final = 1.0
 BRIDGE_TIMEOUT_S: Final = 5.0

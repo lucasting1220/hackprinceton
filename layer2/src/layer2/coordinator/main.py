@@ -24,6 +24,7 @@ from layer2.coordinator.plan import JobNeed, LaptopView, Placement, Plan
 from layer2.coordinator.registry import Registry
 from layer2.coordinator.server import create_control_app, create_dashboard_app
 from layer2.files import ConfigError, load_config, wait_for_stop_file
+from layer2.gemini import api_key
 from layer2.job_files import job_needs
 from layer2.stopping import consume_stop_file, stop_requested, stop_signals
 
@@ -83,6 +84,13 @@ async def _log_when_ready(servers: list[_Server], config: CoordinatorConfig) -> 
         config.client_port,
         config.stop_file,
     )
+    if api_key(Path(config.state_dir)) is None:
+        log.warning(
+            "L2 coordinator: no Gemini API key (GEMINI_API_KEY, or %s in %s): the planner "
+            "uses the rules and ask() fails",
+            settings.GEMINI_KEY_FILE,
+            config.state_dir,
+        )
 
 
 def _job_needs() -> list[JobNeed]:
@@ -97,7 +105,8 @@ async def _serve(config: CoordinatorConfig) -> int:
     def planner(
         needs: list[JobNeed], connected: list[LaptopView], known: set[str], previous: Plan
     ) -> tuple[Plan, str, str]:
-        return choose_plan(config.ollama_url, needs, connected, known, previous, planner_log)
+        key = api_key(Path(config.state_dir))
+        return choose_plan(key, needs, connected, known, previous, planner_log)
 
     placement = Placement(_job_needs, planner=planner)
     events = EventLog(Path(config.state_dir) / "events")

@@ -1,13 +1,9 @@
 import json
-import threading
 import time
-from collections.abc import Iterator
-from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
-from typing import Any
 
 import pytest
-from conftest import closed_port
+from conftest import FakeGemini, closed_port
 
 from layer2 import settings
 from layer2.coordinator.ai_plan import PlanError, choose_plan, parse_and_check
@@ -82,83 +78,51 @@ def test_answers_that_are_not_a_plan_are_rejected(text: str) -> None:
         parse_and_check(text, NEEDS, [A, B], Plan())
 
 
-class _Planner(BaseHTTPRequestHandler):
-    reply = b""
-    delay = 0.0
-    seen: list[dict[str, Any]] = []
-
-    def do_POST(self) -> None:
-        type(self).seen.append(json.loads(self.rfile.read(int(self.headers["Content-Length"]))))
-        time.sleep(self.delay)
-        body = json.dumps({"response": self.reply.decode()}).encode()
-        try:
-            self.send_response(200)
-            self.send_header("Content-Length", str(len(body)))
-            self.end_headers()
-            self.wfile.write(body)
-        except OSError:
-            pass  # the coordinator gave up waiting
-
-    def log_message(self, format: str, *args: object) -> None:
-        return
+KEY = "test-key"
 
 
-@pytest.fixture
-def planner() -> Iterator[tuple[str, type[_Planner]]]:
-    class handler(_Planner):
-        seen: list[dict[str, Any]] = []
-
-    server = HTTPServer(("127.0.0.1", 0), handler)
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
-    thread.start()
-    yield f"http://127.0.0.1:{server.server_address[1]}", handler
-    server.shutdown()
-    server.server_close()
-    thread.join()
-
-
-def test_the_ai_plan_is_used_when_it_passes(
-    planner: tuple[str, type[_Planner]], tmp_path: Path
-) -> None:
-    url, handler = planner
-    handler.reply = answer(GOOD).encode()
+def test_the_ai_plan_is_used_when_it_passes(fake_gemini: type[FakeGemini], tmp_path: Path) -> None:
+    fake_gemini.text = answer(GOOD)
     plan, made_by, why = choose_plan(
-        url, NEEDS, [A, B], {"a", "b"}, Plan(), tmp_path / "planner.log"
+        KEY, NEEDS, [A, B], {"a", "b"}, Plan(), tmp_path / "planner.log"
     )
     assert (plan.jobs, made_by, why) == (GOOD, "ai", "camera jobs on a")
-    [request] = handler.seen
-    assert (request["model"], request["format"], request["stream"]) == (
-        settings.PLANNER_MODEL,
-        "json",
-        False,
-    )
+    [request] = fake_gemini.seen
+    assert request["path"] == f"/v1beta/models/{settings.PLANNER_MODEL}:generateContent"
+    assert request["key"] == KEY
+    assert request["body"]["generationConfig"] == {"responseMimeType": "application/json"}
     assert "AI plan used" in (tmp_path / "planner.log").read_text("utf-8")
 
 
 def test_a_bad_or_late_ai_plan_falls_back_to_the_rules(
-    planner: tuple[str, type[_Planner]], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    fake_gemini: type[FakeGemini], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    url, handler = planner
-    handler.reply = answer({**GOOD, "fall_model": "b"}).encode()
+    fake_gemini.text = answer({**GOOD, "fall_model": "b"})
     plan, made_by, why = choose_plan(
-        url, NEEDS, [A, B], {"a", "b"}, Plan(), tmp_path / "planner.log"
+        KEY, NEEDS, [A, B], {"a", "b"}, Plan(), tmp_path / "planner.log"
     )
     assert made_by == "rules" and plan.jobs["fall_model"] == "a"
     assert "needs the camera" in why
     assert "needs the camera" in (tmp_path / "planner.log").read_text("utf-8")
     monkeypatch.setattr(settings, "PLANNER_TIMEOUT_S", 0.2)
-    handler.reply = answer(GOOD).encode()
-    handler.delay = 1.0
+    fake_gemini.text = answer(GOOD)
+    fake_gemini.delay = 1.0
     started = time.monotonic()
-    _, made_by, why = choose_plan(url, NEEDS, [A, B], {"a", "b"}, Plan())
+    _, made_by, why = choose_plan(KEY, NEEDS, [A, B], {"a", "b"}, Plan())
     assert made_by == "rules" and time.monotonic() - started < 1.0
     assert "did not answer" in why
 
 
-def test_no_ollama_or_nothing_to_plan_uses_the_rules_without_asking() -> None:
-    down = f"http://127.0.0.1:{closed_port()}"
-    assert choose_plan(down, NEEDS, [A, B], {"a", "b"}, Plan())[1] == "rules"
-    assert choose_plan(down, [], [A, B], {"a", "b"}, Plan()) == (
+def test_no_key_gemini_down_or_nothing_to_plan_uses_the_rules(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings, "GEMINI_URL", f"http://127.0.0.1:{closed_port()}")
+    assert choose_plan(None, NEEDS, [A, B], {"a", "b"}, Plan())[1:] == (
+        "rules",
+        "the coordinator has no Gemini API key",
+    )
+    assert choose_plan(KEY, NEEDS, [A, B], {"a", "b"}, Plan())[1] == "rules"
+    assert choose_plan(KEY, [], [A, B], {"a", "b"}, Plan()) == (
         Plan(),
         "rules",
         "nothing to place yet",

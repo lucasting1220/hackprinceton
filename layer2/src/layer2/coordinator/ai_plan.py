@@ -1,7 +1,7 @@
 """The AI planner (docs/layer2-device-management.md, "The plan"), with code checks and the
 rule-based fallback.
 
-The coordinator's own Ollama, with PLANNER_MODEL, is given each connected laptop (sensors and
+Gemini, with PLANNER_MODEL (layer2/gemini.py), is given each connected laptop (sensors and
 free memory), the jobs Layers 3 and 4 asked for, and the previous plan, and returns where each
 job runs as JSON. Code checks every plan before it is used:
 - every job named exists, and every laptop named is connected;
@@ -10,9 +10,9 @@ job runs as JSON. Code checks every plan before it is used:
   PLAN_MEMORY_HEADROOM_GB left for the operating system;
 - the safety work is all placed: every job some connected laptop could hold must be placed.
 What is left out is listed as dropped with the reason the code works out, not the model's.
-If the plan fails a check, the model takes longer than PLANNER_TIMEOUT_S, or Ollama is
-unreachable, the rule-based plan is used at once. The model's reasoning goes to the planner
-log file, never to the dashboard.
+If the plan fails a check, the model takes longer than PLANNER_TIMEOUT_S, Gemini is
+unreachable, or the coordinator has no Gemini API key, the rule-based plan is used at once.
+The model's reasoning goes to the planner log file, never to the dashboard.
 """
 
 import json
@@ -22,7 +22,7 @@ from typing import Any
 
 from layer2 import settings
 from layer2.coordinator.plan import JobNeed, LaptopView, Plan, rule_plan
-from layer2.ollama import ModelError, generate
+from layer2.gemini import ModelError, generate
 
 log = logging.getLogger(__name__)
 
@@ -32,7 +32,7 @@ class PlanError(Exception):
 
 
 def choose_plan(
-    ollama_url: str,
+    key: str | None,
     needs: list[JobNeed],
     connected: list[LaptopView],
     known: set[str],
@@ -45,10 +45,12 @@ def choose_plan(
     fallback = rule_plan(needs, connected, known, previous)
     if not needs or not connected:
         return fallback, "rules", "nothing to place yet"
+    if key is None:
+        return fallback, "rules", "the coordinator has no Gemini API key"
     prompt = planner_prompt(needs, connected, previous)
     try:
         text = generate(
-            ollama_url,
+            key,
             settings.PLANNER_MODEL,
             prompt,
             timeout=settings.PLANNER_TIMEOUT_S,
