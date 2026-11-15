@@ -209,9 +209,26 @@ function listOf(
   return rows;
 }
 
+/** A UTC time in the range contracts/README.md gives for watch readings. */
+function isReadingTime(value: unknown): value is string {
+  if (!isUtcTime(value)) return false;
+  const at = Date.parse(value);
+  const earliest = Date.parse(settings.WATCH_READING_EARLIEST_AT);
+  return at >= earliest && at <= Date.parse(settings.WATCH_READING_LATEST_AT);
+}
+
+/** A night's date, YYYY-MM-DD, in the same range as the readings' times. */
+function isReadingDate(value: unknown): value is string {
+  if (!isCalendarDate(value)) return false;
+  const earliest = settings.WATCH_READING_EARLIEST_AT.slice(0, 10);
+  return value >= earliest && value <= settings.WATCH_READING_LATEST_AT.slice(0, 10);
+}
+
 /**
- * The watch data Layer 3 gets: `{device_id, heart_rate, sleep, steps}`, each list holding only the
- * doc's fields, or undefined if any is missing or malformed. Each list may be empty.
+ * The watch data Layer 3 gets, exactly contracts/watch-data.json: `{schema_version, type,
+ * device_id, heart_rate, sleep, steps}`, each list holding only the contract's fields, or undefined
+ * if any is missing or malformed. Each list may be empty. `device_id` is always the sending phone's,
+ * from its envelope; a `device_id`, `type` or `schema_version` in the plaintext is ignored.
  */
 export function parseWatchData(
   deviceId: string,
@@ -219,20 +236,27 @@ export function parseWatchData(
 ): Readonly<Record<string, unknown>> | undefined {
   const { heart_rate: heartRows, sleep: sleepRows, steps: stepRows } = plaintext;
   const heartRate = listOf(heartRows, ({ measured_at, bpm }) =>
-    isUtcTime(measured_at) && isAmount(bpm) ? { measured_at, bpm } : undefined,
+    isReadingTime(measured_at) && isAmount(bpm) ? { measured_at, bpm } : undefined,
   );
   const sleep = listOf(sleepRows, (row) => {
     const { night_of, asleep_minutes, bedtime_at, wake_at, interruptions } = row;
-    const times = isUtcTime(bedtime_at) && isUtcTime(wake_at);
-    if (!isCalendarDate(night_of) || !isAmount(asleep_minutes) || !times) return undefined;
+    const times = isReadingTime(bedtime_at) && isReadingTime(wake_at);
+    if (!isReadingDate(night_of) || !isAmount(asleep_minutes) || !times) return undefined;
     if (!isCount(interruptions)) return undefined;
     return { night_of, asleep_minutes, bedtime_at, wake_at, interruptions };
   });
   const steps = listOf(stepRows, ({ measured_at, steps_today }) =>
-    isUtcTime(measured_at) && isCount(steps_today) ? { measured_at, steps_today } : undefined,
+    isReadingTime(measured_at) && isCount(steps_today) ? { measured_at, steps_today } : undefined,
   );
   if (heartRate === undefined || sleep === undefined || steps === undefined) return undefined;
-  return { device_id: deviceId, heart_rate: heartRate, sleep, steps };
+  return {
+    schema_version: settings.WATCH_DATA_SCHEMA_VERSION,
+    type: "watch_data",
+    device_id: deviceId,
+    heart_rate: heartRate,
+    sleep,
+    steps,
+  };
 }
 
 export interface PhoneHandoffOptions {
