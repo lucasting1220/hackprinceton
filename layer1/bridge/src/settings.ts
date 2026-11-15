@@ -356,3 +356,13 @@ export const RELAY_LINK_ACK_TIMEOUT_MS = 10_000;
 
 /** The most outbox messages sent to the relay and not yet acknowledged. */
 export const RELAY_LINK_IN_FLIGHT_MAX = 20;
+
+/** Keep-awake on macOS: caffeinate, which holds off idle sleep until the bridge's process ends. */
+export const KEEP_AWAKE_MACOS_FILE = "/usr/bin/caffeinate";
+
+/** Keep-awake on Windows: Windows PowerShell, which ships with every supported version. */
+export const KEEP_AWAKE_WINDOWS_FILE = "powershell.exe";
+
+/** How long the keep-awake helper may take to start, and to end once the bridge stops it. */
+export const KEEP_AWAKE_START_TIMEOUT_MS = 5_000;
+export const KEEP_AWAKE_STOP_TIMEOUT_MS = 5_000;

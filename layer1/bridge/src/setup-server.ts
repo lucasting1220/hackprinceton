@@ -51,6 +51,8 @@ export interface SetupServerOptions {
   readonly laptop?: Omit<LaptopOptions, "stateDir" | "repoRoot">;
   /** The words after "Remote access: " (step 5's relay link); "not set up" without it. */
   readonly remoteAccess?: () => string;
+  /** Why this laptop may sleep while the bridge runs (keep-awake.ts), or undefined. */
+  readonly keepAwakeProblem?: () => string | undefined;
 }
 
 /** A page route's answer: a page with its status, or a 303 to `redirect`. */
@@ -203,8 +205,17 @@ export async function startSetupServer(options: SetupServerOptions) {
     if (!closed) await options.onHomeReady?.(home);
   }
 
-  /** The page for what the state folder holds: no home, the home, or why it cannot be read. */
+  /** The page for what the state folder holds, under keep-awake's problem if there is one. */
   async function currentPage(): Promise<string> {
+    const shown = await stateFolderPage();
+    const problem = options.keepAwakeProblem?.();
+    if (problem === undefined) return shown;
+    const notice = html`<p>Keep awake: ${problem}</p>`;
+    return shown.replace("</h1>\n", () => `</h1>\n${notice.text}\n`);
+  }
+
+  /** The page for what the state folder holds: no home, the home, or why it cannot be read. */
+  async function stateFolderPage(): Promise<string> {
     try {
       const home = await loadHome(stateDir);
       if (home === undefined) return joinPage.currentPage() ?? welcomePage(token);
