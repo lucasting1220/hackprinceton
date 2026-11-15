@@ -12,11 +12,14 @@ started. Plain blocking Python.
     home = layer2.status()     # the same data as the coordinator's /api/state
     layer2.to_phone("alerts", {...})   # to Layer 1's bridge: alerts, replies, status, reports
     layer2.on_request(handle)          # each request from a phone, forever (Layer 4)
-    reading = layer2.receive("watch-data")   # the next watch reading or None (Layer 3)
+    batch = layer2.receive("watch-data")     # the next batch of watch data or None (Layer 3)
+    layer2.pass_on("watch-readings", reading)   # to the job that takes it (Layer 3 to Layer 4)
+    reading = layer2.receive("watch-readings")  # the next watch reading or None (Layer 4)
 
     for frame in layer2.feed("camera"):   # frame.data (JPEG), frame.captured_at (UTC)
 
-So far: the event log, ask(), status(), to_phone(), receive(), on_request() and feed().
+So far: the event log, ask(), status(), to_phone(), receive(), pass_on(),
+on_request() and feed().
 fan_out() comes with a later build step. feed() uses the websockets package, installed with
 layer2; everything else is the standard library.
 """
@@ -153,13 +156,20 @@ class Layer2:
         self._call({"type": "phone_send", "kind": kind, "body": message})
 
     def receive(
-        self, kind: Literal["requests", "watch-data"], wait_s: float = 25.0
+        self, kind: Literal["requests", "watch-data", "watch-readings"], wait_s: float = 25.0
     ) -> dict[str, Any] | None:
-        """The next message from Layer 1's bridge of this kind, waiting up to `wait_s` (at most
-        30 s); None if none came. The first call makes this job the one that takes `kind`."""
+        """The next message of this kind, from Layer 1's bridge (requests, watch-data) or from
+        another job (watch-readings), waiting up to `wait_s` (at most 30 s); None if none came.
+        The first call makes this job the one that takes `kind`."""
         reply = self._call({"type": "receive", "kind": kind, "wait_s": wait_s}, wait_s + 10.0)
         message: dict[str, Any] | None = reply.get("message")
         return message
+
+    def pass_on(self, kind: Literal["watch-readings"], message: dict[str, Any]) -> None:
+        """Hand one message to the job that takes `kind` (its receive(kind) gets it unchanged),
+        through the coordinator. Returns once that job's worker has it; raises Layer2Error when
+        no job takes `kind` or it could not be carried."""
+        self._call({"type": "pass_on", "kind": kind, "body": message})
 
     def on_request(self, handle: Callable[[dict[str, Any]], None]) -> None:
         """Call `handle` with each request from a phone, forever. A Layer2Error (for example
