@@ -234,8 +234,8 @@ export const RELAY_HUB_SILENT_CLOSE_MS = 40_000;
 /** How long a phone's command waits at the relay for the hub's answer before 504 hub_timeout. */
 export const RELAY_COMMAND_TIMEOUT_MS = 5_000;
 
-/** Live view (phone-hub.md §7): the paths at the relay. */
-export const LIVE_VIEW_PATH = "/v1/live-view";
+/** Live view (phone-hub.md §7): the sessions' path at the relay. */
+export const LIVE_VIEW_PATH = "/v1/live-view/sessions";
 /** How long one live view session lasts, and its TURN login with it: a setting, not a limit. */
 export const LIVE_VIEW_SESSION_MS = 5 * 60_000;
 /** How long a session may take to become ready: the hub's answer and the sender's sign-in. */

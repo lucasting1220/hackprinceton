@@ -78,7 +78,7 @@ export const REFUSED = {
 } as const;
 
 /** The session path of live view's status and stop calls (§7.2, §7.3). */
-const SESSION_PATH = new RegExp(`^${LIVE_VIEW_PATH}/([0-9a-f-]{36})(/stop)?$`);
+const SESSION_PATH = new RegExp(`^${LIVE_VIEW_PATH}/([0-9a-f-]{36})$`);
 
 /** Commands the relay never carries (§5.5): watch readings stay on the home network. */
 const LAN_ONLY_TYPES: readonly string[] = ["heart_rate", "fetch"];
@@ -202,8 +202,8 @@ interface Signed {
 }
 
 interface Route {
-  readonly method: "GET" | "POST";
-  /** The path, or "session" and "session_stop" for live view's per-session paths (§7). */
+  readonly method: "GET" | "POST" | "DELETE";
+  /** The path, or "session" for live view's per-session path (§7). */
   readonly path: string;
   /** Whether a resident device may call it (R14). */
   readonly resident: boolean;
@@ -324,8 +324,8 @@ export function createPhoneApi(options: PhoneApiOptions): http.Server {
       },
     },
     {
-      method: "POST",
-      path: "session_stop",
+      method: "DELETE",
+      path: "session",
       resident: false,
       handle: ({ device, request, sessionId }) => {
         request.resume();
@@ -401,8 +401,7 @@ export function createPhoneApi(options: PhoneApiOptions): http.Server {
       return { ...REFUSED.method, headers: { Allow: "GET" } };
     }
     const session = SESSION_PATH.exec(url.pathname);
-    const path =
-      session === null ? url.pathname : session[2] === undefined ? "session" : "session_stop";
+    const path = session === null ? url.pathname : "session";
     const route = routes.find((row) => row.path === path && row.method === request.method);
     if (route === undefined) {
       const allowed = routes.filter((row) => row.path === path).map((row) => row.method);

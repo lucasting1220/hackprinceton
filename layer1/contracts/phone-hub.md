@@ -410,42 +410,45 @@ link_key = HKDF-SHA256(ikm = SHA-256(join_token) as 32 raw bytes, salt = UTF-8 n
 
 ## 7. Live view
 
-A caregiver watches the camera laptop's video for up to 5 minutes at a time, when the resident has turned live view on (§4.4's `live_view_setting`). The relay makes a session for each request; the hub checks the request and the resident's consent; the camera laptop's bridge opens the sender page, which streams over WebRTC. The relay passes the WebRTC connection details between the phone and the sender page on one signaling WebSocket per session, and never sees the video. Sessions live in the relay's memory, so a relay restart ends them. Video only: no audio and no talk-back.
+A caregiver watches the camera laptop's video for up to 5 minutes at a time, when the resident has turned live view on (§4.4's `live_view_setting`). The relay makes a session for each request; the hub checks the request and the resident's consent; the camera laptop's bridge opens the sender page, which streams over WebRTC. The relay passes the WebRTC connection details between the phone and the sender page on one signaling WebSocket per session, and never sees the video. Sessions live in the relay's memory, so a relay restart ends them. Video only: no audio and no talk-back. The paths, states and the session's fields follow the app's CONTRACTS.md §7.
 
 ### 7.1 Starting a session
 
-The caregiver's phone sends `POST /v1/live-view` to the relay, signed in as §5.1 says, with one §3 wrapper of type `live_view_request` sealed with its own key. Its plaintext is `{"msg_id","sent_at","type":"live_view_request","request_id":"<id>","viewer_client_id":"<id>"}`: a new `request_id` per tap, and a fresh `viewer_client_id`, both IDs (§3's rule). It travels through the relay only, never on the LAN.
+The caregiver's phone sends `POST /v1/live-view/sessions` to the relay, signed in as §5.1 says, with one §3 wrapper of type `live_view_request` sealed with its own key. Its plaintext is `{"msg_id","sent_at","type":"live_view_request","request_id":"<id>","viewer_client_id":"<id>"}`: a new `request_id` per tap, and a fresh `viewer_client_id`, both IDs (§3's rule). It travels through the relay only, never on the LAN.
 
-The relay checks the wrapper's shape (`400 bad_request`), that the caller is a caregiver (`403 forbidden`), that `envelope.kid` is the caller (`403 forbidden`), that the type is `live_view_request` (`400 unsupported_type`) and that the hub is connected (`503 hub_offline`). It then makes the session: a `session_id` (a UUID), the time it ends, 5 minutes later, and a token for the sender page. It ends the home's earlier session, if any (reason `replaced`), because the camera laptop has one sender window, and sends the hub `live_view_start` with the phone's wrapper unopened. It answers at once, `202` with the session's status (§7.2), in state `starting`.
+The relay checks the wrapper's shape (`400 bad_request`), that the caller is a caregiver (`403 forbidden`), that `envelope.kid` is the caller (`403 forbidden`), that the type is `live_view_request` (`400 unsupported_type`) and that the hub is connected (`503 hub_offline`). It then makes the session: a `session_id` (a UUID), the time it ends, 5 minutes later, and a token for the sender page. It ends the home's earlier session, if any (reason `replaced`), because the camera laptop has one sender window, and sends the hub `live_view_start` with the phone's wrapper unopened. It answers at once, `202` with the session (§7.2), in state `requested`.
 
-### 7.2 Session status
+### 7.2 The session
 
-`GET /v1/live-view/<session_id>` answers the phone that started the session with `200 {"v":1,"session_id":"…","state":"ready","reason":null,"expires_at":"2026-11-14T15:25:00Z"}`. Any other caregiver gets `404 not_found`, and a resident `403 forbidden`. An ended session answers for 10 minutes, then `404`. The phone asks about once a second while the session is `starting`.
+`GET /v1/live-view/sessions/<session_id>` answers the phone that started the session with `200 {"v":1,"session_id":"…","state":"ready","reason":null,"expires_at":"2026-11-14T15:25:00Z","viewer":{…}}`. Any other caregiver gets `404 not_found`, and a resident `403 forbidden`. An ended session answers for 10 minutes, then `404`. The phone asks about once a second while the session is `requested`, and every few seconds while it plays, to learn when it ends.
 
-| `state`    | Meaning                                                                         | `reason`                                                      |
-| ---------- | ------------------------------------------------------------------------------- | ------------------------------------------------------------- |
-| `starting` | The hub hasn't answered yet, or the sender page hasn't joined signaling         | `null`                                                        |
-| `ready`    | The hub accepted and the sender page is on signaling: join it (§7.4)            | `null`                                                        |
-| `denied`   | The hub refused. The app says so: `off` means the resident turned live view off | the hub's code, such as `off`, `no_camera` or `not_supported` |
-| `ended`    | The session is over; **Keep watching** starts a new one (§7.1)                  | below                                                         |
+| `state`     | Meaning                                                                            | `reason`                                                        |
+| ----------- | ---------------------------------------------------------------------------------- | --------------------------------------------------------------- |
+| `requested` | The hub hasn't answered yet, or the sender page hasn't joined signaling            | `null`                                                          |
+| `ready`     | The hub accepted and the sender page is on signaling: join it with `viewer` (§7.4) | `null`                                                          |
+| `denied`    | The resident's live view switch is off                                             | `live_view_off`                                                 |
+| `ended`     | The session is over; **Keep watching** starts a new one (§7.1)                     | `stopped`, `expired`, `resident_turned_off`, `lost`, `replaced` |
+| `failed`    | It never started, or home stopped answering                                        | below                                                           |
 
-The reasons a session ends: `stopped` (the caregiver's Stop), `time_up` (5 minutes), `turned_off` (the resident turned live view off), `sender_closed` (the sender window closed, such as with **Turn off live view**), `replaced` (a newer session for the home), `hub_timeout` (no answer from the hub within 30 seconds), `no_sender` (the hub accepted, but the sender page didn't join within 30 seconds of the request), `hub_offline` (the hub's connection to the relay closed) and `relay_stopping`.
+- `viewer` is there only while `ready`: `{"signaling_url":"wss://<relay>/v1/live-view/sessions/<session_id>/signal","client_id":"<the phone's device ID>","ice_servers":[…]}`. `ice_servers` is what `RTCPeerConnection` takes: `{"urls":["stun:<host>:3478"]}` and `{"urls":["turn:<host>:3478?transport=udp","turn:<host>:3478?transport=tcp"],"username":"<expiry in Unix seconds>:<session_id>","credential":"<base64>"}`, the team's coturn, with a login that coturn refuses after the session's end. It is `[]` when the relay has no TURN server set up, and then video flows only when both ends share a network.
+- `ended` reasons: `stopped` (the caregiver's Stop), `expired` (5 minutes), `resident_turned_off` (the resident turned live view off, on the phone, the setup page or the sender window's button), `lost` (the sender window closed or lost its connection) and `replaced` (a newer session for the home).
+- `failed` reasons: the hub's own refusal codes, such as `no_camera` or `not_supported`; `hub_timeout` (no answer from the hub within 30 seconds); `no_sender` (the hub accepted, but the sender page didn't join within 30 seconds of the request); `hub_offline` (the hub's connection to the relay closed); and `relay_stopping`.
 
 ### 7.3 Stop
 
-`POST /v1/live-view/<session_id>/stop`, with no body, ends the phone's own session at once with reason `stopped` and answers `204`; any other session is `404 not_found`. The relay closes both signaling sockets and tells the hub, which closes the sender window.
+`DELETE /v1/live-view/sessions/<session_id>` ends the phone's own session at once with reason `stopped` and answers `204`; any other session is `404 not_found`. The relay closes both signaling sockets and tells the hub, which closes the sender window.
 
 ### 7.4 Signaling
 
-One WebSocket per session at `wss://<relay>/v1/live-view/<session_id>/signal`, for the phone and the sender page, with JSON text messages of at most 16 KiB. An unknown session's upgrade gets `404`; an ended or denied one `410`.
+One WebSocket per session at the `viewer`'s `signaling_url`, for the phone and the sender page, with JSON text messages of at most 16 KiB. An unknown session's upgrade gets `404`; one that ended, was denied or failed `410`.
 
 - **The phone** signs in on the upgrade request with §5.1's two headers. Another phone gets `403`, and a wrong credential `401`. It joins once the session is `ready`; the relay takes it earlier too, and it then hears `peer` when the sender page joins.
 - **The sender page** sends no headers. Its first message, within 5 seconds, is `{"type":"hello","token":"<sender_token>"}` with the token from `live_view_start`; a wrong or late one closes the socket with code `4003`.
-- On joining, each side gets `{"type":"welcome","ice_servers":[…],"expires_at":"…"}`. `ice_servers` is what `RTCPeerConnection` takes: `{"urls":["stun:<host>:3478"]}` and `{"urls":["turn:<host>:3478?transport=udp","turn:<host>:3478?transport=tcp"],"username":"<expiry in Unix seconds>:<session_id>","credential":"<base64>"}`, the team's coturn with a login that coturn refuses after the session's end. It is `[]` when the relay has no TURN server set up, and then video flows only when both ends share a network.
+- On joining, each side gets `{"type":"welcome","ice_servers":[…],"expires_at":"…"}`, with the `viewer`'s ICE servers.
 - When both are joined, each gets `{"type":"peer","state":"joined"}`; when one leaves, the other gets `{"type":"peer","state":"left"}`. The sender page then makes the offer.
-- The peers send `offer` and `answer` (with `sdp`), `candidate` (with the ICE candidate's fields) and `bye`. The relay passes each, unchanged, to the other side, and drops any other type. `bye` ends the session: `stopped` from the phone, `sender_closed` from the sender page.
+- The peers send `offer` and `answer` (with `sdp`), `candidate` (with the ICE candidate's fields) and `bye`. The relay passes each, unchanged, to the other side, and drops any other type. `bye` ends the session: `stopped` from the phone; from the sender page, `resident_turned_off` when it says `"reason":"resident_turned_off"`, else `lost`.
 - When the session ends, both get `{"type":"end","reason":"<reason>"}` and the socket closes with code `4000`. A newer socket for the same side closes the older one with `4001`. After 1,000 messages a socket is closed with `4003`.
-- The phone leaving doesn't end the session: it may join again until the time is up. The sender page leaving a ready session ends it (`sender_closed`).
+- The phone leaving doesn't end the session: it may join again until the time is up. The sender page leaving a ready session ends it (`lost`).
 
 ### 7.5 Hub frames
 
@@ -457,19 +460,19 @@ The relay and the hub carry live view on the hub's WebSocket (§5), in `layer1/c
 | `live_view_answer` | hub → relay | `session_id, accepted, reason` (`null` when accepted, else a code) |
 | `live_view_end`    | either way  | `session_id, reason`                                               |
 
-The hub opens `wrapper` with the phone `from`'s own key and checks it as §4.4's checks 2 to 6 do (a paired caregiver's phone, its key, its `type`, `msg_id` and `sent_at`, under 30 seconds old, not seen before), then the resident's consent. It answers `live_view_answer` within 30 seconds. The sender token is a secret: the hub passes it only to the camera laptop's bridge, over the bridge link, and nothing logs it.
+The hub opens `wrapper` with the phone `from`'s own key and checks it as §4.4's checks 2 to 6 do (a paired caregiver's phone, its key, its `type`, `msg_id` and `sent_at`, under 30 seconds old, not seen before), then the resident's consent: off is `live_view_off`, which the phone shows as denied. It answers `live_view_answer` within 30 seconds, and sends `live_view_end` with `resident_turned_off` when the resident turns live view off during a session. The sender token is a secret: the hub passes it only to the camera laptop's bridge, over the bridge link, and nothing logs it.
 
 ### 7.6 Statuses and error codes
 
-| Status | Code               | Where                          | Meaning                                                        |
-| ------ | ------------------ | ------------------------------ | -------------------------------------------------------------- |
-| 202    | none               | `POST /v1/live-view`           | The session started; the body is its status                    |
-| 204    | none               | `POST /v1/live-view/<id>/stop` | The session ended                                              |
-| 400    | `bad_request`      | `POST /v1/live-view`           | The wrapper is malformed                                       |
-| 400    | `unsupported_type` | `POST /v1/live-view`           | The wrapper isn't a `live_view_request`                        |
-| 403    | `forbidden`        | every live view call           | A resident's call, or a wrapper whose `kid` isn't the caller   |
-| 404    | `not_found`        | status and stop                | No such session, another phone's, or ended over 10 minutes ago |
-| 503    | `hub_offline`      | `POST /v1/live-view`           | The hub isn't connected to the relay                           |
+| Status | Code               | Where                                | Meaning                                                        |
+| ------ | ------------------ | ------------------------------------ | -------------------------------------------------------------- |
+| 202    | none               | `POST /v1/live-view/sessions`        | The session started; the body is the session                   |
+| 204    | none               | `DELETE /v1/live-view/sessions/<id>` | The session ended                                              |
+| 400    | `bad_request`      | `POST /v1/live-view/sessions`        | The wrapper is malformed                                       |
+| 400    | `unsupported_type` | `POST /v1/live-view/sessions`        | The wrapper isn't a `live_view_request`                        |
+| 403    | `forbidden`        | every live view call                 | A resident's call, or a wrapper whose `kid` isn't the caller   |
+| 404    | `not_found`        | `GET` and `DELETE` of a session      | No such session, another phone's, or ended over 10 minutes ago |
+| 503    | `hub_offline`      | `POST /v1/live-view/sessions`        | The hub isn't connected to the relay                           |
 
 ## 8. Push
 
@@ -550,5 +553,5 @@ The bridge builds this file. These points differ from the app's `docs/CONTRACTS.
 - **Relay sign-in.** The relay answers `401` for a device it can't sign in (`device_removed` only with the right credential) and `429 too_many_attempts` after repeated failures (§5.1), and has an unsigned `GET /healthz`.
 - **Hub-status pushes.** The hub-offline push carries `last_contact` in Unix seconds, and the app's monitoring notice comes from a `monitoring` message. This file: both pushes also carry `last_contact_at` in ISO 8601, and "monitoring degraded" is an ordinary alert (§3, §8.2).
 - **Join QR code.** The app's `JoinQR` has no `hub_pub`. This file: the code carries `hub_pub`, the whole hub key, and the app refuses a code whose `hub_pub` differs from the one it paired with (§6.1). The app should also refuse a join payload over 1,024 bytes, as it does a pairing one.
-- **Live view.** CONTRACTS.md has no live view calls. This file: §7, with the session made at the relay, its status read by polling, and the WebRTC details passed on the relay's signaling WebSocket, where the sender page makes the offer.
+- **Live view.** CONTRACTS.md §7 signals through Kinesis Video Streams. This file: the relay's own signaling WebSocket at `viewer.signaling_url` (§7.4), where the sender page makes the offer; `viewer.client_id` is the phone's device ID; `POST /v1/live-view/sessions` answers `202` (the mock answers `201`); and the session's reasons are §7.2's.
 - **Approval answers.** The mock answers `200 {"v":1,"ok":true}` and the app falls back to the relay on any answer outside 2xx. This file: `202 {"v":1,"accepted":true}`, and refusals are `400` with `forbidden`, `unknown_join`, `expired` or `join_mismatch`, or `409 duplicate` (§6.5); the app should fall back to the relay only when the LAN gateway can't be reached or answers 5xx.

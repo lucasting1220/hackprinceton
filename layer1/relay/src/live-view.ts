@@ -41,6 +41,8 @@ export type PhoneSignIn = (
 
 export interface LiveViewOptions {
   readonly hub: LiveViewHub;
+  /** The relay's public URL, for the viewer's `signaling_url`. */
+  readonly publicUrl: string;
   /** coturn's servers; without them, sessions offer no ICE server (one network only). */
   readonly turn?: TurnServers;
   readonly signIn: PhoneSignIn;
@@ -66,16 +68,29 @@ const DEFAULT_TIMING: LiveViewTiming = {
 };
 
 /** A session's state, as the phone's status call reads it (§7.2). */
-export type SessionState = "starting" | "ready" | "denied" | "ended";
+export type SessionState = "requested" | "ready" | "denied" | "ended" | "failed";
 
-/** The phone's status call's answer body (§7.2). */
+/** What the phone needs to join signaling once the session is ready (§7.2). */
+export type ViewerDetails = Readonly<{
+  signaling_url: string;
+  client_id: string;
+  ice_servers: readonly IceServer[];
+}>;
+
+/** The phone's status call's answer body (§7.2); `viewer` only while ready. */
 export type SessionStatus = Readonly<{
   v: 1;
   session_id: string;
   state: SessionState;
   reason: string | null;
   expires_at: string;
+  viewer?: ViewerDetails;
 }>;
+
+/** The hub's refusal that means the resident's switch is off: the app's "denied" (§7.2). */
+const CONSENT_OFF = "live_view_off";
+/** The reasons a sender's `bye` may give; any other `bye` or a dropped sender is `lost`. */
+const SENDER_REASONS: readonly string[] = ["resident_turned_off"];
 
 type Role = "viewer" | "sender";
 
@@ -100,7 +115,6 @@ interface Session {
 
 /** The messages peers exchange through signaling; the relay passes on nothing else. */
 const PEER_TYPES: readonly string[] = ["offer", "answer", "candidate", "bye"];
-const SESSION_ID = /^[0-9a-f-]{36}$/;
 const SIGNAL_PATH = new RegExp(`^${LIVE_VIEW_PATH}/([0-9a-f-]{36})/signal$`);
 
 const sha256 = (text: string): Buffer => createHash("sha256").update(text, "utf8").digest();
@@ -121,6 +135,7 @@ export const isSignalPath = (pathname: string): boolean => SIGNAL_PATH.test(path
 
 export class LiveViewSessions {
   readonly #hub: LiveViewHub;
+  readonly #publicUrl: string;
   readonly #turn: TurnServers | undefined;
   readonly #signIn: PhoneSignIn;
   readonly #now: () => number;
@@ -137,6 +152,7 @@ export class LiveViewSessions {
 
   constructor(options: LiveViewOptions) {
     this.#hub = options.hub;
+    this.#publicUrl = options.publicUrl;
     this.#turn = options.turn;
     this.#signIn = options.signIn;
     this.#now = options.now ?? Date.now;
@@ -171,7 +187,7 @@ export class LiveViewSessions {
       expiresAtMs,
       iceServers: this.#turn?.iceServers(id, expiresAtMs) ?? [],
       senderTokenSha256: sha256(senderToken),
-      state: "starting",
+      state: "requested",
       reason: null,
       accepted: false,
       peers: {},
@@ -181,11 +197,11 @@ export class LiveViewSessions {
     this.#byHome.set(homeId, session);
     session.timers.push(
       setTimeout(() => {
-        if (session.state === "starting") {
-          this.#end(session, session.accepted ? "no_sender" : "hub_timeout", true);
-        }
+        if (session.state !== "requested") return;
+        this.#finish(session, "failed", session.accepted ? "no_sender" : "hub_timeout");
+        this.#tellHub(session);
       }, this.#timing.startWaitMs),
-      setTimeout(() => this.#end(session, "time_up", true), expiresAtMs - this.#now()),
+      setTimeout(() => this.#end(session, "expired", true), expiresAtMs - this.#now()),
     );
     for (const timer of session.timers) timer.unref();
     this.#log(`L1 relay: live view session ${id} for device ${deviceId} of home ${homeId} started`);
@@ -207,12 +223,16 @@ export class LiveViewSessions {
     return true;
   }
 
-  /** The hub's `live_view_answer`: denied ends the session, accepted waits for the sender. */
+  /**
+   * The hub's `live_view_answer`: the resident's switch being off is `denied`, any other refusal
+   * `failed`, and accepted waits for the sender.
+   */
   hubAnswered(homeId: string, frame: LiveViewAnswerFrame): void {
     const session = this.#ofHome(homeId, frame.session_id, "answer");
-    if (session === undefined || session.state !== "starting") return;
+    if (session === undefined || session.state !== "requested") return;
     if (!frame.accepted) {
-      this.#finish(session, "denied", frame.reason ?? "refused");
+      const reason = frame.reason ?? "refused";
+      this.#finish(session, reason === CONSENT_OFF ? "denied" : "failed", reason);
       return;
     }
     session.accepted = true;
@@ -225,10 +245,11 @@ export class LiveViewSessions {
     if (session !== undefined) this.#end(session, frame.reason, false);
   }
 
-  /** The home's hub disconnected: its session can't be stopped from home any more, so it ends. */
+  /** The home's hub disconnected: its session can't be stopped from home any more, so it fails. */
   hubDisconnected(homeId: string): void {
     const session = this.#byHome.get(homeId);
-    if (session !== undefined) this.#end(session, "hub_offline", false);
+    if (session !== undefined && this.#live(session))
+      this.#finish(session, "failed", "hub_offline");
   }
 
   /** For the HTTP server's `upgrade` event on a signaling path (§7.4). */
@@ -252,7 +273,7 @@ export class LiveViewSessions {
         return;
       }
     }
-    if (session.state === "ended" || session.state === "denied") {
+    if (!this.#live(session)) {
       refuseUpgrade(socket, 410, "Gone");
       return;
     }
@@ -267,20 +288,36 @@ export class LiveViewSessions {
 
   /** Ends every session, as the relay stops. */
   close(): void {
-    for (const session of this.#byHome.values()) this.#end(session, "relay_stopping", false);
+    for (const session of this.#byHome.values()) {
+      if (this.#live(session)) this.#finish(session, "failed", "relay_stopping");
+    }
     for (const session of this.#sessions.values()) this.#clearTimers(session);
     this.#sessions.clear();
     this.#server.close();
   }
 
   #status(session: Session): SessionStatus {
-    return {
+    const status: SessionStatus = {
       v: 1,
       session_id: session.id,
       state: session.state,
       reason: session.reason,
       expires_at: utcSeconds(new Date(session.expiresAtMs)),
     };
+    if (session.state !== "ready") return status;
+    const signaling = new URL(`${LIVE_VIEW_PATH}/${session.id}/signal`, this.#publicUrl);
+    signaling.protocol = signaling.protocol === "https:" ? "wss:" : "ws:";
+    const viewer = {
+      signaling_url: signaling.href,
+      client_id: session.deviceId,
+      ice_servers: session.iceServers,
+    };
+    return { ...status, viewer };
+  }
+
+  /** Whether the session is still under way: requested or ready. */
+  #live(session: Session): boolean {
+    return session.state === "requested" || session.state === "ready";
   }
 
   /** The home's session with this ID; a frame about another is logged and ignored. */
@@ -304,7 +341,7 @@ export class LiveViewSessions {
       if (type !== "hello") this.#log(`L1 relay: a sender's first message wasn't its hello`);
       const presented = typeof token === "string" ? sha256(token) : Buffer.alloc(32);
       const matches = timingSafeEqual(presented, session.senderTokenSha256);
-      if (!matches || session.state === "ended" || session.state === "denied") {
+      if (!matches || !this.#live(session)) {
         this.#log(`L1 relay: refused a sender for live view session ${session.id}`);
         ws.close(LIVE_VIEW_CLOSE.refused, "refused");
         return;
@@ -354,7 +391,10 @@ export class LiveViewSessions {
     if (message === undefined || typeof type !== "string" || !PEER_TYPES.includes(type)) return;
     const other = session.peers[role === "viewer" ? "sender" : "viewer"];
     if (other !== undefined) send(other.ws, message);
-    if (type === "bye") this.#end(session, role === "viewer" ? "stopped" : "sender_closed", true);
+    if (type !== "bye") return;
+    const { reason } = message;
+    const given = typeof reason === "string" && SENDER_REASONS.includes(reason) ? reason : "lost";
+    this.#end(session, role === "viewer" ? "stopped" : given, true);
   }
 
   #left(session: Session, role: Role, peer: Peer): void {
@@ -363,31 +403,34 @@ export class LiveViewSessions {
     const other = session.peers[role === "viewer" ? "sender" : "viewer"];
     if (other !== undefined) send(other.ws, { type: "peer", state: "left" });
     // The sender's window closing ends the session; a phone may come back, until the time is up.
-    if (role === "sender" && session.state === "ready") this.#end(session, "sender_closed", true);
+    if (role === "sender" && session.state === "ready") this.#end(session, "lost", true);
   }
 
   #readyIfJoined(session: Session): void {
-    if (session.state !== "starting" || !session.accepted || session.peers.sender === undefined)
+    if (session.state !== "requested" || !session.accepted || session.peers.sender === undefined)
       return;
     session.state = "ready";
     this.#log(`L1 relay: live view session ${session.id} is ready`);
   }
 
-  /** Ends a starting or ready session; `tellHub` sends the hub `live_view_end`. */
+  /** Ends a requested or ready session; `tellHub` sends the hub `live_view_end`. */
   #end(session: Session, reason: string, tellHub: boolean): void {
-    if (session.state === "ended" || session.state === "denied") return;
+    if (!this.#live(session)) return;
     this.#finish(session, "ended", reason);
-    if (tellHub) {
-      this.#hub.send(session.homeId, {
-        type: "live_view_end",
-        v: 1,
-        session_id: session.id,
-        reason,
-      });
-    }
+    if (tellHub) this.#tellHub(session);
   }
 
-  #finish(session: Session, state: "ended" | "denied", reason: string): void {
+  /** Sends the hub `live_view_end` with the session's reason, so the sender window closes. */
+  #tellHub(session: Session): void {
+    this.#hub.send(session.homeId, {
+      type: "live_view_end",
+      v: 1,
+      session_id: session.id,
+      reason: session.reason ?? "ended",
+    });
+  }
+
+  #finish(session: Session, state: "ended" | "denied" | "failed", reason: string): void {
     session.state = state;
     session.reason = reason;
     this.#clearTimers(session);
@@ -423,6 +466,3 @@ function parseMessage(data: WebSocket.RawData): Readonly<Record<string, unknown>
 function send(ws: WebSocket, message: object): void {
   if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(message));
 }
-
-/** Whether `value` is a session ID the relay makes. */
-export const isSessionId = (value: string): boolean => SESSION_ID.test(value);

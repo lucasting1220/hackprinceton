@@ -114,7 +114,7 @@ const status = async (relay: HubRelay, phone: TestPhone, sessionId: string) =>
 
 test("a caregiver's request makes a session and sends the hub its request unopened", async (t) => {
   const { relay, body, start, request, caregiver } = await started(t);
-  assert.equal(body.state, "starting");
+  assert.equal(body.state, "requested");
   assert.match(body.session_id, /^[0-9a-f-]{36}$/);
   assert.equal(start.type, "live_view_start");
   assert.equal(start.session_id, body.session_id);
@@ -166,6 +166,13 @@ test("once the hub accepts and the sender signs in, the phone and the sender exc
   const welcome = await senderPeer.next();
   assert.deepEqual(welcome, { type: "welcome", ice_servers: [], expires_at: body.expires_at });
   await waitFor(async () => (await status(relay, caregiver, id)).body, "ready");
+  const ready = (await status(relay, caregiver, id)).body as { viewer?: unknown };
+  const origin = new URL(relay.config.public_url).origin.replace(/^http/, "ws");
+  assert.deepEqual(ready.viewer, {
+    signaling_url: `${origin}${LIVE_VIEW_PATH}/${id}/signal`,
+    client_id: caregiver.deviceId,
+    ice_servers: [],
+  });
 
   // Only the phone that started it reads it or joins it; a resident may not use live view at all.
   assert.equal((await status(relay, other, id)).status, 404);
@@ -209,14 +216,28 @@ test("the hub's denial ends the session with its reason, and its signaling is go
     v: 1,
     session_id: body.session_id,
     accepted: false,
-    reason: "off",
+    reason: "live_view_off",
   });
   await waitFor(
     async () => (await status(relay, caregiver, body.session_id)).body,
     "denied",
-    "off",
+    "live_view_off",
   );
   assert.equal(await refused(signalUrl(relay, body.session_id), caregiver.headers()), 410);
+
+  // Any other refusal is a failure, not the resident's choice.
+  const again = phoneCommand(caregiver, relay.homeId, "live_view_request");
+  const next = await call(relay, LIVE_VIEW_PATH, caregiver, { body: again });
+  const id = (next.body as { session_id: string }).session_id;
+  await hub.next();
+  hub.send({
+    type: "live_view_answer",
+    v: 1,
+    session_id: id,
+    accepted: false,
+    reason: "no_camera",
+  });
+  await waitFor(async () => (await status(relay, caregiver, id)).body, "failed", "no_camera");
 });
 
 test("Stop ends the session at once, closes both sockets and tells the hub", async (t) => {
@@ -225,7 +246,7 @@ test("Stop ends the session at once, closes both sockets and tells the hub", asy
   hub.send({ type: "live_view_answer", v: 1, session_id: id, accepted: true, reason: null });
   const senderPeer = await sender(relay, id, String(start.sender_token));
   const viewerPeer = await viewer(relay, id, caregiver);
-  const stopped = await call(relay, `${LIVE_VIEW_PATH}/${id}/stop`, caregiver, { method: "POST" });
+  const stopped = await call(relay, `${LIVE_VIEW_PATH}/${id}`, caregiver, { method: "DELETE" });
   assert.equal(stopped.status, 204);
   assert.deepEqual(await hub.next(), {
     type: "live_view_end",
@@ -235,8 +256,8 @@ test("Stop ends the session at once, closes both sockets and tells the hub", asy
   });
   for (const peer of [senderPeer, viewerPeer]) assert.equal(await within(peer.closed), 4000);
   await waitFor(async () => (await status(relay, caregiver, id)).body, "ended", "stopped");
-  const again = await call(relay, `${LIVE_VIEW_PATH}/${id}/stop`, new TestPhone(), {
-    method: "POST",
+  const again = await call(relay, `${LIVE_VIEW_PATH}/${id}`, new TestPhone(), {
+    method: "DELETE",
   });
   assert.equal(again.status, 401, "a phone the relay doesn't know can't stop it");
 });
@@ -246,7 +267,7 @@ test("the session ends when its time is up, and when the hub never answers", asy
   const first = await started(t, { timing });
   await waitFor(
     async () => (await status(first.relay, first.caregiver, first.body.session_id)).body,
-    "ended",
+    "failed",
     "hub_timeout",
   );
   assert.equal(fields(await first.hub.next()).reason, "hub_timeout");
@@ -259,9 +280,9 @@ test("the session ends when its time is up, and when the hub never answers", asy
   await waitFor(
     async () => (await status(second.relay, second.caregiver, id)).body,
     "ended",
-    "time_up",
+    "expired",
   );
-  assert.equal(fields(await second.hub.next()).reason, "time_up");
+  assert.equal(fields(await second.hub.next()).reason, "expired");
 });
 
 test("a new request ends the home's earlier session, and the hub disconnecting ends the session", async (t) => {
@@ -283,17 +304,36 @@ test("a new request ends the home's earlier session, and the hub disconnecting e
 
   const newer = (second.body as { session_id: string }).session_id;
   hub.ws.close();
-  await waitFor(async () => (await status(relay, caregiver, newer)).body, "ended", "hub_offline");
+  await waitFor(async () => (await status(relay, caregiver, newer)).body, "failed", "hub_offline");
 });
 
 test("the hub's own live_view_end ends the session, such as the resident turning it off", async (t) => {
   const { relay, hub, caregiver, body } = await started(t);
-  hub.send({ type: "live_view_end", v: 1, session_id: body.session_id, reason: "turned_off" });
+  const reason = "resident_turned_off";
+  hub.send({ type: "live_view_end", v: 1, session_id: body.session_id, reason });
   await waitFor(
     async () => (await status(relay, caregiver, body.session_id)).body,
     "ended",
-    "turned_off",
+    reason,
   );
+});
+
+test("the sender's bye ends the session: turned off by the resident, or else lost", async (t) => {
+  for (const [bye, reason] of [
+    [{ type: "bye", reason: "resident_turned_off" }, "resident_turned_off"],
+    [{ type: "bye", reason: "anything" }, "lost"],
+  ] as const) {
+    const { relay, hub, caregiver, body, start } = await started(t);
+    const id = body.session_id;
+    hub.send({ type: "live_view_answer", v: 1, session_id: id, accepted: true, reason: null });
+    const senderPeer = await sender(relay, id, String(start.sender_token));
+    const viewerPeer = await viewer(relay, id, caregiver);
+    await waitFor(async () => (await status(relay, caregiver, id)).body, "ready");
+    senderPeer.send(bye);
+    await waitFor(async () => (await status(relay, caregiver, id)).body, "ended", reason);
+    assert.equal(fields(await hub.next()).reason, reason);
+    assert.equal(await within(viewerPeer.closed), 4000);
+  }
 });
 
 test("TURN logins are coturn's: expiry in Unix seconds, the session, and HMAC-SHA1 of the secret", async (t) => {

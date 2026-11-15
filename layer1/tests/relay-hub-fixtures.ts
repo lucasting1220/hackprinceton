@@ -78,6 +78,7 @@ export async function startHubRelay(
       ...liveViewOptions,
       hub,
       log,
+      publicUrl: config.public_url,
       signIn: (headers) => {
         const signed = signIn(store, headers);
         return signed.ok ? { ok: true, deviceId: signed.device.deviceId } : { ok: false };
