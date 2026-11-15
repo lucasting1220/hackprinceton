@@ -1,5 +1,7 @@
 """Layer 3 settings: every default, limit and fixed value the capture code uses."""
 
+from datetime import UTC, datetime
+
 # Video format asked of the camera (docs/layer3-raw-data.md, "Video format").
 FRAME_WIDTH: int = 640
 FRAME_HEIGHT: int = 480
@@ -56,3 +58,11 @@ AUDIO_HOST_INTERFACES: dict[str, str] = {
 
 # The host interface that converts a mic's own rate only when it is asked to.
 AUDIO_INTERFACE_NEEDING_CONVERT_REQUEST: str = "Windows WASAPI"
+
+# How many watch readings the receiver remembers, to recognise one that is sent again.
+WATCH_SEEN_LIMIT: int = 20_000
+
+# Every time on a watch reading must fall in this range. It mirrors EARLIEST_SIGNAL_TIME and
+# LATEST_SIGNAL_TIME in layer4/src/layer4/settings.py, so Layer 4 accepts each reading.
+EARLIEST_READING_TIME: datetime = datetime(1970, 1, 2, tzinfo=UTC)
+LATEST_READING_TIME: datetime = datetime(2999, 12, 31, tzinfo=UTC)
