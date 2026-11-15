@@ -1,7 +1,8 @@
-"""The coordinator's dashboard page, built to be shown to judges on a projector: headline tiles
-(laptops online, memory pooled, jobs running, work not placed), one card per laptop with its
-hardware, RAM and CPU use (bars and a two-minute chart) and the jobs placed on it, and the work
-that could not be placed. Light, large type; read-only.
+"""The coordinator's dashboard page (home.html), shown to judges on a projector: a sidebar with
+an Overview and one entry per laptop; the overview has the home's figures, a panel per laptop
+with memory and processor rings and its jobs, and the work not placed; a laptop's view has its
+specs, memory and processor panels (with a dot-matrix load history), jobs and setup. Dark,
+display only: nothing on it changes the home.
 
 It reads /api/state (the Layer 1 contract: status, jobs, dropped work) and /api/hardware
 (Layer 2 only: specs and load) every DASHBOARD_POLL_S, never starting a poll before the last
@@ -18,7 +19,7 @@ _HISTORY_POINTS = 120  # two minutes at one poll a second
 
 PAGE = (
     files("layer2.coordinator")
-    .joinpath("dashboard.html")
+    .joinpath("home.html")
     .read_text(encoding="utf-8")
     .replace("__STALE_AFTER_MS__", str(int(settings.STALE_AFTER_S * 1000)))
     .replace("__POLL_MS__", str(int(settings.DASHBOARD_POLL_S * 1000)))

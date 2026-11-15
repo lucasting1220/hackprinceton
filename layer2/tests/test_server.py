@@ -266,13 +266,15 @@ def test_dashboard_page_shows_each_laptop_as_one_card(dashboard: TestClient) -> 
     page = dashboard.get("/").text
     assert "/api/state" in page and "/api/hardware" in page
     for part in (
-        "Memory",
-        "Processor",
-        "No jobs on this laptop",
-        "laptops online",
-        "memory pooled across the home",
-        "jobs running",
+        "Overview",
+        "Laptops online",
+        "Memory pooled",
+        "Jobs running",
         "Work not placed",
+        "No jobs on this laptop",
+        '"Memory"',
+        '"Processor"',
+        "Load, last minute",
         "createElementNS(SVG",
     ):
         assert part in page
