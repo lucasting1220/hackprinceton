@@ -6,8 +6,11 @@ import type { AddressInfo } from "node:net";
 import { text } from "node:stream/consumers";
 import type { CreateHomeOptions, Home } from "./home.ts";
 import { createHome, HomeError, HomeExistsError, loadHome } from "./home.ts";
+import { type Html, html, page } from "./html.ts";
 import { errorMessage } from "./json-file.ts";
 import { CoordinatorLauncher, type CoordinatorStatus } from "./launcher.ts";
+import type { PhoneAccess } from "./phone-access.ts";
+import { PairingPage } from "./pairing-page.ts";
 import * as settings from "./settings.ts";
 
 /** Sent with every response: nothing is loaded from elsewhere, cached, framed or kept open. */
@@ -31,45 +34,58 @@ export interface SetupServerOptions {
   readonly homeOptions?: CreateHomeOptions;
   /** Gets the server's and the launcher's lines; console.log by default. */
   readonly log?: (line: string) => void;
+  /** Runs once a home exists, after the coordinator starts: main.ts's home-ready hook. */
+  readonly onHomeReady?: (home: Home) => Promise<void>;
+  /** The phone side once the home is ready, for the Pair a phone page and the Phones section. */
+  readonly phoneAccess?: () => PhoneAccess | undefined;
 }
 
-const escapeHtml = (value: unknown) =>
-  String(value).replace(/[&<>"']/g, (char) => `&#${char.charCodeAt(0)};`);
+/** A page route's answer: a page with its status, or a 303 to `redirect`. */
+export type PageReply =
+  | { readonly status: number; readonly body: string }
+  | { readonly redirect: string };
 
-/** A page titled `title`, from a template in which every value placed is escaped. */
-const page =
-  (title: string) =>
-  (parts: TemplateStringsArray, ...values: unknown[]): string => {
-    const body = parts.reduce((done, part, index) => done + escapeHtml(values[index - 1]) + part);
-    return `<!doctype html>
-<html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width">
-<title>Debbie: ${escapeHtml(title)}</title><h1>${escapeHtml(title)}</h1>
-${body}
-</html>
-`;
-  };
+/**
+ * A row of the setup page's route table. Every route checks the Host; a "form" route also checks
+ * the Origin, the body's size and the per-run token, and gets the form's fields.
+ */
+export interface PageRoute {
+  readonly method: "GET" | "POST";
+  readonly path: string;
+  readonly guard: "view" | "form";
+  readonly handle: (fields: URLSearchParams) => Promise<PageReply>;
+}
 
-const welcomePage = (token: string) => page("Welcome")`<form method="post" action="/home">
+const welcomePage = (token: string) =>
+  page(
+    "Welcome",
+    html`<form method="post" action="/home">
 <input type="hidden" name="token" value="${token}"><button>Create a home</button></form>
-<p><button disabled>Join a home</button> Coming in build step 3.</p>`;
-const problemPage = (message: string) => page("Setup problem")`<p>${message}</p>`;
-const RELOAD_PAGE = page("Reload this page")`<p>This page came from an earlier run of the bridge.
-<a href="/">Reload it</a>, then try again.</p>`;
+<p><button disabled>Join a home</button> Coming in build step 3.</p>`,
+  );
+const problemPage = (message: string) => page("Setup problem", html`<p>${message}</p>`);
+const RELOAD_PAGE = page(
+  "Reload this page",
+  html`<p>This page came from an earlier run of the bridge.
+<a href="/">Reload it</a>, then try again.</p>`,
+);
 /** Only a home that the bridge found after it started (its files repaired, say) has none. */
 const NOT_STARTED = "not started; restart the bridge to start it";
-/** Where GET shows the page: Create a home leaves the browser at /home. */
-const PAGE_TARGETS: ReadonlySet<string> = new Set(["/", "/home"]);
 
-/** The home, and the coordinator's state with why its latest run failed (A2). */
-function homePage(home: Home, status: CoordinatorStatus | undefined): string {
+/** The home, the coordinator's state with why its latest run failed (A2), and its phones. */
+function homePage(home: Home, status: CoordinatorStatus | undefined, phones: Html): string {
   const dashboard = `http://${settings.LOCAL_HOST}:${home.dashboardPort}/`;
   const stub = status?.program === "stub" ? "STUB (Layer 2's coordinator isn't built yet), " : "";
   const state = status?.state === "restarting" ? "restarting after a crash" : status?.state;
   const why = status?.lastErrorLine ? `; last error: ${status.lastErrorLine}` : "";
-  return page("Home created")`<p>Home ID: <code>${home.homeId}</code></p>
+  return page(
+    "Home created",
+    html`<p>Home ID: <code>${home.homeId}</code></p>
 <p>Remote access: not set up</p>
 <p>Coordinator: ${stub}${(state ?? NOT_STARTED).replace("_", " ")}${why}</p>
-<p>Dashboard: <a href="${dashboard}">${dashboard}</a></p>`;
+<p>Dashboard: <a href="${dashboard}">${dashboard}</a></p>
+${phones}`,
+  );
 }
 
 /** Serves the setup page on 127.0.0.1 (R2, D4, D7), or rejects if its port is in use. */
@@ -90,6 +106,7 @@ export async function startSetupServer(options: SetupServerOptions) {
   const url = `${bridgeUrl}/`;
   const hosts: string[] = settings.SETUP_HOST_NAMES.map((name) => `${name}:${bound}`);
   const origins = hosts.map((host) => `http://${host}`);
+  const pairingPage = new PairingPage(options.phoneAccess ?? (() => undefined), token);
   let launcher: CoordinatorLauncher | undefined;
   let closed = false;
 
@@ -104,51 +121,79 @@ export async function startSetupServer(options: SetupServerOptions) {
     });
   }
 
+  /** Once a home exists: starts its coordinator, then runs the home-ready hook. */
+  async function homeReady(home: Home): Promise<void> {
+    await startCoordinator(home);
+    if (!closed) await options.onHomeReady?.(home);
+  }
+
   /** The page for what the state folder holds: no home, the home, or why it cannot be read. */
   async function currentPage(): Promise<string> {
     try {
       const home = await loadHome(stateDir);
-      return home === undefined ? welcomePage(token) : homePage(home, launcher?.status());
+      if (home === undefined) return welcomePage(token);
+      return homePage(home, launcher?.status(), pairingPage.phonesSection());
     } catch (error) {
       if (!(error instanceof HomeError)) throw error;
       return problemPage(error.message);
     }
   }
 
-  function refuse(why: string): [number, string] {
-    log(`L1 setup: refused a request: ${why}`);
-    return [403, problemPage(`This request was refused: ${why}. Open ${url}`)];
-  }
-
-  async function respond(request: IncomingMessage): Promise<[number, string]> {
-    const { method, url: target, headers } = request;
-    if (!hosts.includes(headers.host ?? "")) return refuse("it was not for this page's address");
-    if (method === "GET" && PAGE_TARGETS.has(target ?? "")) return [200, await currentPage()];
-    if (method !== "POST" || target !== "/home") return [404, problemPage("No such page.")];
-    if (!origins.includes(headers.origin ?? "")) return refuse("it did not come from this page");
-    const length = Number(headers["content-length"]); // NaN without one, so that is refused too
-    if (!(length <= settings.SETUP_MAX_BODY_BYTES)) return [413, problemPage("Too large.")];
-    if (new URLSearchParams(await text(request)).get("token") !== token) return [403, RELOAD_PAGE];
+  async function createHomeReply(): Promise<PageReply> {
     try {
       const home = await createHome(stateDir, { ...homeOptions, bridgeUrl });
-      await startCoordinator(home);
-      return [200, homePage(home, launcher?.status())];
+      await homeReady(home);
+      return { status: 200, body: homePage(home, launcher?.status(), pairingPage.phonesSection()) };
     } catch (error) {
-      if (error instanceof HomeExistsError) return [409, await currentPage()];
+      if (error instanceof HomeExistsError) return { status: 409, body: await currentPage() };
       if (!(error instanceof HomeError)) throw error;
-      return [500, problemPage(error.message)];
+      return { status: 500, body: problemPage(error.message) };
     }
   }
 
+  const showPage = async (): Promise<PageReply> => ({ status: 200, body: await currentPage() });
+  /** The route table: Create a home leaves the browser at /home, so GET shows the page there too. */
+  const routes: PageRoute[] = [
+    { method: "GET", path: "/", guard: "view", handle: showPage },
+    { method: "GET", path: "/home", guard: "view", handle: showPage },
+    { method: "POST", path: "/home", guard: "form", handle: createHomeReply },
+    ...pairingPage.routes(),
+  ];
+
+  function refuse(why: string): PageReply {
+    log(`L1 setup: refused a request: ${why}`);
+    return { status: 403, body: problemPage(`This request was refused: ${why}. Open ${url}`) };
+  }
+
+  async function respond(request: IncomingMessage): Promise<PageReply> {
+    const { method, url: target, headers } = request;
+    if (!hosts.includes(headers.host ?? "")) return refuse("it was not for this page's address");
+    const route = routes.find((row) => row.method === method && row.path === target);
+    if (route === undefined) return { status: 404, body: problemPage("No such page.") };
+    if (route.guard === "view") return route.handle(new URLSearchParams());
+    if (!origins.includes(headers.origin ?? "")) return refuse("it did not come from this page");
+    const length = Number(headers["content-length"]); // NaN without one, so that is refused too
+    if (!(length <= settings.SETUP_MAX_BODY_BYTES)) {
+      return { status: 413, body: problemPage("Too large.") };
+    }
+    const fields = new URLSearchParams(await text(request));
+    if (fields.get("token") !== token) return { status: 403, body: RELOAD_PAGE };
+    return route.handle(fields);
+  }
+
   async function answer(request: IncomingMessage, response: ServerResponse): Promise<void> {
-    let reply: [number, string];
+    let reply: PageReply;
     try {
       reply = await respond(request);
     } catch (error) {
       log(`L1 setup: could not answer a request: ${errorMessage(error)}`);
-      reply = [500, problemPage("The bridge could not answer; its log says why.")];
+      reply = { status: 500, body: problemPage("The bridge could not answer; its log says why.") };
     }
-    response.writeHead(reply[0], HEADERS).end(reply[1]);
+    if ("redirect" in reply) {
+      response.writeHead(303, { ...HEADERS, location: reply.redirect }).end();
+    } else {
+      response.writeHead(reply.status, HEADERS).end(reply.body);
+    }
   }
 
   server.on("request", (request: IncomingMessage, response: ServerResponse) => {
@@ -159,6 +204,7 @@ export async function startSetupServer(options: SetupServerOptions) {
   return {
     url,
     startCoordinator,
+    homeReady,
     /** Stops answering, then stops the coordinator. */
     async close(): Promise<void> {
       closed = true;

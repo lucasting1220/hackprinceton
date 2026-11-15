@@ -377,3 +377,13 @@ test("no secret reaches a log line or a confirm message", async (t) => {
   for (const secret of secrets) assert.ok(!text.includes(secret));
   assert.doesNotMatch(text, new RegExp(`\\b${code}\\b`));
 });
+
+test("once the phone has collected its bundle, a new code can be shown at once", async () => {
+  const f = fixture();
+  const phone = new FakePhone(started(f));
+  expect(f.pairing.handleRequest(phone.request(), ADDRS[0]), 202);
+  assert.ok((await f.pairing.confirm(pendingId(f))).ok);
+  assert.deepEqual(f.pairing.start(ADDRS), { ok: false, reason: "collecting" });
+  bundleOf(f.pairing.handleRequest(phone.request(), ADDRS[0]));
+  assert.equal(f.pairing.start(ADDRS).ok, true);
+});

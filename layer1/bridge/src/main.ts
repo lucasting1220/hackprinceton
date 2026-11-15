@@ -1,8 +1,9 @@
 import { existsSync } from "node:fs";
 import path from "node:path";
 import { parseArgs } from "node:util";
-import { HomeError, loadHome, resolveStateDir } from "./home.ts";
+import { type Home, HomeError, loadHome, resolveStateDir } from "./home.ts";
 import { errorMessage, removePath } from "./json-file.ts";
+import { PhoneAccess, type PhoneAccessOptions } from "./phone-access.ts";
 import {
   browserCommand,
   openInBrowser,
@@ -18,9 +19,11 @@ const REPO_ROOT = path.resolve(import.meta.dirname, "..", "..", "..");
 const STOP_SIGNALS = ["SIGINT", "SIGTERM", "SIGHUP"] as const;
 
 export interface BridgeOptions
-  extends Pick<SetupServerOptions, "stateDir" | "repoRoot" | "port" | "log"> {
+  extends Pick<SetupServerOptions, "stateDir" | "repoRoot" | "port" | "log" | "homeOptions"> {
   /** Opens the setup page; the default browser by default (D4). */
   readonly open?: (url: string) => Promise<void>;
+  /** The network side's port and addresses; tests pass port 0 and their own addresses. */
+  readonly network?: Omit<PhoneAccessOptions, "log">;
 }
 
 let outputGuarded = false;
@@ -50,8 +53,31 @@ export async function startBridge(options: BridgeOptions) {
     if (!(error instanceof HomeError)) throw error;
     log(`L1 bridge: ${error.message}`); // the setup page shows it too
   });
+  let phones: Promise<PhoneAccess | undefined> | undefined;
+  let started: PhoneAccess | undefined;
+  let stopping: Promise<void> | undefined;
+
+  /**
+   * The home-ready hook, after a home loads at start and after Create a home: starts the phone
+   * side on the coordinator. Steps 4 and 5 start their outbox and relay link here too.
+   */
+  async function onHomeReady(home: Home): Promise<void> {
+    phones ??= PhoneAccess.start(home, { ...options.network, log }).catch((error: unknown) => {
+      log(`L1 bridge: phone pairing could not start: ${errorMessage(error)}`);
+      return undefined;
+    });
+    const access = await phones;
+    if (stopping !== undefined) await access?.close();
+    else started = access;
+  }
+
   // The page's port comes first: a second bridge must exit before it touches the coordinator.
-  const server = await startSetupServer({ ...options, log });
+  const server = await startSetupServer({
+    ...options,
+    log,
+    onHomeReady,
+    phoneAccess: () => started,
+  });
   const stopFile = path.join(options.stateDir, settings.STATE_NAMES.bridgeStop);
   try {
     await removePath(stopFile); // one left from a run that ended before it found it
@@ -59,12 +85,15 @@ export async function startBridge(options: BridgeOptions) {
     await server.close();
     throw error;
   }
-  let stopping: Promise<void> | undefined;
 
   async function shutdown(reason: string): Promise<void> {
     clearInterval(stopFilePoll);
     for (const [signal, handler] of signalHandlers) process.off(signal, handler);
     log(`L1 bridge: ${reason}; stopping`);
+    await (await phones)?.close().catch((error: unknown) => {
+      log(`L1 bridge: could not stop the network side: ${errorMessage(error)}`);
+      process.exitCode = 1;
+    });
     await server.close().catch((error: unknown) => {
       log(`L1 bridge: could not stop the coordinator: ${errorMessage(error)}`);
       process.exitCode = 1;
@@ -92,7 +121,7 @@ export async function startBridge(options: BridgeOptions) {
 
   log(`L1 bridge: the setup page is at ${server.url}`);
   try {
-    if (home) await server.startCoordinator(home);
+    if (home) await server.homeReady(home);
     await (options.open ?? ((url) => openInBrowser(url, browserCommand(url))))(server.url);
   } catch (error) {
     requestStop(`could not start: ${errorMessage(error)}`);
@@ -102,6 +131,8 @@ export async function startBridge(options: BridgeOptions) {
   return {
     url: server.url,
     stopFile,
+    /** The phone side, once the home is ready and until the bridge stops. */
+    phones: () => started,
     /** The shutdown a stop signal or the stop file starts; resolves once it is done. */
     stop(reason: string): Promise<void> {
       requestStop(reason);

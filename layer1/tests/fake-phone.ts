@@ -2,7 +2,7 @@
  * The app's side of pairing, for tests: its own X25519 key pair, the proof, the 4-digit code it
  * shows, and opening the bundle with its phone key, all through phone-crypto.ts.
  */
-import { generateKeyPairSync, type KeyObject } from "node:crypto";
+import { generateKeyPairSync, type KeyObject, randomUUID } from "node:crypto";
 import type { QrPayload } from "../bridge/src/pairing.ts";
 import {
   type Envelope,
@@ -13,9 +13,11 @@ import {
   pairingProof,
   phoneKey,
   type Role,
+  seal,
   sharedSecret,
   toBase64url,
 } from "../bridge/src/phone-crypto.ts";
+import { utcSeconds } from "../bridge/src/wire.ts";
 
 export interface FakePhoneOptions {
   readonly name?: string;
@@ -82,3 +84,40 @@ export class FakePhone {
     return JSON.parse(open(envelope, this.key(), { homeId, type: "pair" }).toString("utf8"));
   }
 }
+
+export interface PhoneMessage {
+  readonly homeId: string;
+  readonly deviceId: string;
+  readonly type: string;
+  /** The time in the plaintext; now by default. */
+  readonly sentAt?: string;
+  readonly msgId?: string;
+  /** Fields to add to, or replace in, the plaintext. */
+  readonly fields?: Record<string, unknown>;
+  /** The wrapper's type and msg_id, where a test makes them differ from the plaintext's. */
+  readonly wrapperType?: string;
+  readonly wrapperMsgId?: string;
+  /** The type the associated data binds; the wrapper's by default. */
+  readonly sealedType?: string;
+}
+
+/** A §3 wrapper as the app sends it to the LAN gateway, sealed with the phone's own key. */
+export function phoneWrapper(key: KeyObject, message: PhoneMessage) {
+  const { homeId, deviceId, type, fields = {} } = message;
+  const msgId = message.msgId ?? randomUUID();
+  const sentAt = message.sentAt ?? utcSeconds(new Date());
+  const wrapperType = message.wrapperType ?? type;
+  const plaintext = { msg_id: msgId, sent_at: sentAt, type, ...fields };
+  const bytes = Buffer.from(JSON.stringify(plaintext), "utf8");
+  const label = { homeId, type: message.sealedType ?? wrapperType };
+  return {
+    v: 1,
+    msg_id: message.wrapperMsgId ?? msgId,
+    type: wrapperType,
+    sent_at: sentAt,
+    envelope: seal(bytes, key, deviceId, label),
+  };
+}
+
+/** A fetch from the start, as the app sends it. */
+export const FETCH_FIELDS = { after: null, limit: 50 } as const;

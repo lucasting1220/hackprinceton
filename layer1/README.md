@@ -21,7 +21,7 @@ Run each command from this folder (`layer1/`). These are the checks that `CLAUDE
 
 `npm run format` rewrites files to the expected format.
 
-`npm start` runs the bridge: it serves the setup page, opens it in the default browser and starts the home's coordinator. Pass `npm start -- --state-dir <absolute folder>` to use a state folder other than this system's default. To stop the bridge, press Ctrl+C, or create an empty file named `bridge.stop` in its state folder, which works on every system and from scripts. Either way it closes the setup page, stops the coordinator, removes `bridge.stop` and exits.
+`npm start` runs the bridge: it serves the setup page, opens it in the default browser and starts the home's coordinator. Pass `npm start -- --state-dir <absolute folder>` to use a state folder other than this system's default. To stop the bridge, press Ctrl+C, or create an empty file named `bridge.stop` in its state folder, which works on every system and from scripts. Once a home exists, the bridge also listens on port 7480 on every network interface, where phones pair and then reach the home over home Wi-Fi; the setup page's Pair a phone button shows the QR code. Either way it closes port 7480 and the setup page, stops the coordinator, removes `bridge.stop` and exits.
 
 ## What lint does not catch
 
