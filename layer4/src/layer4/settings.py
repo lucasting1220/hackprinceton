@@ -31,6 +31,11 @@ FALL_DETECTION_GAP = timedelta(seconds=5)
 REWRITE_CONTEXT = timedelta(minutes=10)
 REWRITE_MAX_CHARS = 300
 
+# Help check: the longest transcript tail the quick model reads, and how long the check may
+# keep failing before it counts as stopped.
+HELP_TRANSCRIPT_MAX_CHARS = 2000
+HELP_CHECK_GAP = timedelta(seconds=5)
+
 
 @dataclass(frozen=True)
 class RuleThresholds:
