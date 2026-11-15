@@ -5,7 +5,8 @@ Control app (WebSocket /ws on 0.0.0.0:listen_port): workers join with `hello` an
 and `stop` orders that worker needs (coordinator/plan.py). Jobs reach the event log through
 their worker with `log_append` and `log_read`, read the home's state with `state_read`, and
 send messages for phones with `phone_send` (handed to Layer 1's bridge in the background),
-each answered with a `reply`. Dashboard app
+each answered with a `reply`; a job takes the bridge's requests or watch data with
+`subscribe`, and gets each one as a `deliver` (coordinator/inbox.py). Dashboard app
 (127.0.0.1:dashboard_port): the dashboard page, GET /api/state (the
 Layer 1 contract) and GET /api/hardware (Layer 2 only: specs and load, for the page).
 Neither ever logs a token, a whole `hello` or raw text a client chose.
@@ -35,12 +36,14 @@ from layer2.contracts import (
     Reply,
     StateRead,
     StatusMessage,
+    Subscribe,
     WelcomeAccepted,
     WelcomeRejected,
 )
 from layer2.coordinator import bridge
 from layer2.coordinator.dashboard import PAGE
 from layer2.coordinator.event_log import EventLog, EventTooLargeError
+from layer2.coordinator.inbox import Subscriptions
 from layer2.coordinator.plan import Placement
 from layer2.coordinator.registry import Registry
 from layer2.files import ConfigError, load_json_model
@@ -102,6 +105,7 @@ def create_control_app(
     registry: Registry[WebSocket],
     placement: Placement | None = None,
     events: EventLog | None = None,
+    subscriptions: Subscriptions | None = None,
 ) -> FastAPI:
     plan = placement if placement is not None else Placement(lambda: [])
     app = FastAPI(openapi_url=None, docs_url=None, redoc_url=None)
@@ -159,7 +163,9 @@ def create_control_app(
             )
             await socket.send_text(welcome.model_dump_json())
             log.info("L2 coordinator: laptop %s joined", node_id)
-            await _receive(socket, node_id, registry, plan, events, config.bridge_url)
+            await _receive(
+                socket, node_id, registry, plan, events, config.bridge_url, subscriptions
+            )
         finally:
             if registry.is_current(node_id, socket):
                 registry.leave(node_id, socket)
@@ -168,9 +174,10 @@ def create_control_app(
     return app
 
 
-_FromWorker = TypeAdapter[StatusMessage | LogAppend | LogRead | StateRead | PhoneSend](
+_FromWorker = TypeAdapter[StatusMessage | LogAppend | LogRead | StateRead | PhoneSend | Subscribe](
     Annotated[
-        StatusMessage | LogAppend | LogRead | StateRead | PhoneSend, Field(discriminator="type")
+        StatusMessage | LogAppend | LogRead | StateRead | PhoneSend | Subscribe,
+        Field(discriminator="type"),
     ]
 )
 
@@ -182,6 +189,7 @@ async def _receive(
     placement: Placement,
     events: EventLog | None,
     bridge_url: str,
+    subscriptions: Subscriptions | None,
 ) -> None:
     """Handle a worker's messages until the connection closes: each status is recorded and
     answered with the orders this worker needs; each event log request gets a reply. Bad
@@ -228,6 +236,10 @@ async def _receive(
                 continue
             if not registry.is_current(node_id, socket):
                 continue
+            if isinstance(message, Subscribe):
+                if subscriptions is not None:
+                    subscriptions.subscribe(message.kind, node_id, send)
+                continue
             if isinstance(message, PhoneSend):
                 if len(text.encode("utf-8")) > settings.PHONE_MAX_BYTES:
                     too_big = (
@@ -263,6 +275,8 @@ async def _receive(
     finally:
         for task in carrying:
             task.cancel()
+        if subscriptions is not None:
+            subscriptions.drop(send)
 
 
 async def _answer(request: LogAppend | LogRead, events: EventLog | None) -> Reply:
