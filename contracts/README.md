@@ -107,7 +107,7 @@ Added Nov 15 from the field list that the Layer 1 doc ("Handoff to Layer 4"), `l
 ### Rules that go with this file
 
 - **Path:** the bridge posts the object to the coordinator at `POST /v1/watch-data` on `client_port`. The coordinator answers 202 once the worker whose job takes `watch-data` has it, or 503 when no job takes it. Layer 3 gets the same object from `layer2.receive("watch-data")`.
-- **On the wire:** `device_id` and the three lists `heart_rate`, `sleep` and `steps`, each of which may be empty, with only the fields in the example on each row. `schema_version` and `type` are optional in version 1: the bridge does not send them today, and Layer 3 takes a batch with or without them.
+- **On the wire:** `device_id` and the three lists `heart_rate`, `sleep` and `steps`, each of which may be empty, with only the fields in the example on each row. `schema_version` and `type` are optional in version 1: the bridge sends both, and Layer 3 takes a batch with or without them.
 - **Times:** `measured_at`, `bedtime_at` and `wake_at` are in UTC and carry their time zone, between 1970-01-02 and 2999-12-31, the range Layer 4 accepts. `night_of` is a `YYYY-MM-DD` date in the same range.
 - **Counts:** `bpm` and `asleep_minutes` are numbers and may be decimals; `interruptions` and `steps_today` are whole numbers; none is below 0. Layer 3 passes every count on as a whole number, rounding a decimal to the nearest, halves up, and refuses a `bpm` below 1, because Layer 4 takes a whole number above 0.
 - **`measured_at` for steps** is the moment the count was read, so a later count on the same day is a new reading.
