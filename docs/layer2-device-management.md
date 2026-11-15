@@ -1,6 +1,27 @@
 # Layer 2: Cluster
 
-**Status: draft for team review. Nothing is built.** Items under "Decided" come from the design interviews of Nov 13 and 14. Items marked proposed and those under "Open questions" are not yet agreed. Updated to match `layer4-care-layer.md` and the cross-layer decisions in `coherence-review.md`.
+**Status: built through step 7 (Nov 15); see "What is built".** Items under "Decided" come from the design interviews of Nov 13 and 14. Items marked proposed and those under "Open questions" are not yet agreed. Updated to match `layer4-care-layer.md` and the cross-layer decisions in `coherence-review.md`.
+
+## What is built
+
+As of Nov 15, on `main`, with the pull request numbers. Each was tested on macOS and in CI on Windows and macOS.
+
+| Build step | State | Pull requests |
+|---|---|---|
+| 1. Worker connects with its token, reports specs and status; dashboard and `/api/state` list laptops | Done | #9 to #15, #19, #23, #25 |
+| 2. Start and stop a job on a worker, using the rule-based plan | Done. Jobs are read from `layer3/jobs/<name>/job.json` and `layer4/jobs/<name>/job.json` (`contracts/job.json`, #44); none exist yet | #26, #27, #29, #30, #48 |
+| 3. Route `quick` requests to an Ollama model | First version: a job's `ask()` is answered by its own laptop's Ollama; `deep` is answered by `quick`, and the answer says so | #35 |
+| 4. AI planner with code checks, falling back to the rules | Done. The model is `PLANNER_MODEL` (placeholder `qwen2.5:3b`) until it is measured on the coordinator laptop with `layer2-compare-models` (#57) | #39, #40 |
+| 5. Re-plan and move jobs when a laptop joins | Done for joins: the coordinator re-plans on a laptop's first status; a job that moves is stopped first, then started. A lost laptop is still "later" | #30, #40 |
+| 6. Fan-out batches | Not started | |
+| 7. Carry messages between Layer 1's bridge and Layer 4; store the event log | Done: `to_phone()` to `bridge_url` (#54, #58); the bridge's `/v1/requests` and `/v1/watch-data` on `client_port` to the job that subscribed (#60, #62); the event log (#31 to #34) | #31 to #34, #58, #60, #62 |
+| 8. Split model | Not started (may be dropped) | |
+
+Also built: the dashboard for the demo (one page, dark; laptops, jobs and their restarts, the planner's latest decision, recent events; #18, #51, #53, #66 to #68), and `status()` for Layer 4's monitoring check (#36).
+
+**Not yet built:** `feed()` (camera and mic from Layer 3 to Layer 4; its agreement is being drafted), `fan_out()`, routing `quick` to another laptop's Ollama, and model placement in the plan.
+
+**The job client** (`layer2.job_client`, which Layer 4 already imports): `Layer2.from_env()`, `log_event(event)`, `read_log(since=…)` or `read_log(day=…)`, `ask(prompt, quality)`, `status()`, `to_phone(kind, message)` with `kind` one of `alerts`, `replies`, `status`, `reports`, `receive(kind)` with `kind` one of `requests`, `watch-data`, and `on_request(handle)`. A job reaches it through its own worker's local gateway, whose address and secret the worker puts in the job's environment.
 
 ## Summary
 
@@ -178,6 +199,8 @@ Proposals for the owners of each layer to agree.
 | Coordinator to worker | `request` | a prompt or a fan-out item |
 | Both ways | `message` | something travelling between Layer 4 and Layer 1's bridge |
 | Both ways | `media` | forwarded video frames or audio, on a separate connection so it cannot delay the messages above |
+
+As built (Nov 15), the connection also carries: `start` and `stop` naming a job only (the worker finds the command in its own job folder, so a message can never run an arbitrary program); job states and restart counts inside `status`; `log_append`, `log_read`, `state_read` and `phone_send` from a worker for its jobs, each answered by a `reply` with the same id; `subscribe` from a worker and `deliver` to it for the bridge's requests and watch data. `request`, `result` and `media` are not built yet.
 
 ## Dashboard
 
