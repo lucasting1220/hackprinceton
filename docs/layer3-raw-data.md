@@ -4,7 +4,7 @@
 
 ## Summary
 
-Layer 3 collects the raw data and hands it on. It opens the webcam and its built-in mic, receives the watch data that the iPhone app sends, and passes all three to Layer 4, untouched apart from a timestamp. It runs no AI and makes no decisions.
+Layer 3 collects the raw data and hands it on. It opens the webcam and its built-in mic, receives the watch data that the iPhone app sends, and passes all three to Layer 4. What it passes on is untouched apart from a timestamp and the rounding of watch counts to whole numbers; a watch reading that is malformed or a repeat is not passed on. It runs no AI and makes no decisions.
 
 Data moves one way: every piece of fetched data goes to Layer 3, Layer 3 passes it to Layer 4, Layer 4 computes the decision, and Layer 1 carries the result to the caregiver's iPhone.
 
@@ -29,8 +29,10 @@ Data moves one way: every piece of fetched data goes to Layer 3, Layer 3 passes 
 | Watch data | Heart rate; last night's sleep (total, bedtime, wake time and interruptions); steps so far today |
 | Watch data source | Layer 1's iPhone app reads it from Apple Health and sends it. Layer 3 receives it at home |
 | Watch data timing | Readings arrive in bursts when the resident's iPhone is unlocked. That is acceptable |
-| Repeated readings | Layer 3 removes them. Layer 4 never receives the same reading twice |
-| Gaps in watch data | Layer 3 always passes on the time it last received data. A gap is never an alert; Layer 4 shows it in live status |
+| Repeated readings | Layer 3 removes them. A repeat is a reading of the same kind with the same measured time; a sleep record's measured time is its wake-up time. Layer 4 never receives the same reading twice while the receiver runs: the receiver remembers the newest 20,000 measured times of each kind and, once it has had to forget some, treats a reading measured at or before the newest time it forgot as passed on already, with a warning. That time is never later than the moment the batch arrived, so readings dated in the future cannot block the readings measured after that. A reading dated later than the moment its batch arrived is the one exception to "never twice": once forgotten, it can pass again. The receiver stores nothing, so after a restart a reading sent again passes once more |
+| Watch counts | Heart rate, minutes asleep, interruptions and steps are passed on as whole numbers. A decimal is rounded to the nearest whole number, halves up |
+| Malformed watch readings | A reading is refused and counted, with the first few of a batch logged, and never stops the rest of its batch, when a time has no time zone or falls outside 1970-01-02 to 2999-12-31, a count is not a number or is below its minimum (1 for heart rate, 0 for the others), the night is not a date, or the entry is not a JSON object. A kind that is not a list, and a top-level name other than `heart_rate`, `sleep`, `steps`, `device_id`, `type`, `schema_version`, `msg_id` and `sent_at`, are refused the same way |
+| Gaps in watch data | Layer 3 always passes on the time a new reading last arrived. A gap is never an alert; Layer 4 shows it in live status |
 | Output | Three raw feeds to Layer 4: camera frames, mic audio, and watch readings |
 | Storage | None. No video or audio is stored anywhere |
 | Sensors the resident declined | A camera or mic declined at setup is not opened |
@@ -54,7 +56,7 @@ resident's iPhone ──▶ Layer 1 bridge ──▶ Layer 2 coordinator ──�
 |---|---|---|
 | Capture job | Opens the camera and mic named in the laptop's config; stamps and hands out frames and audio; reports and recovers from device failures | The laptop holding the webcam |
 | Local video feed | Serves the camera frames to Layer 1's live-view sender on the same laptop | The camera laptop |
-| Watch data receiver | Takes in the readings the app sends, removes repeats, and passes them on with the time each was measured and the time data last arrived | A worker, placed by Layer 2 |
+| Watch data receiver | Takes in the readings the app sends, removes repeats, and passes them on with the time each was measured and the time a new reading last arrived | A worker, placed by Layer 2 |
 
 ## When a device fails
 
@@ -77,7 +79,7 @@ Proposals for each layer's owner to agree.
 |---|---|
 | `camera` | one frame, 640 by 480, and `captured_at` |
 | `mic` | a short chunk of audio at 16 kHz in one channel, and `captured_at` |
-| `watch` | one reading (below), plus `last_received_at` for the feed as a whole |
+| `watch` | one reading (below), plus `last_received_at`, the time a new reading last arrived on the feed |
 
 Watch readings:
 
@@ -89,14 +91,13 @@ Watch readings:
 
 **Layer 3 to Layer 1.** The local video feed on the camera laptop. Layer 1's doc proposes it as a WebSocket on `127.0.0.1` port 7460, one JPEG per message, up to 15 frames per second at 640 by 480, encoded only while a client is connected.
 
-**Layer 1 to Layer 3.** Watch readings from the app, carried by Layer 1's bridge and Layer 2's coordinator. The Layer 1 doc defines this as `POST /v1/watch-data`, with the same fields as the table above.
+**Layer 1 to Layer 3.** Watch readings from the app, carried by Layer 1's bridge and Layer 2's coordinator. The Layer 1 doc defines this as `POST /v1/watch-data`, with the same fields as the table above. Every time must carry a time zone.
 
 ## Proposed, not yet confirmed
 
 1. **Timestamps.** Frames and audio use the capturing laptop's clock. Watch readings keep the time the watch measured them.
 2. **Audio chunk length:** half a second.
 3. **Retry interval** after a device failure: 3 seconds.
-4. **Recognising a repeat:** two watch readings of the same kind with the same measured time are the same reading.
 
 ## Risks
 
