@@ -19,6 +19,14 @@ public protocol HomeService: Sendable {
     func setLiveViewAllowed(_ allowed: Bool) async throws
     /// Tells the hub, revokes at the relay, then wipes. Returns false if the home couldn't be told.
     func unpair() async -> Bool
+    /// Asks the home a question (`request` with kind `ask`) and returns the body of Layer 4's `reply`, which the home
+    /// writes with its own Ollama model.
+    func ask(_ question: String) async throws -> String
+}
+
+public extension HomeService {
+    /// A home without Layer 4 (the demo, test doubles) can't answer a question.
+    func ask(_ question: String) async throws -> String { throw AssistantError.notConfigured }
 }
 
 public struct HeartSample: Codable, Sendable, Equatable { public let t: Date; public let bpm: Int
@@ -88,7 +96,13 @@ public final class NetworkHomeService: HomeService, @unchecked Sendable {
     private let log = Logger(subsystem: "app.debbie", category: "network")
 
     private struct State { var cursor: String?; var seen: [String] = []; var alerts: [String: HubAlert] = [:]
-        var monitoring: MonitoringSnapshot?; var care: CareStatus?; var lastRediscovery: Date? }
+        var monitoring: MonitoringSnapshot?; var care: CareStatus?; var lastRediscovery: Date?
+        /// Layer 4's answers by `request_id`, until `ask` takes them.
+        var replies: [String: String] = [:] }
+
+    /// A `reply` from the hub: Layer 4's answer to one of this phone's requests (phone-hub.md §3).
+    private struct Reply: Decodable { let requestID: String; let body: String
+        enum CodingKeys: String, CodingKey { case requestID = "request_id", body } }
 
     public init(store: any PairingStore = SecureStore(), mode: Mode = .auto, isDebug: Bool = false,
                 lanSession: URLSession? = nil, relaySession: URLSession? = nil) {
@@ -294,6 +308,7 @@ public final class NetworkHomeService: HomeService, @unchecked Sendable {
     public func refresh() async throws -> HomeSnapshot {
         let c = try config()
         let homeKey = try? key(.homeKey)
+        let phoneKey = try? key(.phoneKey)
         let lan = await useLAN(c) || c.role == .resident   // residents have no relay messages to read
         let cursor = lock.withLock { $0.cursor }
         let (data, status): (Data, Int)
@@ -310,7 +325,10 @@ public final class NetworkHomeService: HomeService, @unchecked Sendable {
         for w in page.messages {
             guard lock.withLock({ !$0.seen.contains(w.msgID) }) else { continue }
             lock.withLock { $0.seen.append(w.msgID); if $0.seen.count > 1000 { $0.seen.removeFirst() } }
-            guard let homeKey, let plain = try? ContractCrypto.open(w.envelope, key: homeKey, homeID: c.homeID, type: w.type) else {
+            // A message for this phone alone (`reply`) is sealed with its own key, kid its device ID; the rest with the home key.
+            let forThisPhone = w.envelope.kid == c.deviceID && w.to == c.deviceID
+            guard let openKey = forThisPhone ? phoneKey : homeKey,
+                  let plain = try? ContractCrypto.open(w.envelope, key: openKey, homeID: c.homeID, type: w.type) else {
                 log.notice("dropped a message that didn't decrypt (type \(w.type, privacy: .public))"); continue
             }
             switch w.type {
@@ -326,6 +344,8 @@ public final class NetworkHomeService: HomeService, @unchecked Sendable {
                 }
             case "heartbeat", "monitoring": if let m = try? JSONDecoder.debbie.decode(MonitoringSnapshot.self, from: plain) { lock.withLock { $0.monitoring = m } }
             case "care_status": if let cs = try? JSONDecoder.debbie.decode(CareStatus.self, from: plain) { lock.withLock { $0.care = cs } }
+            case "reply" where forThisPhone:
+                if let r = try? JSONDecoder.debbie.decode(Reply.self, from: plain) { lock.withLock { $0.replies[r.requestID] = r.body } }
             default: break
             }
         }
@@ -389,6 +409,31 @@ public final class NetworkHomeService: HomeService, @unchecked Sendable {
     }
 
     public func setLiveViewAllowed(_ allowed: Bool) async throws { try await command("live_view_setting", ["enabled": allowed]) }
+
+    /// How long `ask` waits for Layer 4's reply. The home's Ollama model can take a while on a laptop.
+    public static let replyWait: Duration = .seconds(45)
+    /// How often `ask` fetches messages while it waits for the reply.
+    public static let replyPoll: Duration = .seconds(1)
+
+    /// Sends the question as a `request` with kind `ask` (phone-hub.md §3), then fetches messages until the `reply` with
+    /// the same `request_id` arrives. Throws `AssistantError.slow` if none comes within `replyWait`.
+    public func ask(_ question: String) async throws -> String {
+        try await ask(question, requestID: UUID().uuidString.lowercased())
+    }
+
+    func ask(_ question: String, requestID: String) async throws -> String {
+        try await command("request", ["request_id": requestID, "kind": "ask", "text": question])
+        let deadline = ContinuousClock.now + Self.replyWait
+        while ContinuousClock.now < deadline {
+            try await Task.sleep(for: Self.replyPoll)
+            if let answer = takeReply(requestID) { return answer }
+            _ = try await refresh()
+            if let answer = takeReply(requestID) { return answer }
+        }
+        throw AssistantError.slow
+    }
+
+    private func takeReply(_ requestID: String) -> String? { lock.withLock { $0.replies.removeValue(forKey: requestID) } }
 
     /// How long unpairing waits to tell the home before forgetting it anyway. With the laptop switched off the
     /// attempts could take half a minute with nothing on screen (owner, 23:5x: "unpair this iPhone is not working").

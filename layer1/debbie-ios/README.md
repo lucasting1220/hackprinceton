@@ -79,9 +79,9 @@ consent and every live-view outcome, and a push to the Simulator (`push` runs `x
 encrypted alert, which the Notification Service Extension decrypts). `UITests/MockHomeUITests` pairs the real app
 with the mock, cuts the LAN gateway and measures the fallback to the relay.
 
-## Debbie's AI answers (Gemini)
+## Debbie's AI answers (the home's Ollama model)
 
-The centre tab is a conversation with Debbie, who summarises how the person at home is doing (D-031). With a Gemini key, Google Gemini writes her answers. Without one, the phone writes them from the same facts in fixed wording.
+The centre tab is a conversation with Debbie, who summarises how the person at home is doing (D-031). Each question goes to the home as a `request` with kind `ask` (`layer1/contracts/phone-hub.md` §3); Layer 4 answers it with the home's own Ollama model, and the app reads the `reply` sealed with this iPhone's own key. The demo home, and a Debug run with `DEBBIE_ASSISTANT=offline`, answer on the phone in fixed wording instead. The app no longer uses Gemini; the steps below only matter for `GeminiAssistant`'s own tests and smoke script.
 
 1. Create `~/.config/debbie-ios/gemini.env` (mode 600), outside the repo:
    ```sh

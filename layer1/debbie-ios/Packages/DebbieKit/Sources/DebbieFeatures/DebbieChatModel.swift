@@ -84,14 +84,16 @@ public final class DebbieChatModel {
         let onDevice = !assistant.isGenerative
         let ask = UUID()
         currentAsk = ask
+        let answerLimit = assistant.answerLimit
         task = Task { [weak self] in
-            // 3 s with no words: say what she's doing. 20 s: give up. 45 s: stop a reply still in progress.
-            // Both cut-offs show "taking longer than usual" (note 17 R6); only the caregiver's own Stop shows nothing.
+            // 3 s with no words: say what she's doing. The assistant's answer limit (20 s by default): give up. 25 s
+            // later: stop a reply still in progress. Both cut-offs show "taking longer than usual" (note 17 R6); only
+            // the caregiver's own Stop shows nothing.
             let watchdog = Task { [weak self] in
                 try? await Task.sleep(for: .seconds(3))
                 guard !Task.isCancelled else { return }
                 if self?.writing == true { self?.slow = true }
-                try? await Task.sleep(for: .seconds(17))
+                try? await Task.sleep(for: answerLimit - .seconds(3))
                 guard !Task.isCancelled else { return }
                 if self?.writing == true { self?.problem = .slow; self?.stop() }
                 try? await Task.sleep(for: .seconds(25))
