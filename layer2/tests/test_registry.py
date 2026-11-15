@@ -218,3 +218,31 @@ def test_bad_status_message_is_rejected(field: str, value: object) -> None:
     data = status().model_dump()
     with pytest.raises(ValidationError):
         StatusMessage.model_validate({**data, field: value})
+
+
+def test_hardware_lists_specs_and_tools_from_hello(registry: Registry[str]) -> None:
+    registry.join("node-1", HELLO, "conn-a")
+    [laptop] = registry.hardware().laptops
+    assert (laptop.node_id, laptop.display_name) == ("node-1", HELLO.display_name)
+    assert (laptop.specs, laptop.tools) == (HELLO.specs, HELLO.tools)
+    assert laptop.memory_free_gb is None and laptop.cpu_percent is None
+
+
+def test_hardware_shows_the_latest_load(registry: Registry[str], clock: Clock) -> None:
+    registry.join("node-1", HELLO, "conn-a")
+    clock.advance(2)
+    registry.status("node-1", "conn-a", status())
+    [laptop] = registry.hardware().laptops
+    assert (laptop.memory_free_gb, laptop.cpu_percent) == (8.0, 12.5)
+    assert laptop.last_status_at == START + timedelta(seconds=2)
+    assert registry.hardware().updated_at == START + timedelta(seconds=2)
+
+
+def test_rejoin_refreshes_specs_and_clears_the_old_load(registry: Registry[str]) -> None:
+    registry.join("node-1", HELLO, "conn-a")
+    registry.status("node-1", "conn-a", status())
+    upgraded = HELLO.model_copy(update={"specs": HELLO.specs.model_copy(update={"memory_gb": 64})})
+    registry.join("node-1", upgraded, "conn-b")
+    [laptop] = registry.hardware().laptops
+    assert laptop.specs.memory_gb == 64
+    assert laptop.memory_free_gb is None and laptop.cpu_percent is None

@@ -239,3 +239,45 @@ def test_dashboard_marks_laptops_unknown_when_the_coordinator_is_down(
 ) -> None:
     page = dashboard.get("/").text
     assert "markAllUnknown" in page
+
+
+def test_hardware_endpoint_lists_joined_laptops(control: TestClient, dashboard: TestClient) -> None:
+    with control.websocket_connect("/ws") as socket:
+        socket.send_text(json.dumps(HELLO))
+        socket.receive_text()
+        socket.send_text(status_message())
+        socket.close()
+    body = dashboard.get("/api/hardware").json()
+    assert set(body) == {"schema_version", "updated_at", "laptops"}
+    [laptop] = body["laptops"]
+    assert laptop["display_name"] == APPROVED_NAME
+    assert laptop["specs"] == HELLO["specs"]
+    assert laptop["tools"] == HELLO["tools"]
+    assert (laptop["memory_free_gb"], laptop["cpu_percent"]) == (4.0, 10.0)
+    assert "token" not in json.dumps(body)
+
+
+def test_hardware_endpoint_refuses_other_host_names(registry: Registry[WebSocket]) -> None:
+    outsider = TestClient(create_dashboard_app(registry), base_url="http://attacker.example")
+    assert outsider.get("/api/hardware").status_code == 400
+
+
+def test_dashboard_page_shows_each_laptop_as_one_card(dashboard: TestClient) -> None:
+    page = dashboard.get("/").text
+    assert "/api/state" in page and "/api/hardware" in page
+    for part in (
+        "Overview",
+        "Laptops online",
+        "Memory pooled",
+        "Jobs running",
+        "Work not placed",
+        "No jobs on this laptop",
+        '"Memory"',
+        '"Processor"',
+        "Load, last minute",
+        "createElementNS(SVG",
+    ):
+        assert part in page
+    assert "cluster" not in page.lower(), "CLAUDE.md: say home, not cluster"
+    assert "__" not in page.split("<script>")[1], "a placeholder was left unfilled"
+    assert "<script src" not in page, "the page must work without internet"
