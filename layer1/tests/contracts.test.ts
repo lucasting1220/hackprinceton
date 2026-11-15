@@ -6,6 +6,7 @@ import { describe, type TestContext, test } from "node:test";
 import { createHome, type Home } from "../bridge/src/home.ts";
 import { readJsonFile } from "../bridge/src/json-file.ts";
 import * as settings from "../bridge/src/settings.ts";
+import { startStub, waitFor } from "./coordinator-fixtures.ts";
 
 const contractsDir = path.join(import.meta.dirname, "..", "..", "contracts");
 
@@ -86,5 +87,33 @@ describe("the files createHome writes, checked as Layer 2's models check them", 
     const home = await createdHome(t);
     const written = await readLike(home.acceptedWorkersFile, "accepted-workers.json");
     assert.deepEqual(written, { schema_version: 1, workers: [] });
+  });
+});
+
+describe("contracts/api-state.json", () => {
+  /** Fails unless `actual` has exactly `example`'s keys, and its value types, at every level. */
+  function assertSameShape(actual: unknown, example: unknown, where: string): void {
+    if (Array.isArray(example)) {
+      assert.ok(Array.isArray(actual), `${where} must be a list`);
+      for (const item of actual) assertSameShape(item, example[0], `${where}[]`);
+    } else if (typeof example === "object" && example !== null) {
+      assert.ok(typeof actual === "object" && actual !== null, `${where} must be an object`);
+      assert.deepEqual(Object.keys(actual).sort(), Object.keys(example).sort(), `${where} keys`);
+      for (const [key, value] of Object.entries(example)) {
+        assertSameShape((actual as Record<string, unknown>)[key], value, `${where}.${key}`);
+      }
+    } else {
+      assert.equal(typeof actual, typeof example, `${where} type`);
+    }
+  }
+
+  test("the stub's /api/state has exactly its keys at every level, in UTC", async (t) => {
+    const stub = await startStub(t);
+    await waitFor(() => stub.stderr().includes("ready"));
+    const url = `http://127.0.0.1:${stub.dashboardPort}/api/state`;
+    const state: unknown = await (await fetch(url, { signal: AbortSignal.timeout(2_000) })).json();
+    assertSameShape(state, await readContract("api-state.json"), "api-state.json");
+    const { updated_at: updatedAt } = state as { updated_at: string };
+    assert.match(updatedAt, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z$/);
   });
 });
