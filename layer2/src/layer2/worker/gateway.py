@@ -8,6 +8,7 @@ LAYER2_GATEWAY_TOKEN. Requests:
     {"token": "...", "type": "log_append", "event": {...}}
     {"token": "...", "type": "log_read", "since": "<ISO time>"}   or   "day": "YYYY-MM-DD"
     {"token": "...", "type": "state_read"}   (answer: "state", the /api/state data)
+    {"token": "...", "type": "phone_send", "kind": "alerts", "body": {...}}   (to Layer 1's bridge)
     {"token": "...", "type": "ask", "prompt": "...", "quality": "quick" | "deep"}
 
 Answers: {"ok": true, "truncated": false}, with "events": [...] for a read (truncated is true
@@ -31,7 +32,7 @@ from websockets.asyncio.client import ClientConnection
 from websockets.exceptions import ConnectionClosed
 
 from layer2 import settings
-from layer2.contracts import LogAppend, LogRead, Reply, StateRead
+from layer2.contracts import LogAppend, LogRead, PhoneSend, Reply, StateRead
 from layer2.ollama import ModelError, generate
 
 log = logging.getLogger(__name__)
@@ -86,7 +87,8 @@ class Relay:
             self._pending.pop(request_id, None)
 
 
-_REQUESTS: dict[str, type[LogAppend] | type[LogRead] | type[StateRead]] = {
+_REQUESTS: dict[str, type[LogAppend] | type[LogRead] | type[StateRead] | type[PhoneSend]] = {
+    "phone_send": PhoneSend,
     "log_append": LogAppend,
     "log_read": LogRead,
     "state_read": StateRead,
@@ -140,7 +142,10 @@ class Gateway:
         if request.get("type") == "ask":
             return await self._ask(request)
         if request.get("type") not in _REQUESTS:
-            return {"ok": False, "error": "type must be log_append, log_read, state_read or ask"}
+            return {
+                "ok": False,
+                "error": "type must be log_append, log_read, state_read, phone_send or ask",
+            }
         try:
             reply = await self._relay.ask(request)
         except ValidationError:

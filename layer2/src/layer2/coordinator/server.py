@@ -3,14 +3,17 @@
 Control app (WebSocket /ws on 0.0.0.0:listen_port): workers join with `hello` and report with
 `status`; a connection's first status re-plans, and each status is answered with the `start`
 and `stop` orders that worker needs (coordinator/plan.py). Jobs reach the event log through
-their worker with `log_append` and `log_read`, and read the home's state with `state_read`,
-each answered with a `reply`. Dashboard app
+their worker with `log_append` and `log_read`, read the home's state with `state_read`, and
+send messages for phones with `phone_send` (handed to Layer 1's bridge in the background),
+each answered with a `reply`; a job takes the bridge's requests or watch data with
+`subscribe`, and gets each one as a `deliver` (coordinator/inbox.py). Dashboard app
 (127.0.0.1:dashboard_port): the dashboard page, GET /api/state (the
 Layer 1 contract) and GET /api/hardware (Layer 2 only: specs and load, for the page).
 Neither ever logs a token, a whole `hello` or raw text a client chose.
 """
 
 import asyncio
+import contextlib
 import logging
 from pathlib import Path
 from typing import Annotated
@@ -29,14 +32,18 @@ from layer2.contracts import (
     LogAppend,
     LoggedEvent,
     LogRead,
+    PhoneSend,
     Reply,
     StateRead,
     StatusMessage,
+    Subscribe,
     WelcomeAccepted,
     WelcomeRejected,
 )
+from layer2.coordinator import bridge
 from layer2.coordinator.dashboard import PAGE
 from layer2.coordinator.event_log import EventLog, EventTooLargeError
+from layer2.coordinator.inbox import Subscriptions
 from layer2.coordinator.plan import Placement
 from layer2.coordinator.registry import Registry
 from layer2.files import ConfigError, load_json_model
@@ -98,6 +105,7 @@ def create_control_app(
     registry: Registry[WebSocket],
     placement: Placement | None = None,
     events: EventLog | None = None,
+    subscriptions: Subscriptions | None = None,
 ) -> FastAPI:
     plan = placement if placement is not None else Placement(lambda: [])
     app = FastAPI(openapi_url=None, docs_url=None, redoc_url=None)
@@ -155,7 +163,9 @@ def create_control_app(
             )
             await socket.send_text(welcome.model_dump_json())
             log.info("L2 coordinator: laptop %s joined", node_id)
-            await _receive(socket, node_id, registry, plan, events)
+            await _receive(
+                socket, node_id, registry, plan, events, config.bridge_url, subscriptions
+            )
         finally:
             if registry.is_current(node_id, socket):
                 registry.leave(node_id, socket)
@@ -164,8 +174,11 @@ def create_control_app(
     return app
 
 
-_FromWorker = TypeAdapter[StatusMessage | LogAppend | LogRead | StateRead](
-    Annotated[StatusMessage | LogAppend | LogRead | StateRead, Field(discriminator="type")]
+_FromWorker = TypeAdapter[StatusMessage | LogAppend | LogRead | StateRead | PhoneSend | Subscribe](
+    Annotated[
+        StatusMessage | LogAppend | LogRead | StateRead | PhoneSend | Subscribe,
+        Field(discriminator="type"),
+    ]
 )
 
 
@@ -175,12 +188,34 @@ async def _receive(
     registry: Registry[WebSocket],
     placement: Placement,
     events: EventLog | None,
+    bridge_url: str,
+    subscriptions: Subscriptions | None,
 ) -> None:
     """Handle a worker's messages until the connection closes: each status is recorded and
     answered with the orders this worker needs; each event log request gets a reply. Bad
     messages are ignored, and logged once per connection."""
     logged_bad = False
     planned = False
+    sending = asyncio.Lock()  # replies from background tasks must not interleave
+    carrying: set[asyncio.Task[None]] = set()
+
+    async def send(text: str) -> None:
+        async with sending:
+            await socket.send_text(text)
+
+    async def carry(message: PhoneSend) -> None:
+        """Hand a message to the bridge without holding up this connection."""
+        try:
+            await asyncio.to_thread(bridge.post, bridge_url, message.kind, message.body)
+            reply = Reply(type="reply", schema_version=1, id=message.id, ok=True)
+        except bridge.BridgeError as error:
+            log.warning(
+                "L2 coordinator: a %s message for phones was not delivered: %s", message.kind, error
+            )
+            reply = Reply(type="reply", schema_version=1, id=message.id, ok=False, error=str(error))
+        with contextlib.suppress(RuntimeError, WebSocketDisconnect, WebSocketDisconnected, OSError):
+            await send(reply.model_dump_json(exclude_none=True))
+
     try:
         while True:
             text = await _receive_text(socket)
@@ -201,14 +236,32 @@ async def _receive(
                 continue
             if not registry.is_current(node_id, socket):
                 continue
+            if isinstance(message, Subscribe):
+                if subscriptions is not None:
+                    subscriptions.subscribe(message.kind, node_id, send)
+                continue
+            if isinstance(message, PhoneSend):
+                if len(text.encode("utf-8")) > settings.PHONE_MAX_BYTES:
+                    too_big = (
+                        f"a message for phones may be at most {settings.PHONE_MAX_BYTES} bytes"
+                    )
+                    reply = Reply(
+                        type="reply", schema_version=1, id=message.id, ok=False, error=too_big
+                    )
+                    await send(reply.model_dump_json(exclude_none=True))
+                    continue
+                task = asyncio.create_task(carry(message))
+                carrying.add(task)
+                task.add_done_callback(carrying.discard)
+                continue
             if isinstance(message, StateRead):
                 state = registry.api_state(placement.plan.dropped)
                 reply = Reply(type="reply", schema_version=1, id=message.id, ok=True, state=state)
-                await socket.send_text(reply.model_dump_json(exclude_none=True))
+                await send(reply.model_dump_json(exclude_none=True))
                 continue
             if not isinstance(message, StatusMessage):
                 reply = await _answer(message, events)
-                await socket.send_text(reply.model_dump_json(exclude_none=True))
+                await send(reply.model_dump_json(exclude_none=True))
                 continue
             registry.status(node_id, socket, message)
             if not planned:
@@ -216,9 +269,14 @@ async def _receive(
                 placement.request_replan(lambda: (registry.connected(), registry.known()))
             for order in placement.orders(node_id, registry.job_reports()):
                 log.info("L2 coordinator: %s job %s on %s", order.type, order.job, node_id)
-                await socket.send_text(order.model_dump_json())
+                await send(order.model_dump_json())
     except (WebSocketDisconnect, WebSocketDisconnected):
         return
+    finally:
+        for task in carrying:
+            task.cancel()
+        if subscriptions is not None:
+            subscriptions.drop(send)
 
 
 async def _answer(request: LogAppend | LogRead, events: EventLog | None) -> Reply:

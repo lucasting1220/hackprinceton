@@ -10,8 +10,9 @@ started. Plain blocking Python with no dependencies beyond the standard library.
     answer = layer2.ask("Rewrite this alert: ...", quality="quick")
 
     home = layer2.status()     # the same data as the coordinator's /api/state
+    layer2.to_phone("alerts", {...})   # to Layer 1's bridge: alerts, replies, status, reports
 
-So far: the event log, ask() and status(). fan_out(), feed(), to_phone() and on_request() come
+So far: the event log, ask(), status() and to_phone(). fan_out(), feed() and on_request() come
 with later build steps.
 """
 
@@ -73,6 +74,14 @@ class Layer2:
             request["day"] = day.isoformat()
         events: list[dict[str, Any]] = self._call(request).get("events", [])
         return events
+
+    def to_phone(
+        self, kind: Literal["alerts", "replies", "status", "reports"], message: dict[str, Any]
+    ) -> None:
+        """Hand one message for the caregiver's phone to Layer 1's bridge (POST /v1/<kind>),
+        through the coordinator. Returns once the bridge has accepted it; raises Layer2Error
+        if it could not be delivered, so the caller can retry."""
+        self._call({"type": "phone_send", "kind": kind, "body": message})
 
     def status(self) -> dict[str, Any]:
         """Which laptops the coordinator knows (with `last_status_at`, so a quiet one can be
