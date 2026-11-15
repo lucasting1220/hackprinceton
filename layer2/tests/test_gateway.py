@@ -10,7 +10,7 @@ import pytest
 from conftest import Running, closed_port, contract, wait_until_serving, write_coordinator_config
 
 from layer2 import settings
-from layer2.contracts import MissingItem
+from layer2.contracts import ApiState, MissingItem
 from layer2.worker.client import WorkerState, run_worker
 from layer2.worker.gateway import Gateway, Relay
 
@@ -85,22 +85,26 @@ def test_requests_reach_the_coordinators_event_log(tmp_path: Path) -> None:
             bad = await call(gateway, {"type": "log_read"})
             wrong = await call(gateway, {"type": "log_append", "event": {}}, token="0" * 64)
             unknown = await call(gateway, {"type": "start", "job": "x"})
+            state = await call(gateway, {"type": "state_read"})
         finally:
             stop.set()
             await asyncio.wait_for(task, settings.STOP_DEADLINE_S)
             await gateway.close()
-        return [read, bad, wrong, unknown]
+        return [read, bad, wrong, unknown, state]
 
     try:
-        read, bad, wrong, unknown = asyncio.run(scenario())
+        read, bad, wrong, unknown, state = asyncio.run(scenario())
     finally:
         Path(coordinator["stop_file"]).touch()
         assert running.wait(settings.STOP_DEADLINE_S) == 0
     assert read["ok"] and [item["event"] for item in read["events"]] == [{"kind": "fall"}]
     assert bad == {"ok": False, "error": "the request's fields are not valid"}
     assert wrong == {"ok": False, "error": "wrong or missing token"}
-    assert unknown == {"ok": False, "error": "type must be log_append, log_read or ask"}
+    assert unknown == {"ok": False, "error": "type must be log_append, log_read, state_read or ask"}
     assert len(list((folder / "events").glob("*.jsonl"))) == 1
+    assert state["ok"]
+    ApiState.model_validate(state["state"])
+    assert [laptop["node_id"] for laptop in state["state"]["laptops"]] == [worker["node_id"]]
 
 
 def test_a_line_that_is_not_json_gets_an_error() -> None:

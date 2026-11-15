@@ -34,7 +34,12 @@ for _ in range(100):  # until the worker has joined
     except Layer2Error:
         time.sleep(0.05)
 events = layer2.read_log(since=datetime.now(UTC) - timedelta(minutes=10))
-pathlib.Path("result.json").write_text(json.dumps(events))
+for _ in range(100):  # until the worker's status has reported this job
+    status = layer2.status()
+    if status["jobs"]:
+        break
+    time.sleep(0.05)
+pathlib.Path("result.json").write_text(json.dumps({"events": events, "status": status}))
 time.sleep(60)
 """
 
@@ -83,7 +88,7 @@ def test_a_job_writes_and_reads_the_event_log_through_its_worker(
     job_folder.mkdir()
     config = write_worker_config(tmp_path, coordinator["listen_port"])
 
-    async def scenario() -> list[dict[str, Any]]:
+    async def scenario() -> dict[str, Any]:
         relay = Relay()
         gateway = Gateway(relay)
         await gateway.start()
@@ -97,7 +102,7 @@ def test_a_job_writes_and_reads_the_event_log_through_its_worker(
                 if result.exists():
                     break
                 await asyncio.sleep(0.05)
-            events: list[dict[str, Any]] = json.loads(result.read_text(encoding="utf-8"))
+            events: dict[str, Any] = json.loads(result.read_text(encoding="utf-8"))
         finally:
             stop.set()
             await asyncio.wait_for(worker, settings.STOP_DEADLINE_S)
@@ -105,11 +110,15 @@ def test_a_job_writes_and_reads_the_event_log_through_its_worker(
         return events
 
     try:
-        events = asyncio.run(scenario())
+        result = asyncio.run(scenario())
     finally:
         Path(coordinator["stop_file"]).touch()
         assert running.wait(settings.STOP_DEADLINE_S) == 0
-    assert [item["event"] for item in events] == [{"kind": "fall", "confidence": 0.93}]
+    assert [item["event"] for item in result["events"]] == [{"kind": "fall", "confidence": 0.93}]
+    jobs = result["status"]["jobs"]
+    assert jobs == [
+        {"job": "care_rules", "node_id": contract("worker.json")["node_id"], "state": "running"}
+    ]
     stored = list((folder / "events").glob("*.jsonl"))
     assert len(stored) == 1
 

@@ -36,3 +36,22 @@ Agreed Nov 14 from Layer 1's asks L1 to L5, L7 and L8. Layer 1 writes the config
 - **Transport:** plain WebSocket between workers and the coordinator on the demo network (the phone hotspot).
 - **Writing files:** every JSON file is written whole, to a temporary file in the same folder and then renamed over the old one, retried if Windows reports the file busy.
 - **Times** are ISO 8601 in UTC and field names for times end in `_at`.
+
+## Layers 3 and 4 and Layer 2: jobs
+
+Added Nov 14 from the Layer 2 doc's "Layers 3 and 4 to Layer 2: jobs". Layers 3 and 4 write one description file per job; Layer 2 reads them to plan where each job runs and to start it.
+
+| File | Written by | Read by | What it is |
+|---|---|---|---|
+| `job.json` | Layer 3 and Layer 4, one per job | Layer 2 coordinator (planning) and worker (starting) | A job's description |
+
+### Rules that go with this file
+
+- **Where:** `<repo>/layer3/jobs/<name>/job.json` and `<repo>/layer4/jobs/<name>/job.json`. `name` equals the folder name: lowercase letters, digits and underscores, starting with a letter, at most 64 characters. Names are unique across both layers.
+- **`start_command`:** the program and its arguments, run without a shell, with the job's folder as the working directory. Relative paths in it are relative to that folder.
+- **Environment:** Layer 2 adds `LAYER2_JOB` (the job's name), `LAYER2_NODE_ID`, `LAYER2_GATEWAY` and `LAYER2_GATEWAY_TOKEN`. A job reaches Layer 2 only through `layer2.job_client`, which reads them.
+- **`kind`:** `always-on` (runs until Layer 2 stops it; restarted if it exits) or `per-item` (fan-out, Layer 2 build step 6).
+- **`memory_gb`:** the memory the job needs, for the planner's budget.
+- **`sensor`:** `camera`, `mic` or `null`. A job with a sensor runs on a laptop holding it; when no laptop has it (none attached, or the resident declined it), the job is listed under `dropped` in `api-state.json`.
+- **Job states** in `api-state.json` `jobs[].state`: `starting`, `running` or `restarting`.
+- **Stopping:** Layer 2 terminates a job's process and kills it after 5 seconds, so jobs must not rely on cleanup that takes longer.
