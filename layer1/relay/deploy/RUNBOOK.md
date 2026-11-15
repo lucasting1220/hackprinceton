@@ -6,7 +6,7 @@ Each step has a command and a check. Run the commands from the repository root o
 
 ## What stays secret
 
-- The hub credential, the APNs key, the TURN secret and device credentials never go into the repository, a log, a chat, a command-line argument or a file on a laptop other than the coordinator's `relay-credential.json`.
+- The hub credential, the APNs key, the TURN secret and device credentials never go into the repository, a log, a chat, a command-line argument or a file on a laptop other than the coordinator's `relay-credential.json`. The one exception: when the coordinator laptop can't SSH to the relay, `layer1/DEMO.md` step 3 provisions from a laptop that can and moves the credential by AirDrop or a USB drive; every copy is deleted as soon as it is imported.
 - Never `cat` the key, the TURN secret or the credential file to the terminal.
 - The deploy files in this folder hold placeholders only: the team ID, the app's bundle ID and the Key ID are filled in on the server (step 4).
 
