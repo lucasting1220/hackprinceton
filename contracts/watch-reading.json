@@ -1,0 +1,8 @@
+{
+  "schema_version": 1,
+  "type": "watch_reading",
+  "kind": "heart_rate",
+  "measured_at": "2026-11-14T03:12:45Z",
+  "bpm": 72,
+  "last_received_at": "2026-11-14T03:13:00Z"
+}
