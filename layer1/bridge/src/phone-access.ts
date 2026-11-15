@@ -13,6 +13,7 @@ import { LinkHub } from "./link.ts";
 import { lanAddresses, type NetworkSide, startNetworkSide } from "./network-server.ts";
 import type { MessageSource } from "./outbox.ts";
 import { Pairing } from "./pairing.ts";
+import type { PhoneHandoff } from "./phone-handoff.ts";
 import { PhoneRegistry, PhonesError } from "./phones.ts";
 import * as settings from "./settings.ts";
 
@@ -24,6 +25,8 @@ export interface PhoneAccessOptions {
   readonly log?: (line: string) => void;
   /** Step 4's outbox, which the LAN gateway's fetch pages through. */
   readonly outbox?: MessageSource;
+  /** The handoff to Layer 2's coordinator, for the LAN gateway's `request` and `watch_data`. */
+  readonly handoff?: PhoneHandoff;
 }
 
 /** What the pairing page reads: the parts while the network side runs, or why it doesn't. */
@@ -122,7 +125,7 @@ export class PhoneAccess {
 
   async #listen(pairing: Pairing, phones: PhoneRegistry, join: HubJoin): Promise<void> {
     const port = this.#options.port ?? settings.BRIDGE_NETWORK_PORT;
-    const { outbox } = this.#options;
+    const { outbox, handoff } = this.#options;
     const handlers = { laptop_approval: (request: OpenedRequest) => join.approve(request) };
     const gateway = new LanGateway({
       homeId: this.#home.homeId,
@@ -130,6 +133,7 @@ export class PhoneAccess {
       log: this.#log,
       handlers,
       ...(outbox === undefined ? {} : { outbox }),
+      ...(handoff === undefined ? {} : { handoff }),
     });
     const link = new LinkHub({ home: this.#home, seen: gateway, log: this.#log });
     const pair = {

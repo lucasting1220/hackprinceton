@@ -1,6 +1,7 @@
 /**
- * Hub → phone messages sealed with the home key (phone-hub.md §3): `alert`, `care_status` and the
- * `heartbeat`, the only place in bridge/ that builds their plaintext or wrapper. Each is sealed once;
+ * Hub → phone messages (phone-hub.md §3): `alert`, `care_status`, `report` and the `heartbeat`,
+ * sealed with the home key, and `reply`, sealed with one phone's own key; the only place in bridge/
+ * that builds their plaintext or wrapper. Each is sealed once;
  * the LAN gateway, and later the relay, serve the same wrapper. No I/O, so the relay may import it.
  */
 import { type KeyObject, randomUUID } from "node:crypto";
@@ -11,7 +12,7 @@ import { utcSeconds, type Wrapper } from "./wire.ts";
 const HOME_KID = "home";
 
 /** The hub → caregivers types sealed with the home key (§3's message types). */
-export type HomeMessageType = "alert" | "care_status" | "heartbeat";
+export type HomeMessageType = "alert" | "care_status" | "heartbeat" | "report";
 
 /** An alert's fields as the phone gets them, with detected_at already in UTC whole seconds. */
 export type AlertFields = Readonly<{
@@ -83,4 +84,38 @@ export function sealCareStatus(
 /** The heartbeat, which carries no fields and goes through the relay only, never the outbox (§3). */
 export function sealHeartbeat(home: HomeSeal, choices: SealChoices = {}): Wrapper {
   return sealHomeMessage("heartbeat", {}, home, choices);
+}
+
+/** Layer 4's daily report, for every caregiver phone (§3). */
+export function sealReport(
+  report: Readonly<Record<string, unknown>>,
+  home: HomeSeal,
+  choices: SealChoices = {},
+): Wrapper {
+  return sealHomeMessage("report", report, home, choices);
+}
+
+/** The phone a `reply` is sealed for, with its own key. Never log the key. */
+export type PhoneSeal = Readonly<{ homeId: string; deviceId: string; phoneKey: KeyObject }>;
+
+/**
+ * Layer 4's answer to one phone's request (§3): sealed with that phone's own key, kid its device ID,
+ * and routed to it alone by `to`, so no other phone fetches it.
+ */
+export function sealReply(
+  reply: Readonly<Record<string, unknown>>,
+  phone: PhoneSeal,
+  choices: SealChoices = {},
+): Wrapper {
+  const msgId = choices.msgId ?? randomUUID();
+  const sentAt = utcSeconds(choices.sentAt ?? new Date());
+  const type = "reply";
+  const plaintext = Buffer.from(
+    canonicalJson({ ...reply, msg_id: msgId, sent_at: sentAt, type }),
+    "utf8",
+  );
+  const label = { homeId: phone.homeId, type };
+  const envelope = seal(plaintext, phone.phoneKey, phone.deviceId, label, choices.nonce);
+  plaintext.fill(0);
+  return { v: 1, msg_id: msgId, type, sent_at: sentAt, to: phone.deviceId, envelope };
 }

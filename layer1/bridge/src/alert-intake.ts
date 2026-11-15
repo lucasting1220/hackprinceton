@@ -8,10 +8,11 @@
  */
 import { createHash, type KeyObject } from "node:crypto";
 import type { Home } from "./home.ts";
-import { HomeError, readHomeSecrets } from "./home.ts";
+import { HomeError, readCoordinatorClientPort, readHomeSecrets } from "./home.ts";
 import { type AlertFields, canonicalJson, sealAlert } from "./home-messages.ts";
 import { type Html, html } from "./html.ts";
 import { Outbox, OutboxError } from "./outbox.ts";
+import { CoordinatorLink, PhoneHandoff, PhoneRequests } from "./phone-handoff.ts";
 import * as settings from "./settings.ts";
 import type { MachineReply, PageRoute } from "./setup-server.ts";
 import { utcSeconds } from "./wire.ts";
@@ -33,8 +34,16 @@ export const ALERT_FIELDS = [
   "update",
 ] as const;
 
-/** What the home's alerts need once a home exists: its ID, its key and its outbox. */
-export type HomeAlerts = Readonly<{ homeId: string; homeKey: KeyObject; outbox: Outbox }>;
+/**
+ * What the home's messages for phones need once a home exists: its ID, its key and its outbox, and
+ * the handoff to Layer 2's coordinator, which also remembers which phone sent each request.
+ */
+export type HomeAlerts = Readonly<{
+  homeId: string;
+  homeKey: KeyObject;
+  outbox: Outbox;
+  handoff?: PhoneHandoff;
+}>;
 
 /** The checked alert, or the first field that breaks a rule, named with the rule, never the value. */
 export type ParsedAlert =
@@ -73,7 +82,7 @@ function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
 }
 
 /** Text of 1 to `max` code points, well-formed so the app's JSON decoder takes it. */
-function textRule(value: unknown, max: number): string | undefined {
+export function textRule(value: unknown, max: number): string | undefined {
   if (typeof value !== "string") return "must be text";
   if (!value.isWellFormed()) return "must be well-formed Unicode";
   const length = [...value].length;
@@ -129,17 +138,18 @@ export function parseAlert(body: unknown): ParsedAlert {
 }
 
 /** The intake's answers: its own type and schema_version, as Layer 2's messages have. */
-const answer = (status: number, type: string, reason?: string): MachineReply => ({
+export const answer = (status: number, type: string, reason?: string): MachineReply => ({
   status,
   json: reason === undefined ? { type, schema_version: 1 } : { type, schema_version: 1, reason },
 });
-const ACCEPTED = answer(202, "accepted");
-const NO_HOME = answer(503, "unavailable", "no_home");
-const UNWRITABLE = answer(503, "unavailable", "outbox_unwritable");
+export const ACCEPTED = answer(202, "accepted");
+export const NO_HOME = answer(503, "unavailable", "no_home");
+export const UNWRITABLE = answer(503, "unavailable", "outbox_unwritable");
 
 /**
  * Reads the home key and opens the outbox, once a home exists: main.ts's home-ready hook. A key
- * file that can't be read leaves alerts off (503 no_home), with the reason logged.
+ * file that can't be read leaves alerts off (503 no_home), with the reason logged. The handoff reads
+ * coordinator.json's client_port; if it can't, phones' requests get 503 and the reason is logged.
  */
 export async function openHomeAlerts(
   home: Home,
@@ -154,7 +164,21 @@ export async function openHomeAlerts(
     return undefined;
   }
   const outbox = await Outbox.open(home.stateDir, { log });
-  return { homeId: home.homeId, homeKey, outbox };
+  const handoff = await openHandoff(home, log);
+  return { homeId: home.homeId, homeKey, outbox, ...(handoff === undefined ? {} : { handoff }) };
+}
+
+async function openHandoff(home: Home, log: (line: string) => void) {
+  let port: number;
+  try {
+    port = await readCoordinatorClientPort(home.stateDir);
+  } catch (error) {
+    if (!(error instanceof HomeError)) throw error;
+    log(`L1 handoff: phones' requests can't reach the coordinator: ${error.message}`);
+    return undefined;
+  }
+  const coordinator = new CoordinatorLink({ port, log });
+  return new PhoneHandoff({ coordinator, requests: new PhoneRequests(), log });
 }
 
 export interface AlertIntakeOptions {

@@ -68,8 +68,13 @@ export async function startBridge(options: BridgeOptions) {
    * side on the coordinator. Steps 4 and 5 start their outbox and relay link here too.
    */
   async function onHomeReady(home: Home): Promise<void> {
-    const outbox = (await openAlerts(home))?.outbox;
-    const network = { ...options.network, log, ...(outbox === undefined ? {} : { outbox }) };
+    const { outbox, handoff } = (await openAlerts(home)) ?? {};
+    const network = {
+      ...options.network,
+      log,
+      ...(outbox === undefined ? {} : { outbox }),
+      ...(handoff === undefined ? {} : { handoff }),
+    };
     phones ??= PhoneAccess.start(home, network).catch((error: unknown) => {
       log(`L1 bridge: phone pairing could not start: ${errorMessage(error)}`);
       return undefined;

@@ -9,6 +9,7 @@ import type { Reply, Route } from "./network-server.ts";
 import { errorReply } from "./network-server.ts";
 import type { MessageSource } from "./outbox.ts";
 import { open, PhoneCryptoRefusal } from "./phone-crypto.ts";
+import { COORDINATOR_DOWN, HANDOFF_TYPES, type PhoneHandoff } from "./phone-handoff.ts";
 import type { PhoneLookup } from "./phones.ts";
 import * as settings from "./settings.ts";
 import { isUtcTime, parseWrapper, utcSeconds, type Wrapper } from "./wire.ts";
@@ -30,6 +31,8 @@ export interface LanGatewayOptions {
   readonly outbox?: MessageSource;
   /** Handlers for the later steps' command types, in place of 501 (step 3: laptop_approval). */
   readonly handlers?: Readonly<Record<string, CommandHandler>>;
+  /** Carries `request` and `watch_data` to Layer 2's coordinator; without it they get 503. */
+  readonly handoff?: PhoneHandoff;
 }
 
 /** What a command type's handler answers for an opened request. */
@@ -61,11 +64,7 @@ const REFUSED = {
 };
 
 /** Commands that a later step builds: 501 until then, on either route (Reconciliation 11). */
-const LATER_COMMANDS: ReadonlySet<string> = new Set([
-  "request",
-  "laptop_approval",
-  "live_view_setting",
-]);
+const LATER_COMMANDS: ReadonlySet<string> = new Set(["laptop_approval", "live_view_setting"]);
 
 const utf8 = new TextDecoder("utf-8", { fatal: true });
 
@@ -80,6 +79,7 @@ export class LanGateway {
   readonly #log: (line: string) => void;
   readonly #outbox: MessageSource | undefined;
   readonly #handlers: Readonly<Record<string, CommandHandler>>;
+  readonly #handoff: PhoneHandoff | undefined;
   /** Per phone, each msg_id seen in the last PHONE_SEEN_IDS_MS and when, oldest first. */
   readonly #seen = new Map<string, Map<string, number>>();
   /** Per phone, when its wrong clock was last logged. */
@@ -92,6 +92,7 @@ export class LanGateway {
     this.#log = options.log ?? ((line: string) => console.log(line));
     this.#outbox = options.outbox;
     this.#handlers = options.handlers ?? {};
+    this.#handoff = options.handoff;
   }
 
   /**
@@ -155,11 +156,18 @@ export class LanGateway {
     return { status: 200, body: { v: 1, messages: page.messages, next: page.next, hub } };
   }
 
-  /** A phone → hub command: `unpair` removes the phone, a handler's type goes to it, others 501. */
+  /**
+   * A phone → hub command: `unpair` removes the phone, `request` and `watch_data` go to the
+   * coordinator, a handler's type goes to it, and others get 501.
+   */
   async commands(body: unknown): Promise<Reply> {
     const opened = this.openPhoneRequest(body);
     if (!opened.ok) return opened.reply;
     const { type, deviceId } = opened.request;
+    if (Object.hasOwn(HANDOFF_TYPES, type)) {
+      const phone = () => this.#phones.lookup(deviceId);
+      return this.#handoff?.forward(opened.request, phone) ?? COORDINATOR_DOWN;
+    }
     const handler = Object.hasOwn(this.#handlers, type) ? this.#handlers[type] : undefined;
     if (handler !== undefined) return handler(opened.request);
     if (LATER_COMMANDS.has(type)) return REFUSED.notSupported;

@@ -8,6 +8,7 @@ import { text } from "node:stream/consumers";
 import { AlertIntake, type HomeAlerts } from "./alert-intake.ts";
 import type { CreateHomeOptions, Home } from "./home.ts";
 import { createHome, HomeError, HomeExistsError, loadHome } from "./home.ts";
+import { HandoffIntake } from "./handoff-intake.ts";
 import { type Html, html, page } from "./html.ts";
 import { JoinPage, laptopsSection } from "./join-page.ts";
 import { errorMessage } from "./json-file.ts";
@@ -44,7 +45,7 @@ export interface SetupServerOptions {
   readonly onHomeReady?: (home: Home) => Promise<void>;
   /** The phone side once the home is ready, for the Pair a phone page and the Phones section. */
   readonly phoneAccess?: () => PhoneAccess | undefined;
-  /** The home's alerts once the home is ready, for POST /v1/alerts (step 4). */
+  /** The home's alerts once the home is ready, for POST /v1/alerts (step 4) and the handoff's. */
   readonly homeAlerts?: () => HomeAlerts | undefined;
   /** What a joining laptop is given besides the state folder and repository; tests shorten waits. */
   readonly laptop?: Omit<LaptopOptions, "stateDir" | "repoRoot">;
@@ -159,7 +160,9 @@ export async function startSetupServer(options: SetupServerOptions) {
   const origins = hosts.map((host) => `http://${host}`);
   const pairingPage = new PairingPage(options.phoneAccess ?? (() => undefined), token);
   const alerts = new AlertIntake({ ready: options.homeAlerts ?? (() => undefined), log });
-  const homeSections = () => html`${pairingPage.phonesSection()}${alerts.section()}`;
+  const handoff = new HandoffIntake({ ready: options.homeAlerts ?? (() => undefined), log });
+  const homeSections = () =>
+    html`${pairingPage.phonesSection()}${alerts.section()}${handoff.section()}`;
   let launcher: CoordinatorLauncher | undefined;
   let closed = false;
   // Add a laptop (step 3). The role lock (A4): a laptop joining a home can't create one, and the
@@ -235,6 +238,7 @@ export async function startSetupServer(options: SetupServerOptions) {
     ...pairingPage.routes(),
     alerts.route(),
     ...joinPage.routes(),
+    ...handoff.routes(),
   ];
 
   function refuse(why: string): PageReply {

@@ -360,3 +360,14 @@ export async function addAcceptedWorker(home: Home, worker: AcceptedWorker): Pro
     return next;
   });
 }
+
+/** coordinator.json's client_port: where the bridge posts to Layer 2's coordinator on 127.0.0.1. */
+export function readCoordinatorClientPort(stateDir: string): Promise<number> {
+  const file = filesIn(stateDir).coordinatorConfigFile;
+  return locked(async () => {
+    const config = await readJsonFile(file).catch((error: unknown) => {
+      throw unreadable(file, error);
+    });
+    return field(file, config, "client_port", isPort);
+  });
+}
