@@ -43,7 +43,7 @@ function isId(value: unknown): value is string {
 }
 
 /** The UTC form above, on a real date and time: 2026-02-30 and 23:59:60 are refused. */
-function isUtcTime(value: unknown): value is string {
+export function isUtcTime(value: unknown): value is string {
   if (typeof value !== "string" || !UTC_TIME.test(value)) return false;
   const seconds = `${value.slice(0, 19)}Z`;
   const date = new Date(seconds);

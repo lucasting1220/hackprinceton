@@ -200,7 +200,7 @@ export class Pairing {
 
   /**
    * Shows a new code for these "a.b.c.d:7480" addresses, ending the old one, unless a phone waits
-   * for Confirm or a confirmed phone may still collect its bundle. With no address, no code.
+   * for Confirm or a confirmed phone may still collect a bundle it hasn't. With no address, no code.
    */
   start(addresses: readonly string[]): StartResult {
     const session = this.#session;
@@ -208,7 +208,9 @@ export class Pairing {
       if (session.state === "pending" || session.state === "confirming") {
         return { ok: false, reason: "phone_waiting" };
       }
-      if (session.state === "confirmed") return { ok: false, reason: "collecting" };
+      if (session.state === "confirmed" && session.confirmed?.collected !== true) {
+        return { ok: false, reason: "collecting" };
+      }
     }
     if (addresses.length === 0) {
       this.#session = undefined;

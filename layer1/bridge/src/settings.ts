@@ -143,3 +143,19 @@ export const HOME_NAME = "Home";
 
 /** The bundle's relay_url: empty until remote access is set up (step 5 replaces this constant). */
 export const RELAY_URL = "";
+
+/** A paired phone's plaintext sent_at may be this far from the hub's clock, either way (§2.5). */
+export const PHONE_CLOCK_SKEW_MS = 30_000;
+
+/** How long the LAN gateway remembers a phone's msg_id, and at most how many per phone (§2.5). */
+export const PHONE_SEEN_IDS_MS = 60_000;
+export const PHONE_SEEN_IDS_MAX = 1_000;
+
+/** The LAN gateway logs a phone's wrong clock at most once in this long (R7). */
+export const STALE_LOG_INTERVAL_MS = 60_000;
+
+/** A fetch's limit above this counts as this (phone-hub.md §4.5). */
+export const MESSAGES_PAGE_MAX = 50;
+
+/** How often the Pair a phone page reloads while it waits for the phone, in seconds. */
+export const PAIRING_PAGE_RELOAD_SECONDS = 2;
