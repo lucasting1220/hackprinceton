@@ -54,3 +54,13 @@ export const WINDOWS_APP_DATA_ENV = "LOCALAPPDATA";
 export const STATE_DIR_NAME = "Debbie";
 /** The labelled stand-in for Layer 2's coordinator, relative to the repository root. */
 export const COORDINATOR_STUB_PATH = ["layer1", "stubs", "fake-layer2-coordinator.ts"] as const;
+
+/** Layer 2's folder, relative to the repository root, and the file that declares its scripts. */
+export const LAYER2_PROJECT_DIR = "layer2";
+export const LAYER2_PYPROJECT_FILE = "pyproject.toml";
+
+/** How long ending the coordinator's processes may take after the stop deadline. */
+export const COORDINATOR_TREE_STOP_TIMEOUT_MS = 5_000;
+
+/** The waits before each restart after a crash; the last one repeats. */
+export const COORDINATOR_RESTART_BACKOFF_MS = [1_000, 2_000, 5_000, 10_000, 30_000] as const;
