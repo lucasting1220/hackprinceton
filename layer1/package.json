@@ -8,6 +8,7 @@
     "format": "biome format --write .",
     "format:check": "biome format .",
     "lint": "biome lint --error-on-warnings .",
+    "start": "node bridge/src/main.ts",
     "typecheck": "tsc --noEmit",
     "test": "node --test --test-timeout=30000 \"**/*.test.ts\""
   },

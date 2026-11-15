@@ -35,6 +35,8 @@ export interface HomeSecrets {
 export interface CreateHomeOptions {
   /** The ports written to coordinator.json; settings.ts's by default. */
   readonly ports?: { readonly listen: number; readonly dashboard: number; readonly client: number };
+  /** coordinator.json's bridge_url: the setup page's address; settings.BRIDGE_URL by default. */
+  readonly bridgeUrl?: string;
   /** Writes each file whole; tests pass one that fails. */
   readonly writeFile?: typeof writeFileWhole;
   /** Removes what a failed creation wrote; tests pass one that fails. */
@@ -123,7 +125,7 @@ async function create(stateDir: string, options: CreateHomeOptions): Promise<Hom
     dashboard_port: ports.dashboard,
     client_port: ports.client,
     ollama_url: settings.OLLAMA_URL,
-    bridge_url: settings.BRIDGE_URL,
+    bridge_url: options.bridgeUrl ?? settings.BRIDGE_URL,
     ...coordinatorPaths(home),
   };
   // home.json goes first, created exclusively: it is what makes a home exist (R2).

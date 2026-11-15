@@ -10,15 +10,18 @@ Node 24, the version in `.nvmrc`.
 
 Run each command from this folder (`layer1/`). These are the checks that `CLAUDE.md` section 5 refers to. Each must pass with zero errors and zero warnings.
 
-| Check      | Command                |
-| ---------- | ---------------------- |
-| Install    | `npm ci`               |
-| Format     | `npm run format:check` |
-| Lint       | `npm run lint`         |
-| Type check | `npm run typecheck`    |
-| Tests      | `npm test`             |
+| Check      | Command                                                                                  |
+| ---------- | ---------------------------------------------------------------------------------------- |
+| Install    | `npm ci`                                                                                 |
+| Format     | `npm run format:check`                                                                   |
+| Lint       | `npm run lint`                                                                           |
+| Type check | `npm run typecheck`                                                                      |
+| Tests      | `npm test`                                                                               |
+| Start      | `npm start`; it stops on Ctrl+C or when a `bridge.stop` file appears in its state folder |
 
 `npm run format` rewrites files to the expected format.
+
+`npm start` runs the bridge: it serves the setup page, opens it in the default browser and starts the home's coordinator. Pass `npm start -- --state-dir <absolute folder>` to use a state folder other than this system's default. To stop the bridge, press Ctrl+C, or create an empty file named `bridge.stop` in its state folder, which works on every system and from scripts. Either way it closes the setup page, stops the coordinator, removes `bridge.stop` and exits.
 
 ## What lint does not catch
 
