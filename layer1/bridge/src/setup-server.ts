@@ -125,7 +125,8 @@ function homePage(
   laptops: Html,
   remote = "not set up",
 ): string {
-  const dashboard = `http://${settings.LOCAL_HOST}:${home.dashboardPort}/`;
+  const dashboard = `http://${settings.HOME_HOST_NAME}:${home.dashboardPort}/`;
+  const fallback = `http://${settings.LOCAL_HOST}:${home.dashboardPort}/`;
   const stub = status?.program === "stub" ? "STUB (Layer 2's coordinator isn't built yet), " : "";
   const state = status?.state === "restarting" ? "restarting after a crash" : status?.state;
   const why = status?.lastErrorLine ? `; last error: ${status.lastErrorLine}` : "";
@@ -134,7 +135,7 @@ function homePage(
     html`<p>Home ID: <code>${home.homeId}</code></p>
 <p>Remote access: ${remote}</p>
 <p>Coordinator: ${stub}${(state ?? NOT_STARTED).replace("_", " ")}${why}</p>
-<p>Dashboard: <a href="${dashboard}">${dashboard}</a></p>
+<p>Dashboard: <a href="${dashboard}">${dashboard}</a> (or <a href="${fallback}">${fallback}</a>)</p>
 ${sections}
 ${laptops}`,
   );
