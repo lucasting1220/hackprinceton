@@ -98,13 +98,13 @@ svg.dots { width: 100%; height: 64px; display: block; margin: .3rem 0 .2rem; }
 <nav>
   <div class="brand">Debbie</div>
   <div class="group">Home</div>
-  <a href="#overview" id="nav-overview">Overview</a>
-__SETUP_LINK__
+__SIDEBAR_HOME__
   <div class="group">Laptops</div>
   <div id="nav-laptops"></div>
   <div class="grow"></div>
   <div class="updated" id="updated"></div>
 </nav>
+__LAPTOP_ICON_TEMPLATE__
 <main>
   <p id="error"></p>
   <div id="view"></div>
@@ -179,21 +179,16 @@ function dots(history) {
   return g;
 }
 
-// Small sidebar icons, drawn in the text colour.
-function icon(kind) {
-  const g = svg("svg", { viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", "stroke-width": 1.8,
-    "stroke-linecap": "round", "stroke-linejoin": "round", "aria-hidden": "true" });
-  if (kind === "home") {
-    for (const [x, y] of [[3, 3], [13, 3], [3, 13], [13, 13]]) g.appendChild(svg("rect", { x, y, width: 8, height: 8, rx: 2 }));
-  } else if (kind === "setup") {
-    g.appendChild(svg("circle", { cx: 12, cy: 12, r: 9 }));
-    g.appendChild(svg("path", { d: "M12 8 V16 M8 12 H16" }));
-  } else {
-    g.appendChild(svg("rect", { x: 4, y: 5, width: 16, height: 11, rx: 1.5 }));
-    g.appendChild(svg("path", { d: "M2 19 H22" }));
-  }
-  return g;
+// The sidebar's laptop icon (contracts/sidebar.json), drawn once on the server.
+const laptopIcon = () => document.getElementById("icon-laptop").content.firstElementChild.cloneNode(true);
+
+// Plain code-point order, as contracts/sidebar.json lists the Laptops group.
+function byCodePoint(a, b) {
+  const x = Array.from(a, (c) => c.codePointAt(0)), y = Array.from(b, (c) => c.codePointAt(0));
+  for (let i = 0; i < Math.min(x.length, y.length); i++) if (x[i] !== y[i]) return x[i] - y[i];
+  return x.length - y.length;
 }
+const sidebarOrder = (a, b) => byCodePoint(a.display_name, b.display_name) || byCodePoint(a.node_id, b.node_id);
 
 function machine() {
   const g = svg("svg", { viewBox: "0 0 200 130", class: "machine", "aria-hidden": "true" });
@@ -421,16 +416,16 @@ function laptopView(laptop, hw, jobs, now) {
   const rows = jobRows(jobs);
   rows.style.borderTop = "0"; rows.style.marginTop = "0"; rows.style.paddingTop = "0";
   jobsPanel.appendChild(rows);
-  const setup = el("div", "panel");
-  setup.appendChild(el("h2", "", "Setup"));
-  if (laptop.missing.length === 0) setup.appendChild(el("div", "muted", "Nothing missing."));
+  const missing = el("div", "panel");
+  missing.appendChild(el("h2", "", "Missing"));
+  if (laptop.missing.length === 0) missing.appendChild(el("div", "muted", "Nothing missing."));
   for (const item of laptop.missing) {
     const row = el("div", "row");
     row.appendChild(el("span", item.required ? "warn" : "muted", item.id));
     row.appendChild(el("span", "st " + (item.required ? "restarting" : "starting"), item.required ? "required" : "optional"));
-    setup.appendChild(row);
+    missing.appendChild(row);
   }
-  for (const p of [mem, cpu, jobsPanel, setup]) grid.appendChild(p);
+  for (const p of [mem, cpu, jobsPanel, missing]) grid.appendChild(p);
   view.appendChild(grid);
   return view;
 }
@@ -444,19 +439,10 @@ function render() {
   const selected = decodeURIComponent(location.hash.slice(1)) || "overview";
   const chosen = state.laptops.find((l) => l.node_id === selected);
   document.getElementById("nav-overview").className = chosen ? "" : "on";
-  const home = document.getElementById("nav-overview");
-  if (!home.querySelector("svg")) home.prepend(icon("home"));
-  const setup = document.getElementById("nav-setup");
-  if (setup && !setup.querySelector("svg")) {
-    setup.prepend(icon("setup"));
-    const url = new URL(setup.href);
-    url.hostname = location.hostname;  // stay on the name this page was opened with
-    setup.href = url.href;
-  }
-  for (const laptop of state.laptops) {
+  for (const laptop of [...state.laptops].sort(sidebarOrder)) {
     const a = el("a", laptop === chosen ? "on" : "");
     a.href = "#" + encodeURIComponent(laptop.node_id);
-    a.appendChild(icon("laptop"));
+    a.appendChild(laptopIcon());
     a.appendChild(el("span", "", laptop.display_name));
     a.appendChild(el("span", now - Date.parse(laptop.last_status_at) > STALE_AFTER_MS ? "dot off" : "dot"));
     nav.appendChild(a);
@@ -517,6 +503,12 @@ async function refresh() {
   render();
 }
 
+// Links to Layer 1's setup page stay on the host name this page was opened with.
+for (const a of document.querySelectorAll('nav a[data-page="setup"]')) {
+  const url = new URL(a.href);
+  url.hostname = location.hostname;
+  a.href = url.href;
+}
 window.addEventListener("hashchange", render);
 async function loop() { await refresh(); setTimeout(loop, POLL_MS); }
 loop();
