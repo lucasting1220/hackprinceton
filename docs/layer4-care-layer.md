@@ -92,6 +92,8 @@ Each rule looks at one signal. The numbers are proposed defaults in a settings f
 
 **Reading the pose** (proposed values, in `settings.py`). A shoulder or hip seen with visibility under 0.5, or a torso shorter than 2% of the frame height, means not in view. Lying down: the torso tilts 60° or more from upright, or looks shorter than half its last upright length (lying toward or away from the camera). Sitting: the hips are within 0.35 torso lengths of the knees, vertically. Otherwise walking; standing counts as walking.
 
+**Falls from the pose** (proposed values, in `settings.py`). A fall is scored once the resident has been lying for 0.5 seconds without a break. The score is the smaller of two marks: how far the hips dropped from the last upright moment (full marks at one upright torso length) and how fast they got there (full marks at 1.2 seconds or less, none at 3 seconds or more). One fall gives one score; the next needs the resident upright again, because the rules keep no state and would otherwise alert every second. Known limits: a fall that ends slumped sitting on the floor, or out of view behind furniture, is not scored; the help check is the second line.
+
 **Alert lifecycle**
 1. A rule fires. The upper tier writes the event to the log and sends the template alert immediately. This step never waits on a language model.
 2. It asks the `quick` model to rewrite the alert with context from the last 10 minutes of the event log.
