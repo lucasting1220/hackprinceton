@@ -16,7 +16,8 @@ def test_stub_hands_over_batches_records_items_and_says_it_is_a_stub(
     layer2 = FakeLayer2([{"heart_rate": [{"measured_at": "2026-11-14T03:12:45Z", "bpm": 72}]}])
 
     with caplog.at_level(logging.INFO):
-        [batch] = list(layer2.watch_data())
+        batch = layer2.receive("watch-data")
+        assert layer2.receive("watch-data") is None
         [item] = WatchReceiver().receive(batch, datetime(2026, 11, 14, 12, 0, tzinfo=UTC))
         layer2.publish_watch(item)
 
@@ -24,7 +25,7 @@ def test_stub_hands_over_batches_records_items_and_says_it_is_a_stub(
     stub_lines = [
         record.getMessage() for record in caplog.records if record.name == "fake_layer2_client"
     ]
-    assert len(stub_lines) == 2
+    assert len(stub_lines) == 3
     assert all("STUB" in line for line in stub_lines)
 
 

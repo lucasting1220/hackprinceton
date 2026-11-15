@@ -49,7 +49,7 @@ def run() -> FakeLayer2:
     """Send the sample batches through a new receiver and return the fake that took the items."""
     layer2 = FakeLayer2(SAMPLE_BATCHES)
     receiver = WatchReceiver()
-    for batch in layer2.watch_data():
+    while (batch := layer2.receive("watch-data")) is not None:
         for item in receiver.receive(batch, received_at=datetime.now(UTC)):
             logger.info("L3 STUB watch demo: out: %s", _describe(item))
             layer2.publish_watch(item)

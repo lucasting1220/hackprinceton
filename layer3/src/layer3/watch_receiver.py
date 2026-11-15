@@ -1,7 +1,8 @@
 """Watch data receiver: takes in the watch readings the iPhone app sends, drops repeats, and
 hands each new reading on with the time it was measured and the time a new reading last arrived.
 
-One batch is the body of Layer 1's `POST /v1/watch-data` (docs/layer1-join-and-connect.md).
+One batch is the body of Layer 1's `POST /v1/watch-data` (docs/layer1-join-and-connect.md),
+which Layer 2 hands to a job through `receive("watch-data")`.
 Nothing is stored on disk, a gap in data is never an error, and bad watch data never raises.
 """
 
