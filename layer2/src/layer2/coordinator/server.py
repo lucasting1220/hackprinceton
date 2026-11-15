@@ -33,6 +33,7 @@ from layer2.contracts import (
     LoggedEvent,
     LogRead,
     PhoneSend,
+    PlannerDecision,
     Reply,
     StateRead,
     StatusMessage,
@@ -336,7 +337,17 @@ def create_dashboard_app(
 
     @app.get("/api/details")
     async def details() -> JSONResponse:
-        return JSONResponse(registry.details().model_dump(mode="json"))
+        found = registry.details()
+        decision = placement.decision if placement is not None else None
+        if decision is not None:
+            planner = PlannerDecision(
+                made_by=decision.made_by,
+                why=decision.why[:600],
+                decided_at=decision.decided_at,
+                moved=list(decision.moved),
+            )
+            found = found.model_copy(update={"planner": planner})
+        return JSONResponse(found.model_dump(mode="json"))
 
     @app.get("/")
     async def page() -> HTMLResponse:

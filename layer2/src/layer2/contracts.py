@@ -358,6 +358,15 @@ class JobHealth(Strict):
     restarts: int
 
 
+class PlannerDecision(Strict):
+    """The latest re-plan, on the dashboard. Internal to Layer 2."""
+
+    made_by: Literal["ai", "rules"]
+    why: Annotated[str, Field(max_length=600)]
+    decided_at: UtcDatetime
+    moved: list[str]
+
+
 class DashboardDetails(Strict):
     """GET /api/details on the dashboard port: what the page shows beyond /api/state and
     /api/hardware. Internal to Layer 2: Layer 1 reads only /api/state."""
@@ -365,3 +374,4 @@ class DashboardDetails(Strict):
     schema_version: Literal[1]
     updated_at: UtcDatetime
     jobs: list[JobHealth]
+    planner: PlannerDecision | None = None
