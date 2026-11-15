@@ -67,3 +67,15 @@ export const COORDINATOR_RESTART_BACKOFF_MS = [1_000, 2_000, 5_000, 10_000, 30_0
 
 /** How long the coordinator has to exit once its stop file appears (contracts/README.md). */
 export const COORDINATOR_STOP_DEADLINE_MS = 10_000;
+
+/** A coordinator that ran this long before it crashed restarts after the first wait again. */
+export const COORDINATOR_BACKOFF_RESET_MS = 60_000;
+
+/** The loopback address that Layer 2's dashboard and the bridge's local side listen on. */
+export const LOCAL_HOST = "127.0.0.1";
+
+/** How long the launcher waits to connect when it checks whether the dashboard port is in use. */
+export const COORDINATOR_PROBE_TIMEOUT_MS = 500;
+
+/** How often the launcher checks whether a coordinator left running has taken its stop file. */
+export const COORDINATOR_STOP_POLL_MS = 100;
