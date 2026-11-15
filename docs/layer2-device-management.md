@@ -9,19 +9,21 @@ As of Nov 15, on `main`, with the pull request numbers. Each was tested on macOS
 | Build step | State | Pull requests |
 |---|---|---|
 | 1. Worker connects with its token, reports specs and status; dashboard and `/api/state` list laptops | Done | #9 to #15, #19, #23, #25 |
-| 2. Start and stop a job on a worker, using the rule-based plan | Done. Jobs are read from `layer3/jobs/<name>/job.json` and `layer4/jobs/<name>/job.json` (`contracts/job.json`, #44); none exist yet | #26, #27, #29, #30, #48 |
-| 3. Route `quick` requests to an Ollama model | First version: a job's `ask()` is answered by its own laptop's Ollama; `deep` is answered by `quick`, and the answer says so | #35 |
-| 4. AI planner with code checks, falling back to the rules | Done. The model is `PLANNER_MODEL` (placeholder `qwen2.5:3b`) until it is measured on the coordinator laptop with `layer2-compare-models` (#57) | #39, #40 |
+| 2. Start and stop a job on a worker, using the rule-based plan | Done. Jobs are read from `layer3/jobs/<name>/job.json` and `layer4/jobs/<name>/job.json` (`contracts/job.json`, #44). Folders on `main`: Layer 3's `capture` and `watch_data`; Layer 4's `fall_model`, `speech_to_text` and `health_check` | #26, #27, #29, #30, #48 |
+| 3. Route `quick` requests to an Ollama model | First version: a job's `ask()` is answered by its own laptop's Ollama with `QUICK_MODEL` (`qwen2.5:7b`, chosen by the team on Nov 15); `deep` is answered by `quick`, and the answer says so | #35, #122 |
+| 4. AI planner with code checks, falling back to the rules | Done. The model is `PLANNER_MODEL`, `qwen2.5:7b`, chosen by the team on Nov 15 (#122). `layer2-compare-models` (#57) can still time it on the coordinator laptop | #39, #40, #122 |
 | 5. Re-plan and move jobs when a laptop joins | Done for joins: the coordinator re-plans on a laptop's first status; a job that moves is stopped first, then started. A lost laptop is still "later" | #30, #40 |
 | 6. Fan-out batches | Not started | |
-| 7. Carry messages between Layer 1's bridge and Layer 4; store the event log | Done: `to_phone()` to `bridge_url` (#54, #58); the bridge's `/v1/requests` and `/v1/watch-data` on `client_port` to the job that subscribed (#60, #62); the event log (#31 to #34) | #31 to #34, #58, #60, #62 |
+| 7. Carry messages between Layer 1's bridge and Layer 4; store the event log | Done: `to_phone()` to `bridge_url` (#54, #58); the bridge's `/v1/requests` and `/v1/watch-data` on `client_port` to the job that subscribed (#60, #62); watch readings from one job to another with `pass_on()` (#117); the event log (#31 to #34) | #31 to #34, #58, #60, #62, #117 |
 | 8. Split model | Not started (may be dropped) | |
 
 Also built: the dashboard for the demo (one page, dark; laptops, jobs and their restarts, the planner's latest decision, recent events; #18, #51, #53, #66 to #68), and `status()` for Layer 4's monitoring check (#36).
 
-**Not yet built:** `feed()` (camera and mic from Layer 3 to Layer 4; its agreement is being drafted), `fan_out()`, routing `quick` to another laptop's Ollama, and model placement in the plan.
+Also built: `feed()`, camera frames and mic chunks from Layer 3's capture job to Layer 4's jobs on the same laptop (`contracts/frame-feed.json`, #86, #89; the capture job is #95, #96).
 
-**The job client** (`layer2.job_client`, which Layer 4 already imports): `Layer2.from_env()`, `log_event(event)`, `read_log(since=…)` or `read_log(day=…)`, `ask(prompt, quality)`, `status()`, `to_phone(kind, message)` with `kind` one of `alerts`, `replies`, `status`, `reports`, `receive(kind)` with `kind` one of `requests`, `watch-data`, and `on_request(handle)`. A job reaches it through its own worker's local gateway, whose address and secret the worker puts in the job's environment.
+**Not yet built:** `fan_out()`, routing `quick` to another laptop's Ollama, model placement in the plan, and re-planning when a laptop leaves.
+
+**The job client** (`layer2.job_client`, which Layer 4 already imports): `Layer2.from_env()`, `log_event(event)`, `read_log(since=…)` or `read_log(day=…)`, `ask(prompt, quality)`, `status()`, `to_phone(kind, message)` with `kind` one of `alerts`, `replies`, `status`, `reports`, `receive(kind)` with `kind` one of `requests`, `watch-data`, `watch-readings`, `pass_on("watch-readings", message)`, `on_request(handle)`, and `feed(name)` with `name` `camera` or `mic`. A job reaches it through its own worker's local gateway, whose address and secret the worker puts in the job's environment.
 
 ## Summary
 
