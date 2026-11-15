@@ -1,7 +1,7 @@
 /**
  * The phone ↔ hub contract's cryptography (the iPhone track's CONTRACTS.md §1 and §2), byte for
  * byte as the app's CryptoKit code does it, and nothing else: no I/O, so step 5's relay can import
- * it. Keys stay key objects wherever node:crypto takes one; the QR secret stays bytes because HKDF
+ * it, and the laptop join's derivations (§6). Keys stay key objects wherever node:crypto takes one; the QR secret stays bytes because HKDF
  * takes it as the salt.
  */
 import {
@@ -186,9 +186,14 @@ export function pairingCode(shared: KeyObject, secret: Uint8Array): string {
   return String(four.readUInt32BE(0) % 10_000).padStart(4, "0");
 }
 
-/** `debbie/v1/pair` while pairing, else `debbie/v1/{home_id}/{kid}/{type}` (§2.4). */
+/** Kids whose associated data is fixed: the bundle's and a laptop's join ticket's (§6.4). */
+const FIXED_KIDS: ReadonlySet<string> = new Set(["pair", "join"]);
+
+/** `debbie/v1/pair` or `debbie/v1/join`, else `debbie/v1/{home_id}/{kid}/{type}` (§2.4, §6.4). */
 function associatedData(kid: string, { homeId, type }: Label): Buffer {
-  return Buffer.from(kid === "pair" ? "debbie/v1/pair" : `debbie/v1/${homeId}/${kid}/${type}`);
+  return Buffer.from(
+    FIXED_KIDS.has(kid) ? `debbie/v1/${kid}` : `debbie/v1/${homeId}/${kid}/${type}`,
+  );
 }
 
 /**
@@ -229,4 +234,57 @@ export function open(envelope: Envelope, key: KeyObject, label: Label): Buffer {
     if (codeOf(error) === "ERR_OSSL_BAD_DECRYPT") throw new PhoneCryptoRefusal("not_authentic");
     throw error;
   }
+}
+
+/** A join token's length in bytes (contracts/README.md: 64 lowercase hex characters). */
+const JOIN_TOKEN_BYTES = 32;
+
+/** A new join token: 32 random bytes as 64 lowercase hex characters. Never log it. */
+export function joinToken(): string {
+  return randomBytes(JOIN_TOKEN_BYTES).toString("hex");
+}
+
+/** token_sha256: the SHA-256 of the token's 64 characters, in lowercase hex, as Layer 2 hashes it. */
+export function tokenSha256(token: string): string {
+  return createHash("sha256").update(token, "ascii").digest("hex");
+}
+
+/** The raw 32-byte X25519 public key of a private key. */
+export function rawPublicKey(privateKey: KeyObject): Buffer {
+  return fromBase64url(createPublicKey(privateKey).export({ format: "jwk" }).x, KEY_BYTES);
+}
+
+/**
+ * The key that seals a laptop's join ticket (§6.4): HKDF-SHA256(ikm = X25519(hub, laptop), salt =
+ * join_id, info = "debbie/v1/laptop-key" ‖ hub_pub ‖ laptop_pub, 32), so it opens under no other
+ * pair of keys.
+ */
+export function laptopKey(
+  shared: KeyObject,
+  joinId: string,
+  hubPublic: Uint8Array,
+  laptopPublic: Uint8Array,
+): KeyObject {
+  const info = Buffer.concat([Buffer.from("debbie/v1/laptop-key"), hubPublic, laptopPublic]);
+  const raw = Buffer.from(hkdfSync("sha256", shared, Buffer.from(joinId, "utf8"), info, KEY_BYTES));
+  const key = createSecretKey(raw);
+  raw.fill(0);
+  return key;
+}
+
+/**
+ * The bridge link's key (§6.6): HKDF-SHA256(ikm = SHA-256 of the join token, the 32 bytes that
+ * token_sha256 spells, salt = node_id, info = "debbie/v1/link-key", 32). Both bridges derive it:
+ * the laptop from its token, the hub from accepted-workers.json.
+ */
+export function linkKey(tokenSha256Hex: string, nodeId: string): KeyObject {
+  const hash = Buffer.from(tokenSha256Hex, "hex");
+  if (hash.length !== KEY_BYTES) throw new PhoneCryptoRefusal("bad_length");
+  const raw = Buffer.from(
+    hkdfSync("sha256", hash, Buffer.from(nodeId, "utf8"), "debbie/v1/link-key", KEY_BYTES),
+  );
+  hash.fill(0);
+  const key = createSecretKey(raw);
+  raw.fill(0);
+  return key;
 }

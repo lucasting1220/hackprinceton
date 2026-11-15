@@ -20,7 +20,10 @@ const REPO_ROOT = path.resolve(import.meta.dirname, "..", "..", "..");
 const STOP_SIGNALS = ["SIGINT", "SIGTERM", "SIGHUP"] as const;
 
 export interface BridgeOptions
-  extends Pick<SetupServerOptions, "stateDir" | "repoRoot" | "port" | "log" | "homeOptions"> {
+  extends Pick<
+    SetupServerOptions,
+    "stateDir" | "repoRoot" | "port" | "log" | "homeOptions" | "laptop"
+  > {
   /** Opens the setup page; the default browser by default (D4). */
   readonly open?: (url: string) => Promise<void>;
   /** The network side's port and addresses; tests pass port 0 and their own addresses. */
@@ -138,7 +141,9 @@ export async function startBridge(options: BridgeOptions) {
 
   log(`L1 bridge: the setup page is at ${server.url}`);
   try {
+    // By role: the home laptop starts its coordinator; a laptop that joined a home, its worker.
     if (home) await server.homeReady(home);
+    else await server.resumeLaptop();
     await (options.open ?? ((url) => openInBrowser(url, browserCommand(url))))(server.url);
   } catch (error) {
     requestStop(`could not start: ${errorMessage(error)}`);

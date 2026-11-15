@@ -49,7 +49,7 @@ test("answers on 127.0.0.1 only for its own Host, and a POST only from its page"
   const port = Number(new URL(s.server.url).port);
   const welcome = await s.send("GET", "/");
   assert.match(welcome.page, /<button>Create a home<\/button>/);
-  assert.match(welcome.page, /<button disabled>Join a home<\/button> Coming in build step 3/);
+  assert.match(welcome.page, /<a href="\/join">Join a home<\/a>/);
   const h = welcome.headers;
   const security = [h["content-security-policy"], h["referrer-policy"], h["cache-control"]];
   const csp = "default-src 'none'; style-src 'self'; form-action 'self'; frame-ancestors 'none'";

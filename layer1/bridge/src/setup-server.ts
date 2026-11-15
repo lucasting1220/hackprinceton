@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { once } from "node:events";
+import { existsSync } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import { text } from "node:stream/consumers";
@@ -8,12 +9,15 @@ import { AlertIntake, type HomeAlerts } from "./alert-intake.ts";
 import type { CreateHomeOptions, Home } from "./home.ts";
 import { createHome, HomeError, HomeExistsError, loadHome } from "./home.ts";
 import { type Html, html, page } from "./html.ts";
+import { JoinPage, laptopsSection } from "./join-page.ts";
 import { errorMessage } from "./json-file.ts";
+import { Laptop, type LaptopOptions } from "./laptop.ts";
 import { CoordinatorLauncher, type CoordinatorStatus } from "./launcher.ts";
 import { readJsonBody } from "./network-server.ts";
 import type { PhoneAccess } from "./phone-access.ts";
 import { PairingPage } from "./pairing-page.ts";
 import * as settings from "./settings.ts";
+import path from "node:path";
 
 /** Sent with every response: nothing is loaded from elsewhere, cached, framed or kept open. */
 const HEADERS = {
@@ -42,6 +46,8 @@ export interface SetupServerOptions {
   readonly phoneAccess?: () => PhoneAccess | undefined;
   /** The home's alerts once the home is ready, for POST /v1/alerts (step 4). */
   readonly homeAlerts?: () => HomeAlerts | undefined;
+  /** What a joining laptop is given besides the state folder and repository; tests shorten waits. */
+  readonly laptop?: Omit<LaptopOptions, "stateDir" | "repoRoot">;
 }
 
 /** A page route's answer: a page with its status, or a 303 to `redirect`. */
@@ -95,7 +101,7 @@ const welcomePage = (token: string) =>
     "Welcome",
     html`<form method="post" action="/home">
 <input type="hidden" name="token" value="${token}"><button>Create a home</button></form>
-<p><button disabled>Join a home</button> Coming in build step 3.</p>`,
+<p><a href="/join">Join a home</a>: add this laptop to a home that another laptop created.</p>`,
   );
 const problemPage = (message: string) => page("Setup problem", html`<p>${message}</p>`);
 const RELOAD_PAGE = page(
@@ -106,8 +112,13 @@ const RELOAD_PAGE = page(
 /** Only a home that the bridge found after it started (its files repaired, say) has none. */
 const NOT_STARTED = "not started; restart the bridge to start it";
 
-/** The home, the coordinator's state with why its latest run failed (A2), and its phones. */
-function homePage(home: Home, status: CoordinatorStatus | undefined, phones: Html): string {
+/** The home, its coordinator's state and latest failure (A2), its phones and alerts, and its laptops. */
+function homePage(
+  home: Home,
+  status: CoordinatorStatus | undefined,
+  sections: Html,
+  laptops: Html,
+): string {
   const dashboard = `http://${settings.LOCAL_HOST}:${home.dashboardPort}/`;
   const stub = status?.program === "stub" ? "STUB (Layer 2's coordinator isn't built yet), " : "";
   const state = status?.state === "restarting" ? "restarting after a crash" : status?.state;
@@ -118,7 +129,8 @@ function homePage(home: Home, status: CoordinatorStatus | undefined, phones: Htm
 <p>Remote access: not set up</p>
 <p>Coordinator: ${stub}${(state ?? NOT_STARTED).replace("_", " ")}${why}</p>
 <p>Dashboard: <a href="${dashboard}">${dashboard}</a></p>
-${phones}`,
+${sections}
+${laptops}`,
   );
 }
 
@@ -150,6 +162,22 @@ export async function startSetupServer(options: SetupServerOptions) {
   const homeSections = () => html`${pairingPage.phonesSection()}${alerts.section()}`;
   let launcher: CoordinatorLauncher | undefined;
   let closed = false;
+  // Add a laptop (step 3). The role lock (A4): a laptop joining a home can't create one, and the
+  // home laptop, or one creating its home, can't join one.
+  const laptop = new Laptop({ log, ...options.laptop, stateDir, repoRoot });
+  let creating = false;
+  const roleTaken = () =>
+    creating || existsSync(path.join(stateDir, settings.STATE_NAMES.home))
+      ? "This laptop is already the home laptop, so it can't join another home."
+      : undefined;
+  const joinPage = new JoinPage(laptop, token, roleTaken);
+  const homeView = (home: Home) =>
+    homePage(
+      home,
+      launcher?.status(),
+      homeSections(),
+      laptopsSection(options.phoneAccess?.(), home.hubPublicKey),
+    );
 
   async function startCoordinator(home: Home): Promise<void> {
     if (closed) return;
@@ -172,8 +200,8 @@ export async function startSetupServer(options: SetupServerOptions) {
   async function currentPage(): Promise<string> {
     try {
       const home = await loadHome(stateDir);
-      if (home === undefined) return welcomePage(token);
-      return homePage(home, launcher?.status(), homeSections());
+      if (home === undefined) return joinPage.currentPage() ?? welcomePage(token);
+      return homeView(home);
     } catch (error) {
       if (!(error instanceof HomeError)) throw error;
       return problemPage(error.message);
@@ -181,14 +209,20 @@ export async function startSetupServer(options: SetupServerOptions) {
   }
 
   async function createHomeReply(): Promise<PageReply> {
+    if (laptop.busy()) {
+      return { status: 409, body: problemPage("This laptop is already joining a home.") };
+    }
+    creating = true;
     try {
       const home = await createHome(stateDir, { ...homeOptions, bridgeUrl });
       await homeReady(home);
-      return { status: 200, body: homePage(home, launcher?.status(), homeSections()) };
+      return { status: 200, body: homeView(home) };
     } catch (error) {
       if (error instanceof HomeExistsError) return { status: 409, body: await currentPage() };
       if (!(error instanceof HomeError)) throw error;
       return { status: 500, body: problemPage(error.message) };
+    } finally {
+      creating = false;
     }
   }
 
@@ -200,6 +234,7 @@ export async function startSetupServer(options: SetupServerOptions) {
     { method: "POST", path: "/home", guard: "form", handle: createHomeReply },
     ...pairingPage.routes(),
     alerts.route(),
+    ...joinPage.routes(),
   ];
 
   function refuse(why: string): PageReply {
@@ -258,12 +293,15 @@ export async function startSetupServer(options: SetupServerOptions) {
     url,
     startCoordinator,
     homeReady,
-    /** Stops answering, then stops the coordinator. */
+    /** On a laptop that joined a home: starts its worker again, with its node ID and token. */
+    resumeLaptop: () => laptop.resume(),
+    /** Stops answering, then stops the coordinator, or this laptop's worker. */
     async close(): Promise<void> {
       closed = true;
       server.close();
       server.closeAllConnections();
       await launcher?.stop();
+      await laptop.close();
     },
   };
 }

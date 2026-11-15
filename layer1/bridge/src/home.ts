@@ -8,6 +8,7 @@ import {
   readFileBytes,
   readJsonFile,
   removePath,
+  updateJsonFile,
   writeFileWhole,
 } from "./json-file.ts";
 import * as settings from "./settings.ts";
@@ -19,6 +20,8 @@ export interface Home {
   readonly hubPublicKey: string;
   /** The dashboard port in coordinator.json, for the dashboard link. */
   readonly dashboardPort: number;
+  /** coordinator.json's listen_port, where workers reach the coordinator; join tickets carry it. */
+  readonly listenPort: number;
   readonly stateDir: string;
   readonly coordinatorConfigFile: string;
   readonly acceptedWorkersFile: string;
@@ -111,7 +114,7 @@ async function create(stateDir: string, options: CreateHomeOptions): Promise<Hom
   const { ports = DEFAULT_PORTS, writeFile = writeFileWhole } = options;
   const files = filesIn(stateDir);
   const { privateKey } = crypto.generateKeyPairSync("x25519");
-  const home = homeAt(stateDir, crypto.randomUUID(), publicKeyOf(privateKey), ports.dashboard);
+  const home = homeAt(stateDir, crypto.randomUUID(), publicKeyOf(privateKey), ports);
   const homeJson = {
     schema_version: 1,
     home_id: home.homeId,
@@ -191,7 +194,10 @@ async function load(stateDir: string): Promise<Home | undefined> {
     stateDir,
     field(files.home, saved, "home_id", isString),
     field(files.home, saved, "hub_public_key", isString),
-    field(files.coordinatorConfigFile, config, "dashboard_port", isPort),
+    {
+      dashboard: field(files.coordinatorConfigFile, config, "dashboard_port", isPort),
+      listen: field(files.coordinatorConfigFile, config, "listen_port", isPort),
+    },
   );
   // Layer 2's coordinator follows coordinator.json, so its paths must be this folder's files.
   for (const [name, value] of Object.entries(coordinatorPaths(home))) {
@@ -238,9 +244,15 @@ function filesIn(stateDir: string) {
   };
 }
 
-function homeAt(stateDir: string, homeId: string, hubPublicKey: string, port: number): Home {
+function homeAt(
+  stateDir: string,
+  homeId: string,
+  hubPublicKey: string,
+  ports: { readonly dashboard: number; readonly listen: number },
+): Home {
   const { home, homeKey, hubPrivateKey, ...coordinatorFiles } = filesIn(stateDir);
-  return { homeId, hubPublicKey, dashboardPort: port, stateDir, ...coordinatorFiles };
+  const { dashboard: dashboardPort, listen: listenPort } = ports;
+  return { homeId, hubPublicKey, dashboardPort, listenPort, stateDir, ...coordinatorFiles };
 }
 
 /** The paths coordinator.json gives Layer 2's coordinator: this state folder's files. */
@@ -271,3 +283,80 @@ const isString = (value: unknown): value is string => typeof value === "string";
 const isPort = (value: unknown): value is number =>
   typeof value === "number" && Number.isInteger(value) && value > 0 && value <= 0xffff;
 const json = (data: unknown): string => `${JSON.stringify(data, null, 2)}\n`;
+
+/** One entry of accepted-workers.json, with contracts/accepted-workers.json's field names. */
+export interface AcceptedWorker {
+  readonly node_id: string;
+  readonly display_name: string;
+  /** Link-key material (phone-hub.md §6.6), so a secret: never logged and never shown. */
+  readonly token_sha256: string;
+}
+
+/** accepted-workers.json can't be read or would break Layer 2's rules. Names the file, no value. */
+export class AcceptedWorkersError extends HomeError {
+  override name = "AcceptedWorkersError";
+}
+
+const WORKER_KEYS = ["display_name", "node_id", "token_sha256"];
+const TOKEN_SHA256 = /^[0-9a-f]{64}$/;
+
+/**
+ * accepted-workers.json's entries, checked as Layer 2's model checks them: exactly its keys at each
+ * level, version 1, 64 lowercase hex hashes, and no node_id or hash twice. A file that breaks them
+ * throws an AcceptedWorkersError, since the coordinator would refuse every worker.
+ */
+function parseAcceptedWorkers(file: string, data: unknown): AcceptedWorker[] {
+  const broken = (rule: string) => new AcceptedWorkersError(`${file} is not valid: ${rule}`);
+  const isObject = (value: unknown): value is Record<string, unknown> =>
+    typeof value === "object" && value !== null && !Array.isArray(value);
+  const keys = (value: object) => Object.keys(value).sort().join(",");
+  if (!isObject(data) || keys(data) !== "schema_version,workers") throw broken("its keys");
+  const { schema_version: version, workers } = data;
+  if (version !== 1) throw broken("schema_version must be 1");
+  if (!Array.isArray(workers)) throw broken("workers must be a list");
+  const entries = workers.map((worker: unknown, index): AcceptedWorker => {
+    const fields = isObject(worker) && keys(worker) === WORKER_KEYS.join(",") ? worker : {};
+    const { node_id, display_name, token_sha256 } = fields;
+    const ok =
+      typeof node_id === "string" &&
+      typeof display_name === "string" &&
+      typeof token_sha256 === "string" &&
+      TOKEN_SHA256.test(token_sha256);
+    if (!ok) throw broken(`workers[${index}] does not match the contract`);
+    return { node_id, display_name, token_sha256 };
+  });
+  for (const key of ["node_id", "token_sha256"] as const) {
+    const values = entries.map((entry) => entry[key]);
+    if (new Set(values).size !== values.length) throw broken(`two workers share a ${key}`);
+  }
+  return entries;
+}
+
+/** The workers the home accepts, from accepted-workers.json. */
+export async function acceptedWorkers(home: Home): Promise<AcceptedWorker[]> {
+  const file = home.acceptedWorkersFile;
+  const data = await readJsonFile(file).catch((error: unknown) => {
+    throw new AcceptedWorkersError(errorMessage(error), { cause: error });
+  });
+  return parseAcceptedWorkers(file, data);
+}
+
+/**
+ * Appends `worker` to accepted-workers.json through updateJsonFile's queue, written whole, so two
+ * approvals at once both land. A file that already breaks Layer 2's rules is left as it is, and so
+ * is one the new entry would break; either throws an AcceptedWorkersError.
+ */
+export async function addAcceptedWorker(home: Home, worker: AcceptedWorker): Promise<void> {
+  const file = home.acceptedWorkersFile;
+  await updateJsonFile(file, (current) => {
+    const workers = parseAcceptedWorkers(file, current ?? { schema_version: 1, workers: [] });
+    const entry = {
+      node_id: worker.node_id,
+      display_name: worker.display_name,
+      token_sha256: worker.token_sha256,
+    };
+    const next = { schema_version: 1, workers: [...workers, entry] };
+    parseAcceptedWorkers(file, next);
+    return next;
+  });
+}
