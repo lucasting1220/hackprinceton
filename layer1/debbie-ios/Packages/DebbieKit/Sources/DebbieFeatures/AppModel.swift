@@ -81,16 +81,21 @@ public final class AppModel: CareModel {
     private var seenAlertIDs = Set<String>()
     private let store = SecureStore()
     private let log = Logger(subsystem: "app.debbie", category: "app")
-    private let assistant: AssistantService
+    /// Set only to replace the home's answers (tests, the offline Debug override); nil asks the home.
+    private let assistant: AssistantService?
 
-    /// The conversation with Debbie (the centre tab). It reads the home's state each time it asks (D-031).
+    /// The conversation with Debbie (the centre tab). It reads the home's state each time it asks (D-031). Unless an
+    /// assistant was given, each question goes to the home, which answers with its own Ollama model.
     @ObservationIgnored public private(set) lazy var chat = DebbieChatModel(
-        assistant: assistant,
+        assistant: assistant ?? HomeAssistant(ask: { [weak self] question in
+            guard let self else { throw CancellationError() }
+            return try await self.askHome(question)
+        }),
         homeData: { [unowned self] in self.homeDataForDebbie() },
         fallback: { [unowned self] question in self.debbieFallback(question: question) })
 
     public init(network: @escaping () -> HomeService, demo: (() -> HomeService)?, demoMedia: (() -> LiveMediaEngine)?,
-                heartbeatInterval: TimeInterval = 60, assistant: AssistantService = OfflineAssistant()) {
+                heartbeatInterval: TimeInterval = 60, assistant: AssistantService? = nil) {
         self.makeNetworkService = network
         self.makeDemoService = demo
         self.demoMediaEngine = demoMedia
@@ -103,6 +108,13 @@ public final class AppModel: CareModel {
             role = config.role
             phase = config.role == .resident ? .resident : .caregiver
         }
+    }
+
+    /// The home's answer to a question from the chat. The demo home has no Layer 4, so it answers on this iPhone from
+    /// the same facts.
+    func askHome(_ question: String) async throws -> String {
+        if isDemo { return debbieFallback(question: question) }
+        return try await service.ask(question)
     }
 
     public var demoAvailable: Bool { makeDemoService != nil }

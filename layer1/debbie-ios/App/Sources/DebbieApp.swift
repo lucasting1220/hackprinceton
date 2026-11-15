@@ -54,16 +54,13 @@ enum AppEnvironment {
         #endif
     }
 
-    /// Debbie's answers come from Gemini when the build carries a key (TestFlight; D-031). Otherwise the on-device wording
-    /// answers, from the same facts.
-    static var assistant: AssistantService {
+    /// Debbie's answers come from the home: Layer 4 answers each question with the home's own Ollama model (nil here).
+    /// A Debug run with `DEBBIE_ASSISTANT=offline` uses the on-device wording instead.
+    static var assistant: AssistantService? {
         #if DEBUG
         if ProcessInfo.processInfo.environment["DEBBIE_ASSISTANT"] == "offline" { return OfflineAssistant() }
         #endif
-        let key = ((Bundle.main.object(forInfoDictionaryKey: "DebbieGeminiKey") as? String) ?? "").trimmingCharacters(in: .whitespaces)
-        let configured = ((Bundle.main.object(forInfoDictionaryKey: "DebbieGeminiModel") as? String) ?? "").trimmingCharacters(in: .whitespaces)
-        guard !key.isEmpty, !key.hasPrefix("$(") else { return OfflineAssistant() }
-        return GeminiAssistant(key: key, model: configured.isEmpty || configured.hasPrefix("$(") ? GeminiAssistant.defaultModel : configured)
+        return nil
     }
 
     @MainActor static func makeModel() -> AppModel {

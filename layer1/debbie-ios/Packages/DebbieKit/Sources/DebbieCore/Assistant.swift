@@ -21,6 +21,12 @@ public protocol AssistantService: Sendable {
     ///   - homeData: the home's current state as plain text, the only facts she may use.
     ///   - conversation: every turn so far, ending with the caregiver's question.
     func reply(instructions: String, homeData: String, conversation: [ChatTurn]) -> AsyncThrowingStream<String, Error>
+    /// How long the chat waits for the first words before it gives up.
+    var answerLimit: Duration { get }
+}
+
+public extension AssistantService {
+    var answerLimit: Duration { .seconds(20) }
 }
 
 /// Why Debbie couldn't answer. Each case has words for the caregiver; none of them carries a key or a response body.

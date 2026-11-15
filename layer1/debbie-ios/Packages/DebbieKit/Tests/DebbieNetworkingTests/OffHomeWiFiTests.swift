@@ -52,6 +52,17 @@ import Testing
         #expect(snap.hubLastContact == ISO8601DateFormatter().date(from: "2026-11-15T05:40:00Z"))
     }
 
+    /// The chat's question goes to the home as a `request`, and the `reply` sealed with this phone's own key is the answer.
+    @Test func askReturnsTheHomesReplySealedWithThePhoneKey() async throws {
+        let paired = try Fixture.pair(lanAddrs: [])
+        RelayStub.answer(["/v1/commands": (202, Data(#"{"v":1,"accepted":true}"#.utf8)),
+                          "/v1/messages": (200, try Fixture.replyPage(requestID: "req-test-1", body: "Her heart rate was 72 at 10:12 PM.")),
+                          "/v1/home": (200, Fixture.homeBody(online: true, lastContactAt: "2026-11-15T06:00:00Z"))])
+        let service = NetworkHomeService(store: paired.store, mode: .relay, relaySession: Fixture.relaySession())
+        let answer = try await service.ask("How is she?", requestID: "req-test-1")
+        #expect(answer == "Her heart rate was 72 at 10:12 PM.")
+    }
+
     @Test func theLANSessionNeverWaitsAndTheRelaySessionIsBounded() {
         let lan = NetworkHomeService.lanSessionConfiguration()
         #expect(lan.waitsForConnectivity == false)
@@ -99,6 +110,15 @@ private enum Fixture {
             messages.append(Wrapper(msgID: "msg-\(alertID)", type: "alert", sentAt: .now, envelope: env))
         }
         return try JSONEncoder.debbie.encode(Page(messages: messages, next: "cursor-1", hub: .init(online: true, last_contact_at: "2026-11-15T06:00:00Z")))
+    }
+
+    /// A messages page with one `reply`, sealed as the hub's sealReply does: this phone's own key, kid and `to` its device ID.
+    static func replyPage(requestID: String, body: String) throws -> Data {
+        let plain = try JSONSerialization.data(withJSONObject: ["msg_id": "msg-reply", "sent_at": "2026-11-15T06:00:00Z", "type": "reply",
+                                                                "request_id": requestID, "title": "Answer", "body": body])
+        let env = try ContractCrypto.seal(plain, key: SymmetricKey(data: Data(repeating: 7, count: 32)), kid: deviceID, homeID: homeID, type: "reply")
+        let reply = Wrapper(msgID: "msg-reply", type: "reply", to: deviceID, sentAt: .now, envelope: env)
+        return try JSONEncoder.debbie.encode(Page(messages: [reply], next: "cursor-1", hub: .init(online: true, last_contact_at: "2026-11-15T06:00:00Z")))
     }
 
     /// `GET /v1/home` exactly as layer1/relay/src/phone-api.ts sends it.
