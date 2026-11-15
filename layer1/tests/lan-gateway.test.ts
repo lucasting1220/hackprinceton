@@ -156,9 +156,9 @@ test("a fetch's after and limit are checked", () => {
 test("unpair removes the phone (202, then 403); later types 501; others 400", async () => {
   const f = fixture();
   const send = f.pair("phone-a");
-  for (const type of ["laptop_approval", "live_view_setting"]) {
-    refused(await f.gateway.commands(send(type)), 501, "not_supported");
-  }
+  refused(await f.gateway.commands(send("laptop_approval")), 501, "not_supported");
+  // Step 7 builds live_view_setting, so a gateway without its handler doesn't take it.
+  refused(await f.gateway.commands(send("live_view_setting")), 400, "unsupported_type");
   // Without a link to the coordinator, the handoff's types get 503, never 501 or 403.
   for (const type of ["request", "watch_data"]) {
     refused(await f.gateway.commands(send(type)), 503, "coordinator_down");
@@ -205,7 +205,7 @@ test("through the relay, a command takes the same switch: handlers, the handoff,
   for (const type of ["request", "watch_data"]) {
     refused(await gateway.commands(send(type), "relay"), 503, "coordinator_down");
   }
-  refused(await gateway.commands(send("live_view_setting"), "relay"), 501, "not_supported");
+  refused(await gateway.commands(send("live_view_setting"), "relay"), 400, "unsupported_type");
   for (const type of ["heart_rate", "fetch"]) {
     refused(await gateway.commands(send(type), "relay"), 400, "lan_only");
   }

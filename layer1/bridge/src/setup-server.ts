@@ -13,6 +13,8 @@ import { type Html, html, page } from "./html.ts";
 import { JoinPage, laptopsSection } from "./join-page.ts";
 import { errorMessage } from "./json-file.ts";
 import { Laptop, type LaptopOptions } from "./laptop.ts";
+import type { LiveViewConsent } from "./live-view-consent.ts";
+import { LiveViewPage } from "./live-view-page.ts";
 import { CoordinatorLauncher, type CoordinatorStatus } from "./launcher.ts";
 import { readJsonBody } from "./network-server.ts";
 import type { PhoneAccess } from "./phone-access.ts";
@@ -53,6 +55,8 @@ export interface SetupServerOptions {
   readonly remoteAccess?: () => string;
   /** Why this laptop may sleep while the bridge runs (keep-awake.ts), or undefined. */
   readonly keepAwakeProblem?: () => string | undefined;
+  /** The resident's live view consent once the home is ready, for the Live view switch (step 7). */
+  readonly liveView?: () => LiveViewConsent | undefined;
 }
 
 /** A page route's answer: a page with its status, or a 303 to `redirect`. */
@@ -167,8 +171,9 @@ export async function startSetupServer(options: SetupServerOptions) {
   const pairingPage = new PairingPage(options.phoneAccess ?? (() => undefined), token);
   const alerts = new AlertIntake({ ready: options.homeAlerts ?? (() => undefined), log });
   const handoff = new HandoffIntake({ ready: options.homeAlerts ?? (() => undefined), log });
+  const liveViewPage = new LiveViewPage(options.liveView ?? (() => undefined), token);
   const homeSections = () =>
-    html`${pairingPage.phonesSection()}${alerts.section()}${handoff.section()}`;
+    html`${pairingPage.phonesSection()}${liveViewPage.section()}${alerts.section()}${handoff.section()}`;
   let launcher: CoordinatorLauncher | undefined;
   let closed = false;
   // Add a laptop (step 3). The role lock (A4): a laptop joining a home can't create one, and the
@@ -255,6 +260,7 @@ export async function startSetupServer(options: SetupServerOptions) {
     alerts.route(),
     ...joinPage.routes(),
     ...handoff.routes(),
+    ...liveViewPage.routes(),
   ];
 
   function refuse(why: string): PageReply {
