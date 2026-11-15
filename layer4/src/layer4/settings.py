@@ -26,6 +26,18 @@ FALL_SIGNAL_WINDOW = timedelta(seconds=1)
 FALL_FRAME_MAX_AGE = timedelta(seconds=2)
 FALL_DETECTION_GAP = timedelta(seconds=5)
 
+# Reading body pose. Lengths are in fractions of the frame height. The torso is the line from
+# mid-hip to mid-shoulder; its angle is measured from straight up. Lying down means the torso
+# tilts at least the lying angle, or looks shorter than the foreshortened ratio of its last
+# upright length (lying toward or away from the camera). Sitting means the hips are within the
+# sitting ratio of a torso length of the knees, vertically.
+POSE_MIN_VISIBILITY = 0.5
+POSE_MIN_TORSO = 0.02
+POSE_UPRIGHT_ANGLE_DEG = 30.0
+POSE_LYING_ANGLE_DEG = 60.0
+POSE_FORESHORTENED_RATIO = 0.5
+POSE_SITTING_HIP_KNEE_RATIO = 0.35
+
 # Alert rewrite: how much of the event log the quick model sees (proposed in the Layer 4 doc),
 # and the longest rewrite the phone is sent; a longer one is dropped and the template stands.
 REWRITE_CONTEXT = timedelta(minutes=10)

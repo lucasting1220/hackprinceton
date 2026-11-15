@@ -1,6 +1,6 @@
 # Layer 4: Care layer
 
-**Status: draft for team review. Nothing is built.** This replaces the earlier "care agent" draft. Items under "Decided" come from the design interviews of Nov 13 and 14. Items under "Proposed" and "Open questions" are not yet agreed.
+**Status: draft for team review. Being built; `layer4/HANDOFF.md` lists what is on `main`.** This replaces the earlier "care agent" draft. Items under "Decided" come from the design interviews of Nov 13 and 14. Items under "Proposed" and "Open questions" are not yet agreed.
 
 ## Summary
 
@@ -36,6 +36,8 @@ Data moves one way: every piece of fetched data goes to Layer 3, Layer 3 passes 
 | Reaching Layer 1 | Messages between Layer 4 and Layer 1's bridge are carried by Layer 2's coordinator |
 | The iPhone app | Layer 1 builds all of it. Layer 4 only supplies the data for each screen |
 | Language | Python |
+| Fall model | MediaPipe Pose Landmarker (lite) finds the body points in each frame; fixed rules in Layer 4 read them for the current activity and for falls. Decided Nov 14 |
+| Speech-to-text model | faster-whisper, `base.en`, int8 on the CPU, with its built-in voice detector. Decided Nov 14 |
 
 ## How data flows
 
@@ -87,6 +89,8 @@ Each rule looks at one signal. The numbers are proposed defaults in a settings f
 | Heart rate | above 130 or below 40 beats per minute | Urgent: "Heart rate of {bpm} recorded at {time} on {date}" |
 | Monitoring check | a camera, mic or detector stopped for more than 30 seconds | Urgent: "Monitoring is degraded: {what stopped}" |
 | Anything else | below its threshold | Event log only |
+
+**Reading the pose** (proposed values, in `settings.py`). A shoulder or hip seen with visibility under 0.5, or a torso shorter than 2% of the frame height, means not in view. Lying down: the torso tilts 60° or more from upright, or looks shorter than half its last upright length (lying toward or away from the camera). Sitting: the hips are within 0.35 torso lengths of the knees, vertically. Otherwise walking; standing counts as walking.
 
 **Alert lifecycle**
 1. A rule fires. The upper tier writes the event to the log and sends the template alert immediately. This step never waits on a language model.
@@ -169,6 +173,6 @@ Not used: acknowledgments and false-alarm marks. Watch readings go from the app 
 ## Open questions
 
 1. The threshold values, and who signs them off.
-2. Which fall model and which speech-to-text model to use.
+2. Which fall model and which speech-to-text model to use: decided Nov 14, see "Decided".
 3. How the daily report reaches the app; Layer 1 needs to add a call.
 4. Sign-off on the contracts by the Layer 1, 2 and 3 owners.
