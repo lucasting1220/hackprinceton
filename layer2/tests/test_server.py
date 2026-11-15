@@ -260,3 +260,22 @@ def test_hardware_endpoint_lists_joined_laptops(control: TestClient, dashboard: 
 def test_hardware_endpoint_refuses_other_host_names(registry: Registry[WebSocket]) -> None:
     outsider = TestClient(create_dashboard_app(registry), base_url="http://attacker.example")
     assert outsider.get("/api/hardware").status_code == 400
+
+
+def test_dashboard_page_shows_each_laptop_as_one_card(dashboard: TestClient) -> None:
+    page = dashboard.get("/").text
+    assert "/api/state" in page and "/api/hardware" in page
+    for part in (
+        "Memory",
+        "Processor",
+        "No jobs on this laptop",
+        "laptops online",
+        "memory pooled across the home",
+        "jobs running",
+        "Work not placed",
+        "createElementNS(SVG",
+    ):
+        assert part in page
+    assert "cluster" not in page.lower(), "CLAUDE.md: say home, not cluster"
+    assert "__" not in page.split("<script>")[1], "a placeholder was left unfilled"
+    assert "<script src" not in page, "the page must work without internet"
