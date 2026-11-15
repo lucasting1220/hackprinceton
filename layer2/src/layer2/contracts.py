@@ -257,6 +257,15 @@ class LogRead(Strict):
         return self
 
 
+class StateRead(Strict):
+    """Worker to coordinator, for a job's status() call: the same data as /api/state.
+    Internal to Layer 2."""
+
+    type: Literal["state_read"]
+    schema_version: Literal[1]
+    id: RequestId
+
+
 class Reply(Strict):
     """Coordinator to worker: the answer to a request with the same id. `truncated` means the
     oldest events were left out to fit one message. Internal to Layer 2."""
@@ -268,3 +277,4 @@ class Reply(Strict):
     error: str | None = None
     events: list[LoggedEvent] | None = None
     truncated: StrictBool = False
+    state: ApiState | None = None
