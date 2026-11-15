@@ -4,6 +4,7 @@ import threading
 from collections.abc import Iterator
 from datetime import UTC, datetime
 from itertools import islice
+from pathlib import Path
 from typing import Any, Literal, cast
 
 import pytest
@@ -102,8 +103,10 @@ def test_bad_names_and_no_feed_are_refused(monkeypatch: pytest.MonkeyPatch) -> N
     assert Layer2.from_env()._frame_feed == "127.0.0.1:7460"
 
 
-def test_every_job_gets_the_frame_feed_address() -> None:
+def test_every_job_gets_the_frame_feed_address_and_config_path(tmp_path: Path) -> None:
     config = WorkerConfig.model_validate(contract("worker.json"))
-    env = job_env(config, {"LAYER2_GATEWAY": "127.0.0.1:5", "LAYER2_GATEWAY_TOKEN": "t"})
+    path = tmp_path / "worker.json"
+    env = job_env(path, config, {"LAYER2_GATEWAY": "127.0.0.1:5", "LAYER2_GATEWAY_TOKEN": "t"})
+    assert env["LAYER2_WORKER_CONFIG"] == str(path.resolve())
     assert env["LAYER2_FRAME_FEED"] == f"127.0.0.1:{config.frame_feed_port}"
     assert env["LAYER2_NODE_ID"] == config.node_id

@@ -51,7 +51,7 @@ Added Nov 14 from the Layer 2 doc's "Layers 3 and 4 to Layer 2: jobs". Layers 3 
 
 - **Where:** `<repo>/layer3/jobs/<name>/job.json` and `<repo>/layer4/jobs/<name>/job.json`. `name` equals the folder name: lowercase letters, digits and underscores, starting with a letter, at most 64 characters. Names are unique across both layers.
 - **`start_command`:** the program and its arguments, run without a shell, with the job's folder as the working directory. Relative paths in it are relative to that folder.
-- **Environment:** Layer 2 adds `LAYER2_JOB` (the job's name), `LAYER2_NODE_ID`, `LAYER2_GATEWAY`, `LAYER2_GATEWAY_TOKEN` and `LAYER2_FRAME_FEED` (the frame feed's address on this laptop). A job reaches Layer 2 only through `layer2.job_client`, which reads them.
+- **Environment:** Layer 2 adds `LAYER2_JOB` (the job's name), `LAYER2_NODE_ID`, `LAYER2_GATEWAY`, `LAYER2_GATEWAY_TOKEN`, `LAYER2_FRAME_FEED` (the frame feed's address on this laptop) and `LAYER2_WORKER_CONFIG` (the absolute path of this laptop's `worker.json`, which the capture job reads for `camera`, `mic` and `frame_feed_port`). A job reaches Layer 2 only through `layer2.job_client`, which reads them.
 - **`kind`:** `always-on` (runs until Layer 2 stops it; restarted if it exits) or `per-item` (fan-out, Layer 2 build step 6).
 - **`memory_gb`:** the memory the job needs, for the planner's budget.
 - **`sensor`:** `camera`, `mic` or `null`. A job with a sensor runs on a laptop holding it; when no laptop has it (none attached, or the resident declined it), the job is listed under `dropped` in `api-state.json`.
