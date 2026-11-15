@@ -3,6 +3,9 @@
 Layer 2 stores each record as an opaque JSON object; only Layer 4 writes and reads them, so
 this format is Layer 4's own. Times are ISO 8601 in UTC with a Z. A record that does not
 parse raises ValueError.
+
+Two record types: "event", one per signal the upper tier saw, and "activity", written by the
+fall_model job when the resident's activity changes, so other jobs can read the latest one.
 """
 
 from collections.abc import Mapping
@@ -10,10 +13,12 @@ from datetime import UTC, datetime
 from typing import assert_never
 
 from layer4.events import Event
+from layer4.fall import Activity
 from layer4.signals import FallSignal, HeartRateSignal, HelpSignal, MonitoringSignal, Signal
 
 RECORD_SCHEMA_VERSION = 1
 RECORD_TYPE = "event"
+ACTIVITY_RECORD_TYPE = "activity"
 
 
 def _utc_text(moment: datetime) -> str:
@@ -116,3 +121,29 @@ def from_record(record: Mapping[str, object]) -> Event:
         occurred_at=_time(record, "occurred_at"),
         alert_id=alert_id,
     )
+
+
+def activity_record(state: Activity, since: datetime) -> dict[str, object]:
+    """A record that the resident's activity became `state` at `since`."""
+    return {
+        "schema_version": RECORD_SCHEMA_VERSION,
+        "type": ACTIVITY_RECORD_TYPE,
+        "activity": state.value,
+        "since": _utc_text(since),
+    }
+
+
+def activity_from_record(record: Mapping[str, object]) -> tuple[Activity, datetime]:
+    """The activity and when it began. Raises ValueError if the record is not one."""
+    if record.get("type") != ACTIVITY_RECORD_TYPE:
+        raise ValueError("not an activity record")
+    if record.get("schema_version") != RECORD_SCHEMA_VERSION:
+        raise ValueError(f"unknown schema_version {record.get('schema_version')!r}")
+    try:
+        state = Activity(_text(record, "activity"))
+    except ValueError as err:
+        raise ValueError(f"unknown activity {record.get('activity')!r}") from err
+    since = _time(record, "since")
+    if since.utcoffset() is None:
+        raise ValueError("since needs a time zone")
+    return state, since

@@ -17,8 +17,15 @@ from layer2.job_client import Layer2, Layer2Error
 from layer4 import settings
 from layer4.alerts import Alert
 from layer4.events import Event
+from layer4.fall import Activity
 from layer4.ports import PortError, Quality
-from layer4.records import from_record, to_record
+from layer4.records import (
+    ACTIVITY_RECORD_TYPE,
+    activity_from_record,
+    activity_record,
+    from_record,
+    to_record,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -63,11 +70,39 @@ class Layer2EventLog:
             if not isinstance(record, Mapping):
                 logger.warning("L4 event log: skipped an entry with no event object")
                 continue
+            if record.get("type") == ACTIVITY_RECORD_TYPE:
+                continue
             try:
                 events.append(from_record(record))
             except ValueError as err:
                 logger.warning("L4 event log: skipped an entry Layer 4 cannot read: %s", err)
         return events
+
+    def append_activity(self, state: Activity, since: datetime) -> None:
+        try:
+            self._client.log_event(activity_record(state, since))
+        except Layer2Error as err:
+            raise PortError(f"activity not written to the log: {err}") from err
+
+    def latest_activity(self, since: datetime) -> tuple[Activity, datetime] | None:
+        """The newest activity record logged since `since`, or None."""
+        try:
+            rows = self._client.read_log(since=since)
+        except Layer2Error as err:
+            raise PortError(f"event log read failed: {err}") from err
+        latest: tuple[Activity, datetime] | None = None
+        for row in rows:
+            record = row.get("event")
+            if not isinstance(record, Mapping) or record.get("type") != ACTIVITY_RECORD_TYPE:
+                continue
+            try:
+                found = activity_from_record(record)
+            except ValueError as err:
+                logger.warning("L4 event log: skipped an activity record: %s", err)
+                continue
+            if latest is None or found[1] >= latest[1]:
+                latest = found
+        return latest
 
 
 class Layer2Model:

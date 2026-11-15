@@ -5,7 +5,7 @@ goes to the rules, which alert when it is outside the limits and log it either w
 reading of each kind is kept for live status, with the heart-rate reading before it for the
 trend; a reading that arrives after a newer one of its kind is judged but does not replace it.
 A message that breaks the contract is skipped with a warning and counted; one bad reading
-never stops the next.
+never stops the next. The fall model's latest activity is kept here too, for live status.
 """
 
 import logging
@@ -13,6 +13,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from datetime import datetime
 
+from layer4.fall import Activity
 from layer4.signals import HeartRateSignal
 from layer4.upper_tier import UpperTier
 from layer4.watch import SleepRecord, StepsCount, parse_reading
@@ -26,6 +27,8 @@ class LatestHealth:
 
     heart_rate: HeartRateSignal | None = None
     heart_rate_before: HeartRateSignal | None = None
+    activity: Activity | None = None
+    activity_since: datetime | None = None
     sleep: SleepRecord | None = None
     steps: StepsCount | None = None
     last_received_at: datetime | None = None
@@ -36,6 +39,15 @@ class HealthCheck:
         self._upper = upper
         self.latest = LatestHealth()
         self.refused = 0
+
+    def set_activity(self, state: Activity, since: datetime) -> bool:
+        """Keep the latest activity from the fall model. True when it changed."""
+        latest = self.latest
+        if latest.activity_since is not None and since <= latest.activity_since:
+            return False
+        changed = state != latest.activity
+        self.latest = replace(latest, activity=state, activity_since=since)
+        return changed
 
     def on_message(self, message: Mapping[str, object]) -> bool:
         """Read one message. True when it held a reading, false when it was refused."""

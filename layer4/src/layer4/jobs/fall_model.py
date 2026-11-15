@@ -8,6 +8,10 @@ on to the rules and the event log; a window with nothing in it is not an event.
 When fall detection stops (no model, or no frames for the detection gap), a monitoring signal
 goes through the same rules, which alert once it has been stopped long enough. It is reported
 until that alert is sent, then not again until frames are read once more.
+
+The resident's activity (walking, sitting, lying down, not in view) is written to the event log
+whenever it changes and has held for ACTIVITY_STABLE, so the job that sends live status can
+show it.
 """
 
 import argparse
@@ -20,16 +24,18 @@ from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import Protocol
 
 import numpy as np
 from numpy.typing import NDArray
 
 from layer2.job_client import FeedItem, Layer2, Layer2Error
 from layer4 import settings
-from layer4.fall import WHAT_STOPPED, FallDetector, FallModel, FallModelError
+from layer4.fall import WHAT_STOPPED, Activity, FallDetector, FallModel, FallModelError
 from layer4.jobs.stop_reporter import StopReporter
 from layer4.layer2_ports import Layer2EventLog, Layer2Phone
 from layer4.mediapipe_fall import open_mediapipe_fall_model
+from layer4.ports import PortError
 from layer4.upper_tier import UpperTier
 
 logger = logging.getLogger(__name__)
@@ -89,6 +95,35 @@ def _now() -> datetime:
     return datetime.now(UTC)
 
 
+class ActivityWriter(Protocol):
+    def append_activity(self, state: Activity, since: datetime) -> None: ...
+
+
+class ActivityReporter:
+    """Writes the activity once it has changed and held for `stable`; a flicker is not written."""
+
+    def __init__(self, log: ActivityWriter, stable: timedelta = settings.ACTIVITY_STABLE) -> None:
+        self._log = log
+        self._stable = stable
+        self._seen: Activity | None = None
+        self._seen_since: datetime | None = None
+        self._written: Activity | None = None
+
+    def update(self, state: Activity | None, at: datetime | None) -> None:
+        if state is None or at is None:
+            return
+        if state != self._seen or self._seen_since is None:
+            self._seen, self._seen_since = state, at
+            return
+        if state == self._written or at - self._seen_since < self._stable:
+            return
+        self._written = state
+        try:
+            self._log.append_activity(state, self._seen_since)
+        except PortError as err:
+            logger.warning("L4 fall_model: activity not logged: %s", err)
+
+
 class FallJob:
     """One frame at a time from the feed, and a health check from a timer thread."""
 
@@ -99,8 +134,10 @@ class FallJob:
         reporter: StopReporter,
         started_at: datetime,
         detection_gap: timedelta = settings.FALL_DETECTION_GAP,
+        activity: ActivityReporter | None = None,
     ) -> None:
         self._detector = detector
+        self._activity = activity
         self._upper = upper
         self._reporter = reporter
         self._started_at = started_at
@@ -113,6 +150,8 @@ class FallJob:
             logger.warning("L4 fall_model: skipped a camera frame that is not a JPEG")
             return
         signal = self._detector.process(frame)
+        if self._activity is not None:
+            self._activity.update(self._detector.activity, self._detector.activity_at)
         if signal is not None and signal.confidence > 0.0:
             with self._lock:
                 self._upper.handle(signal)
@@ -178,10 +217,13 @@ def main(argv: list[str] | None = None) -> int:
         logger.error("L4 fall_model: %s", err)
         return 2
     started_at = _now()
-    upper = UpperTier(settings.RuleThresholds(), Layer2EventLog(client), Layer2Phone(client))
+    event_log = Layer2EventLog(client)
+    upper = UpperTier(settings.RuleThresholds(), event_log, Layer2Phone(client))
     reporter = StopReporter(upper, WHAT_STOPPED)
     model = open_model(args.model, reporter, started_at)
-    job = FallJob(FallDetector(model), upper, reporter, started_at)
+    job = FallJob(
+        FallDetector(model), upper, reporter, started_at, activity=ActivityReporter(event_log)
+    )
     threading.Thread(
         target=_check_health_forever, args=(job, settings.FALL_HEALTH_CHECK_S), daemon=True
     ).start()
