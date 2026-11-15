@@ -309,3 +309,6 @@ export const WORKER_CONNECT_HINT_MS = 30_000;
 
 /** How often a worker laptop's bridge reports to the home laptop's bridge over the link. */
 export const LINK_REPORT_MS = 5_000;
+
+/** The longest camera or mic name the joined laptop's page saves into worker.json, in characters. */
+export const SENSOR_NAME_MAX_CHARS = 128;

@@ -18,6 +18,7 @@ import {
   readFileBytes,
   readJsonFile,
   removePath,
+  updateJsonFile,
   writeFileWhole,
 } from "./json-file.ts";
 import {
@@ -57,6 +58,14 @@ export type WorkerStatusRead =
   | Readonly<{ ok: true; state: "none" }>
   | Readonly<{ ok: false; problem: string }>;
 
+/**
+ * worker.json's camera and mic: the only devices Layer 3 may open, each named exactly as the
+ * operating system shows it, or null when there is none or the resident declined it.
+ */
+export type Sensors = Readonly<{ camera: string | null; mic: string | null }>;
+
+const NO_SENSORS: Sensors = { camera: null, mic: null };
+
 /** What the Join a home page shows. */
 export type LaptopView =
   | Readonly<{ step: "none" }>
@@ -74,6 +83,7 @@ export type LaptopView =
       connection: string;
       link: string;
       rejected: boolean;
+      sensors: Sensors;
     }>;
 
 /** Where the join is; "joined" is shown from the launcher and the status file. */
@@ -251,10 +261,34 @@ export function workerFiles(stateDir: string) {
 }
 
 /**
- * worker.json (contracts/worker.json): every field, with absolute paths. Camera and mic stay null
- * until step 9's picker, since Layer 3's device list isn't available yet.
+ * A camera or mic name as typed on the joined laptop's page: the trimmed name, null for an empty
+ * field, or undefined when it is too long or holds a control character.
  */
-export function workerConfig(stateDir: string, joined: Joined, hub: URL, python: string) {
+export function sensorName(typed: string): string | null | undefined {
+  const name = typed.trim();
+  if (name === "") return null;
+  if ([...name].length > settings.SENSOR_NAME_MAX_CHARS || /\p{Cc}/u.test(name)) return undefined;
+  return name;
+}
+
+/** worker.json's camera and mic, or none when the file or either field isn't usable. */
+function sensorsOf(config: unknown): Sensors {
+  const { camera, mic } = isRecord(config) ? config : {};
+  const named = (value: unknown) => (typeof value === "string" ? value : null);
+  return { camera: named(camera), mic: named(mic) };
+}
+
+/**
+ * worker.json (contracts/worker.json): every field, with absolute paths. Camera and mic are null
+ * until the joined laptop's page names them.
+ */
+export function workerConfig(
+  stateDir: string,
+  joined: Joined,
+  hub: URL,
+  python: string,
+  sensors: Sensors = NO_SENSORS,
+) {
   const files = workerFiles(stateDir);
   return {
     schema_version: 1,
@@ -263,8 +297,8 @@ export function workerConfig(stateDir: string, joined: Joined, hub: URL, python:
     display_name: joined.name,
     coordinator_url: coordinatorUrl(hub, joined.coordinatorPort),
     token_file: files.token,
-    camera: null,
-    mic: null,
+    camera: sensors.camera,
+    mic: sensors.mic,
     frame_feed_port: settings.FRAME_FEED_PORT,
     ollama_url: settings.OLLAMA_URL,
     python,
@@ -456,6 +490,7 @@ export class Laptop {
   #disconnectedSince: number | undefined;
   #link: LinkOutcome | undefined;
   #missing: readonly MissingItem[] = [];
+  #sensors: Sensors = NO_SENSORS;
   readonly #timers = new Set<NodeJS.Timeout>();
   /** The generation whose link reports run, so Check again starts no second loop. */
   #linking = -1;
@@ -519,7 +554,46 @@ export class Laptop {
       await removePath(file);
     }
     this.#joined = undefined;
+    this.#sensors = NO_SENSORS;
     this.#view = { step: "none" };
+  }
+
+  /**
+   * Saves the camera and mic into worker.json, then restarts the worker so Layer 2 reads them.
+   * Without the resident's consent both are null; an empty name means none.
+   */
+  async saveSensors(
+    camera: string,
+    mic: string,
+    consent: boolean,
+  ): Promise<{ ok: true } | { ok: false; message: string }> {
+    const launcher = this.#launcher;
+    if (this.view().step !== "joined" || launcher === undefined) {
+      return { ok: false, message: "This laptop hasn't finished joining a home." };
+    }
+    const named = { camera: sensorName(camera), mic: sensorName(mic) };
+    if (consent && (named.camera === undefined || named.mic === undefined)) {
+      const most = settings.SENSOR_NAME_MAX_CHARS;
+      return {
+        ok: false,
+        message: `Type each name as the operating system shows it, in at most ${most} characters, on one line.`,
+      };
+    }
+    const sensors: Sensors = consent
+      ? { camera: named.camera ?? null, mic: named.mic ?? null }
+      : NO_SENSORS;
+    const generation = this.#generation;
+    await updateJsonFile(this.#files.config, (config) => {
+      if (!isRecord(config)) throw new LaptopError(`${this.#files.config} is damaged.`);
+      return { ...config, camera: sensors.camera, mic: sensors.mic };
+    });
+    if (generation !== this.#generation) return { ok: true };
+    this.#sensors = sensors;
+    this.#log("L1 laptop: camera and mic saved; restarting the worker");
+    await launcher.stop();
+    await removePath(this.#files.status);
+    if (generation === this.#generation) await launcher.start();
+    return { ok: true };
   }
 
   /** Check again, after check found a required item missing. */
@@ -549,6 +623,10 @@ export class Laptop {
       return;
     }
     this.#joined = joined;
+    this.#sensors = await readJsonFile(this.#files.config).then(sensorsOf, (error: unknown) => {
+      if (error instanceof JsonFileError) return NO_SENSORS;
+      throw error;
+    });
     this.#log(`L1 laptop: joined as node ${joined.nodeId}; starting the worker`);
     await this.#setUp(this.#generation);
   }
@@ -701,6 +779,7 @@ export class Laptop {
     };
     await writeFileWhole(this.#files.laptop, json(laptopJson));
     this.#joined = joined;
+    this.#sensors = NO_SENSORS;
     this.#log(`L1 laptop: joined the home as node ${joined.nodeId}`);
   }
 
@@ -821,6 +900,7 @@ export class Laptop {
       connection: `${words[this.#connection()]}${problem}`,
       link: linkWords,
       rejected,
+      sensors: this.#sensors,
     };
   }
 }

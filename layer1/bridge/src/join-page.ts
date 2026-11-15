@@ -5,7 +5,7 @@
  * QR code holds only public keys and IDs. No scripts: waiting pages reload with a meta refresh.
  */
 import { type Html, html, page, trustedHtml } from "./html.ts";
-import type { Laptop, LaptopView, MissingItem } from "./laptop.ts";
+import type { Laptop, LaptopView, MissingItem, Sensors } from "./laptop.ts";
 import type { PhoneAccess } from "./phone-access.ts";
 import { qrSvg } from "./qr.ts";
 import * as settings from "./settings.ts";
@@ -13,8 +13,7 @@ import type { PageReply, PageRoute } from "./setup-server.ts";
 
 const TITLE = "Join a home";
 const RELOAD_SECONDS = settings.JOIN_POLL_MS / 1000;
-const SENSORS_LATER =
-  "Camera and mic: none yet. They are chosen in a later build step, once Layer 3 lists this laptop's devices.";
+const SENSORS_TITLE = "Camera and mic";
 
 /** A form that posts the page's token, `fields` and nothing else to `action`. */
 function button(action: string, token: string, label: string): Html {
@@ -39,6 +38,24 @@ function joinForm(token: string, notice: string | undefined): Html {
 <p><label>This laptop's name <input name="name" required maxlength="64" placeholder="Kitchen laptop"></label></p>
 <button>Continue</button></form>
 <p><a href="/">Back</a></p>`;
+}
+
+/**
+ * The camera and mic form: typed names until Layer 3's device list replaces typing. It doesn't
+ * reload, so typing isn't lost, and the consent box always starts unchecked.
+ */
+export function sensorsForm(sensors: Sensors, token: string, notice?: string): Html {
+  const said = notice === undefined ? "" : html`<p><strong>${notice}</strong></p>`;
+  const most = settings.SENSOR_NAME_MAX_CHARS;
+  return html`${said}<p>Now: camera ${sensors.camera ?? "none"}, mic ${sensors.mic ?? "none"}.</p>
+<p>Type each name exactly as the operating system shows it, for example <code>j5 WebCam JVCU100</code> for the camera and <code>Audio Streaming</code> for the mic on the demo laptop. Only the devices named here are used; a built-in camera or mic is never used unless named. Leave a field empty for none. Layer 3's device list will replace typing later.</p>
+<form method="post" action="/join/sensors"><input type="hidden" name="token" value="${token}">
+<p><label>Camera <input name="camera" maxlength="${most}" value="${sensors.camera ?? ""}"></label></p>
+<p><label>Mic <input name="mic" maxlength="${most}" value="${sensors.mic ?? ""}"></label></p>
+<p><label><input type="checkbox" name="consent" value="yes"> The resident agrees to this camera and mic</label></p>
+<p>Without the resident's agreement, no camera or mic is saved. Saving restarts the worker.</p>
+<button>Save</button></form>
+<p><a href="/join">Back</a></p>`;
 }
 
 /** The page for a laptop's join `view`, and how often it reloads. */
@@ -75,7 +92,7 @@ ${again("Cancel")}`;
       const body = html`<p>${view.connection}</p>
 <p>Name: ${view.name}. Node ID: <code>${view.nodeId}</code>. Home laptop: ${view.homeAddress}.</p>
 <p>Link to the home laptop: ${view.link}.</p>
-<p>${SENSORS_LATER}</p>`;
+<p>Camera: ${view.sensors.camera ?? "none"}. Mic: ${view.sensors.mic ?? "none"}. <a href="/join/sensors">Change the camera and mic</a></p>`;
       return { body, reload: RELOAD_SECONDS };
     }
   }
@@ -108,6 +125,13 @@ export class JoinPage {
         handle: async (fields) => this.#start(fields),
       },
       { method: "POST", path: "/join/check", guard: "form", handle: async () => this.#check() },
+      { method: "GET", path: "/join/sensors", guard: "view", handle: async () => this.#sensors() },
+      {
+        method: "POST",
+        path: "/join/sensors",
+        guard: "form",
+        handle: (fields) => this.#saveSensors(fields),
+      },
       { method: "POST", path: "/join/reset", guard: "form", handle: () => this.#reset() },
     ];
   }
@@ -129,6 +153,24 @@ export class JoinPage {
       return { status, body: page(TITLE, joinForm(this.#token, started.message)) };
     }
     return { redirect: "/join" };
+  }
+
+  #sensors(): PageReply {
+    const view = this.#laptop.view();
+    if (view.step !== "joined") return { redirect: "/join" };
+    return { status: 200, body: page(SENSORS_TITLE, sensorsForm(view.sensors, this.#token)) };
+  }
+
+  async #saveSensors(fields: URLSearchParams): Promise<PageReply> {
+    const consent = fields.get("consent") === "yes";
+    const camera = fields.get("camera") ?? "";
+    const mic = fields.get("mic") ?? "";
+    const saved = await this.#laptop.saveSensors(camera, mic, consent);
+    if (saved.ok) return { redirect: "/join" };
+    const view = this.#laptop.view();
+    const sensors = view.step === "joined" ? view.sensors : { camera: null, mic: null };
+    const body = sensorsForm(sensors, this.#token, saved.message);
+    return { status: 400, body: page(SENSORS_TITLE, body) };
   }
 
   #check(): PageReply {
