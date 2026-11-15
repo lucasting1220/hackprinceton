@@ -17,8 +17,9 @@ from fastapi import FastAPI, WebSocket
 
 from layer2 import settings
 from layer2.contracts import CoordinatorConfig
+from layer2.coordinator.ai_plan import choose_plan
 from layer2.coordinator.event_log import EventLog
-from layer2.coordinator.plan import JobNeed, Placement
+from layer2.coordinator.plan import JobNeed, LaptopView, Placement, Plan
 from layer2.coordinator.registry import Registry
 from layer2.coordinator.server import create_control_app, create_dashboard_app
 from layer2.files import ConfigError, load_config, wait_for_stop_file
@@ -88,7 +89,15 @@ def _job_needs() -> list[JobNeed]:
 
 async def _serve(config: CoordinatorConfig) -> int:
     registry: Registry[WebSocket] = Registry()
-    placement = Placement(_job_needs)
+    planner_log = Path(config.state_dir) / "planner.log"
+
+    def planner(
+        needs: list[JobNeed], connected: list[LaptopView], known: set[str], previous: Plan
+    ) -> Plan:
+        plan, _ = choose_plan(config.ollama_url, needs, connected, known, previous, planner_log)
+        return plan
+
+    placement = Placement(_job_needs, planner=planner)
     events = EventLog(Path(config.state_dir) / "events")
     control = create_control_app(config, registry, placement, events)
     servers = [
