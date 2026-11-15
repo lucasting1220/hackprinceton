@@ -46,7 +46,9 @@ def test_layer4_records_become_labelled_items() -> None:
     ("event", "label", "at", "alert"),
     [
         ({"kind": "fall", "alert_id": None}, "Fall", LOGGED, False),
-        ({"kind": "help"}, "Call for help", LOGGED, False),
+        ({"kind": "help", "alert_id": "x"}, "Call for help", LOGGED, True),
+        ({"kind": "help", "alert_id": None}, "Speech heard", LOGGED, False),
+        ({"kind": "help"}, "Speech heard", LOGGED, False),
         ({"kind": "monitoring", "alert_id": "x"}, "Monitoring", LOGGED, True),
         ({"kind": "<script>alert(1)</script>"}, "Event", LOGGED, False),
         ({"kind": 5, "occurred_at": "not a time"}, "Event", LOGGED, False),
@@ -66,7 +68,7 @@ def test_recent_feed_is_newest_first_and_capped(
     monkeypatch.setattr(settings, "FEED_EVENTS", 2)
     events = EventLog(tmp_path / "events")
     for kind in ("fall", "help", "monitoring"):
-        events.append({"kind": kind})
+        events.append({"kind": kind, "alert_id": "x"})
     assert [item.label for item in recent_feed(events)] == ["Monitoring", "Call for help"]
 
 
