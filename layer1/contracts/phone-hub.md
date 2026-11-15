@@ -37,7 +37,7 @@ The phone makes a new X25519 key pair for each pairing and sends `POST /v1/pair`
 
 `proof = HMAC-SHA256(key = secret, msg = phone_pub ‖ role ‖ 0x00 ‖ name)`, 32 bytes. `secret` and `phone_pub` are the raw bytes, `role` is the ASCII of `caregiver` or `resident`, `0x00` is one zero byte, and `name` is the UTF-8 of the name's NFC form.
 
-After NFC normalization the name has 1 to 64 characters (extended grapheme clusters) and at most 256 UTF-8 bytes. It has no control character (Unicode category Cc) and no bidirectional formatting character (U+061C, U+200E, U+200F, U+202A to U+202E, U+2066 to U+2069). The hub shows and keeps the NFC form.
+After NFC normalization the name has 1 to 64 characters (extended grapheme clusters) and at most 1024 UTF-8 bytes. It has no control character (Unicode category Cc) and no bidirectional formatting character (U+061C, U+200E, U+200F, U+202A to U+202E, U+2066 to U+2069). The hub shows and keeps the NFC form.
 
 ### 2.3 Key agreement and derivation
 
@@ -246,7 +246,7 @@ The bridge builds this file. These points differ from the app's `docs/CONTRACTS.
 - **Bundle values.** The mock makes `d-` device IDs, 24-byte credentials and a `null` `home_key` for residents. This file: UUIDs, 32 bytes, and no `home_key` field for residents.
 - **LAN commands.** The mock answers `200 {"v":1,"ok":true}`. This file: `202 {"v":1,"accepted":true}`.
 - **`GET /v1/hello`.** CONTRACTS.md has `service` only, the mock `hub` only, and the app checks only for a 200. This file: both fields, and a phone uses the LAN route only when `hub` matches the first 8 characters of its stored `hub_pub` (§4.1), so another home's gateway at the same address can't make it show "removed".
-- **Name.** 1 to 64 Unicode scalars. This file: 1 to 64 characters and at most 256 UTF-8 bytes, with no control or bidirectional formatting characters (§2.2).
+- **Name.** 1 to 64 Unicode scalars. This file: 1 to 64 characters and at most 1024 UTF-8 bytes, with no control or bidirectional formatting characters (§2.2).
 - **`ack`.** A phone → hub type. This file: gone (coherence decision 17). The hub answers `400 unsupported_type`.
 - **Heartbeat and `monitoring`.** The heartbeat carries a monitoring object, `monitoring` is a type, and the mock puts heartbeats in the LAN page. This file: the heartbeat is `{msg_id, sent_at, type}` and travels through the relay only, so a LAN page never holds one (§3). "Monitoring degraded" is a Layer 4 alert (decision 15).
 - **`heart_rate`.** `POST /v1/lan/heart-rate`. This file: watch data (heart rate, sleep and steps) comes in step 8. Until then that path gets `404 not_found`.
