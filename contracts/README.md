@@ -33,6 +33,7 @@ Agreed Nov 14 from Layer 1's asks L1 to L5, L7 and L8. Layer 1 writes the config
 - **Exit codes** for the coordinator and worker: 0 stopped normally, 2 bad config, 3 token rejected, 1 anything else. A missing item never makes a program exit.
 - **Stop file:** when the file named by `stop_file` appears, the program stops its jobs and exits within 10 seconds.
 - **Ollama:** programs use the Ollama server already running at `ollama_url`; they never start their own.
+- **Bridge:** the coordinator sends Layer 1's messages for phones to the bridge at `bridge_url` (plain HTTP, 127.0.0.1 only).
 - **Transport:** plain WebSocket between workers and the coordinator on the demo network (the phone hotspot).
 - **Writing files:** every JSON file is written whole, to a temporary file in the same folder and then renamed over the old one, retried if Windows reports the file busy.
 - **Times** are ISO 8601 in UTC and field names for times end in `_at`.
