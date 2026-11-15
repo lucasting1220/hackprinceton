@@ -38,14 +38,18 @@ POSE_LYING_ANGLE_DEG = 60.0
 POSE_FORESHORTENED_RATIO = 0.5
 POSE_SITTING_HIP_KNEE_RATIO = 0.35
 
-# Falls from body pose. A fall is scored once the resident has been lying for the settle time:
-# by how far the hips dropped from the last upright moment, in upright torso lengths (full
-# marks at the full drop), and by how long that took (full marks at or under the fast descent,
-# none at or over the slow one). One fall gives one score; the next needs the resident upright.
+# Falls from body pose. A fall is scored once the resident has been lying for the settle time.
+# Standing height is the highest the hips were while upright within the slow descent before
+# lying. The score is the smaller of two marks: how far the hips dropped from standing height,
+# in upright torso lengths (full marks at the full drop), and how long the descent took (full
+# marks at or under the fast descent, none at or over the slow one), timed from the last upright
+# moment with the hips within the standing tolerance (torso lengths) of standing height. One fall
+# gives one score; the next needs the resident upright.
 FALL_SETTLE = timedelta(seconds=0.5)
 FALL_HIP_DROP_FULL = 1.0
 FALL_DESCENT_FAST = timedelta(seconds=1.2)
 FALL_DESCENT_SLOW = timedelta(seconds=3)
+FALL_STANDING_TOLERANCE = 0.15
 
 # MediaPipe follows this many people per frame: one, the resident.
 POSE_MODEL_PEOPLE = 1

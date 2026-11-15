@@ -96,9 +96,8 @@ async def _serve(config: CoordinatorConfig) -> int:
 
     def planner(
         needs: list[JobNeed], connected: list[LaptopView], known: set[str], previous: Plan
-    ) -> Plan:
-        plan, _ = choose_plan(config.ollama_url, needs, connected, known, previous, planner_log)
-        return plan
+    ) -> tuple[Plan, str, str]:
+        return choose_plan(config.ollama_url, needs, connected, known, previous, planner_log)
 
     placement = Placement(_job_needs, planner=planner)
     events = EventLog(Path(config.state_dir) / "events")
@@ -106,7 +105,9 @@ async def _serve(config: CoordinatorConfig) -> int:
     control = create_control_app(config, registry, placement, events, subscriptions)
     servers = [
         _server(control, "0.0.0.0", config.listen_port),
-        _server(create_dashboard_app(registry, placement), "127.0.0.1", config.dashboard_port),
+        _server(
+            create_dashboard_app(registry, placement, events), "127.0.0.1", config.dashboard_port
+        ),
         _server(create_client_app(subscriptions), "127.0.0.1", config.client_port),
     ]
     stop_file = Path(config.stop_file)

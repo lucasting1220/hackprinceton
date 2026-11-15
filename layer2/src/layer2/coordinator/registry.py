@@ -14,10 +14,12 @@ from typing import Literal
 from layer2 import settings
 from layer2.contracts import (
     ApiState,
+    DashboardDetails,
     DroppedWork,
     HardwareState,
     Hello,
     JobEntry,
+    JobHealth,
     JobStatus,
     Laptop,
     LaptopHardware,
@@ -190,6 +192,18 @@ class Registry[C]:
                 for job in entry.jobs
             ],
             dropped=list(dropped),
+        )
+
+    def details(self) -> DashboardDetails:
+        """For the dashboard: each job's health as its laptop last reported it."""
+        return DashboardDetails(
+            schema_version=1,
+            updated_at=self._now(),
+            jobs=[
+                JobHealth(job=job.job, node_id=node_id, state=job.state, restarts=job.restarts)
+                for node_id, entry in self._laptops.items()
+                for job in entry.jobs
+            ],
         )
 
     def hardware(self) -> HardwareState:

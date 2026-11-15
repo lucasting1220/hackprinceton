@@ -4,12 +4,18 @@ A pose model (MediaPipe, in a separate adapter) finds the body points; this modu
 fall rule and imports no pose library, so the rules are tested on hand-made poses. The rules
 and their settings are described in settings.py and docs/layer4-care-layer.md.
 
+The hip drop is measured from the standing height: the highest hips seen while upright in the
+slow-descent window before lying. The descent is timed from the last upright moment when the
+hips were still within the standing tolerance of that height. In a real fall the knees often
+buckle before the torso tips, so the last upright moment is already part-way down.
+
 One fall gives one high confidence: after scoring a fall the scorer reports 0 until the
 resident is upright again. The upper tier's rules keep no state (decision D4), so without
 this a resident lying on the floor would raise an alert every second.
 """
 
 import math
+from collections import deque
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
@@ -91,6 +97,7 @@ class PoseFallScorer:
         hip_drop_full: float = settings.FALL_HIP_DROP_FULL,
         descent_fast: timedelta = settings.FALL_DESCENT_FAST,
         descent_slow: timedelta = settings.FALL_DESCENT_SLOW,
+        standing_tolerance: float = settings.FALL_STANDING_TOLERANCE,
     ) -> None:
         _check_number("min_visibility", min_visibility, 0.0, 1.0, low_open=False)
         _check_number("min_torso", min_torso, 0.0, 1.0, low_open=True)
@@ -104,6 +111,7 @@ class PoseFallScorer:
         _check_number("foreshortened_ratio", foreshortened_ratio, 0.0, 1.0, low_open=True)
         _check_number("sitting_hip_knee_ratio", sitting_hip_knee_ratio, 0.0, 1.0, low_open=True)
         _check_number("hip_drop_full", hip_drop_full, 0.0, 10.0, low_open=True)
+        _check_number("standing_tolerance", standing_tolerance, 0.0, 1.0, low_open=False)
         for name, duration in (
             ("settle", settle),
             ("descent_fast", descent_fast),
@@ -124,7 +132,8 @@ class PoseFallScorer:
         self._hip_drop_full = hip_drop_full
         self._descent_fast = descent_fast
         self._descent_slow = descent_slow
-        self._last_upright: _Upright | None = None
+        self._standing_tolerance = standing_tolerance
+        self._upright: deque[_Upright] = deque()
         self._upright_torso: float | None = None
         self._lying_since: datetime | None = None
         self._latched = False
@@ -148,7 +157,9 @@ class PoseFallScorer:
         if not in_order:
             return FallReading(confidence=0.0, activity=activity)
         if upright:
-            self._last_upright = _Upright(at=at, hip_y=body.hip_y, torso=body.torso)
+            self._upright.append(_Upright(at=at, hip_y=body.hip_y, torso=body.torso))
+            while self._upright[0].at < at - self._descent_slow:
+                self._upright.popleft()
             self._upright_torso = body.torso
             self._latched = False
             self._lying_since = None
@@ -201,13 +212,18 @@ class PoseFallScorer:
         return Activity.WALKING
 
     def _fall_confidence(self, body: _Body) -> float:
-        last = self._last_upright
         lying_since = self._lying_since
-        if last is None or lying_since is None:
+        if lying_since is None:
             return 0.0
-        drop = (body.hip_y - last.hip_y) / last.torso
+        recent = self._upright
+        if not recent:
+            return 0.0
+        standing = min(recent, key=lambda moment: moment.hip_y)
+        near_standing = standing.hip_y + self._standing_tolerance * standing.torso
+        began = max(moment.at for moment in recent if moment.hip_y <= near_standing)
+        drop = (body.hip_y - standing.hip_y) / standing.torso
         drop_score = max(0.0, min(1.0, drop / self._hip_drop_full))
-        descent = lying_since - last.at
+        descent = lying_since - began
         span = self._descent_slow - self._descent_fast
         speed_score = max(0.0, min(1.0, (self._descent_slow - descent) / span))
         return min(drop_score, speed_score)

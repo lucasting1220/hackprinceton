@@ -88,6 +88,7 @@ def test_a_job_that_exits_is_restarted(tmp_path: Path) -> None:
             )
         )
         assert runner.states()["speech_to_text"] in ("restarting", "starting", "running")
+        assert runner.restarts()["speech_to_text"] >= 2
         await runner.stop_all()
 
     run(test)

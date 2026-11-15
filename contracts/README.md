@@ -37,6 +37,7 @@ Agreed Nov 14 from Layer 1's asks L1 to L5, L7 and L8. Layer 1 writes the config
 - **Transport:** plain WebSocket between workers and the coordinator on the demo network (the phone hotspot).
 - **Writing files:** every JSON file is written whole, to a temporary file in the same folder and then renamed over the old one, retried if Windows reports the file busy.
 - **Times** are ISO 8601 in UTC and field names for times end in `_at`.
+- **Coordinator URL:** `coordinator_url` in `worker.json` is the coordinator's WebSocket URL including its path, `ws://<coordinator address>:<listen_port>/ws`, because the coordinator serves workers only at `/ws`.
 
 ## Layers 3 and 4 and Layer 2: jobs
 
