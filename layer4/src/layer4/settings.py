@@ -98,3 +98,23 @@ class RuleThresholds:
                 f"monitoring_stopped_after must be a positive timedelta, "
                 f"got {self.monitoring_stopped_after!r}"
             )
+
+
+# Sending alerts: how many times to try one alert, and the wait between tries. Every try carries
+# the same alert_id, which the bridge treats as the same alert (contracts/README.md, alerts).
+ALERT_SEND_ATTEMPTS = 3
+ALERT_RETRY_WAIT_S = 1.0
+
+# The fall_model job. It downloads the pose model once and checks its SHA-256: the hash is the
+# "latest" file that passed the webcam tests, so if Google replaces it the download is refused
+# and reported instead of running an untested model. It checks every
+# FALL_HEALTH_CHECK_S whether fall detection has stopped, and retries a model it cannot open
+# every FALL_MODEL_RETRY_S.
+POSE_MODEL_URL = (
+    "https://storage.googleapis.com/mediapipe-models/pose_landmarker/"
+    "pose_landmarker_full/float16/latest/pose_landmarker_full.task"
+)
+POSE_MODEL_SHA256 = "4eaa5eb7a98365221087693fcc286334cf0858e2eb6e15b506aa4a7ecdcec4ad"
+POSE_MODEL_DOWNLOAD_TIMEOUT_S = 60.0
+FALL_HEALTH_CHECK_S = 10.0
+FALL_MODEL_RETRY_S = 30.0

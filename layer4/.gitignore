@@ -1,0 +1,3 @@
+# Pose model files the fall_model job downloads; never committed.
+*.task
+*.task.part

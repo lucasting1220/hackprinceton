@@ -38,6 +38,7 @@ Data moves one way: every piece of fetched data goes to Layer 3, Layer 3 passes 
 | Language | Python |
 | Fall model | MediaPipe Pose Landmarker (full model, `pose_landmarker_full.task`) finds the body points in each frame; fixed rules in Layer 4 read them for the current activity and for falls. The lite model read a person lying on the floor as upright in webcam tests. The model file is not in the repository; the job's configuration gives its path. Decided Nov 14 |
 | Speech-to-text model | faster-whisper, `base.en`, int8 on the CPU, with its built-in voice detector. Decided Nov 14 |
+| Jobs | One job per sensor, each running its own detector and the rules together, because the rules keep no state and Layer 2 carries no messages between jobs. `fall_model` (`layer4/jobs/fall_model/`, sensor camera) reads `feed("camera")`, runs fall detection, the rules, the alert and the event log; only windows with a fall score are logged. It downloads the pose model on first start and checks its SHA-256. Decided Nov 15 |
 
 ## How data flows
 
