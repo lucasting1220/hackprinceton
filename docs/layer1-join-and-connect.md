@@ -40,7 +40,7 @@ Layer 1 builds no scheduler, cluster heartbeat, care engine or second dashboard,
 
 | Topic | Decision |
 |---|---|
-| Laptops | The demo uses several laptops: one coordinator laptop and one or more workers, as in Layer 2. The first laptop set up becomes the coordinator, so start with the laptop that stays plugged in. The external webcam, whose built-in mic is the only mic, plugs into a worker (the camera laptop) |
+| Laptops | The demo uses several laptops: one coordinator laptop and one or more workers, as in Layer 2. The first laptop set up becomes the coordinator, so start with the laptop that stays plugged in. The external webcam plugs into a worker, the camera laptop: in the demo, a MacBook Air (24 GB). The webcam's built-in mic is the only mic, and macOS lists the two as separate devices with different names (camera `j5 WebCam JVCU100`, mic `Audio Streaming`). The HP (Windows) is a worker with no sensors, so its `camera` and `mic` are `null` |
 | Laptop pairing | Layer 1 gives each worker a join token and writes the accepted tokens to a file the coordinator reads. The worker sends its token in `hello`; Lucas's coordinator only checks it and replies accept or reject (ask L2) |
 | Approving a laptop | The new laptop shows a QR code. A paired caregiver scans it in the app and approves |
 | Phone pairing | The coordinator laptop shows a single-use QR code that expires after 10 minutes. The person at that laptop confirms a 4-digit code that also shows on the phone. A phone pairs as a caregiver (it gets the home key) or as a resident (heart rate only). A caregiver phone can also turn on resident mode, so one iPhone can play both roles in the demo |
@@ -158,7 +158,7 @@ Nothing on the network side can confirm a pairing or post an alert. Those happen
 1. Run the setup command from Terminal (see "Network permissions"). The setup page opens in the browser. Choose **Create a home**.
 2. **Check this laptop**: CPU, memory, disk, OS, camera and mic. This laptop coordinates, so a camera or mic on it won't be used.
 3. **Keep this laptop awake**: the person approves, and the bridge keeps the laptop and its screen awake while it runs (`caffeinate -dis -w <bridge pid>` on macOS; on Windows, screen and sleep set to Never when plugged in). Lids stay open during the demo.
-4. The bridge creates the home ID, the home key and its own key pair, and shows the home ID. Remote access shows as "not set up" until the team runs the provisioning command on the relay server with that home ID (build step 5); the bridge loads the certificate the next time it starts.
+4. The bridge creates the home ID, the home key and its own key pair, and shows the home ID. Remote access shows as "not set up" until the team runs the provisioning command on the relay server with that home ID (build step 5), which saves a hub credential on the coordinator laptop; the bridge picks it up the next time it starts.
 5. It writes `coordinator.json` and an empty `accepted-workers.json`, and starts Lucas's coordinator.
 6. **Pair the caregiver's phone** (below). Pair the resident's iPhone the same way, choosing Resident, or, if the team has one iPhone, turn on resident mode on the caregiver's phone.
 7. **Resident consent**: the resident agrees to each sensor (camera, mic, watch data) and, once, gives or withholds consent to live view. A "no" to the camera or mic leaves that device unconfigured (its `worker.json` field is `null`), and the setup page says what won't run; Layer 2's plan lists its jobs as dropped with the reason `declined`. A "no" to watch data leaves resident mode off.
@@ -178,7 +178,7 @@ Nothing on the network side can confirm a pairing or post an alert. Those happen
 3. It sends a join request (the laptop's name and public key) to the coordinator's bridge and shows an **Add this laptop** QR code.
 4. A caregiver taps **Add a laptop** in the app, scans the code and approves. The approval goes to the coordinator's bridge over home Wi-Fi, or through the relay when the phone isn't on the home network.
 5. The coordinator's bridge gives the laptop a node ID and a join token, encrypted to its key. It adds the token's hash to `accepted-workers.json` before sending the token.
-6. **Check sensors** (on the camera or mic laptop): the person picks the external webcam and mic, and the bridge runs Lucas's `check` through the same launch path the demo uses. The page shows **Camera OK** and **Mic OK**, or names the setting to change.
+6. **Check sensors** (on the camera or mic laptop): the person picks the external webcam and mic, and the bridge runs Lucas's `check` through the same launch path the demo uses. The page shows **Camera OK** and **Mic OK**, or names the setting to change. The camera and the mic are picked separately and never assumed to match, because they are separate devices with different names (on the demo camera laptop, `j5 WebCam JVCU100` and `Audio Streaming`). The pickers never offer the laptop's own `MacBook Air Camera` or `MacBook Air Microphone`, and each device is identified by its name, never by the camera's Unique ID.
 7. The bridge writes `worker.json` and the token file, deletes any old status and stop files, and starts Lucas's worker. It shows **Joined** only when the worker's status file says the coordinator accepted it.
 8. The bridge keeps a link to the coordinator's bridge, signed in with its join token, used to start and stop live view and to report setup progress.
 
@@ -372,9 +372,11 @@ Target: reconnect within 30 seconds once both ends have a working connection. Re
 | Domain name | To buy. Point a name such as `relay.<domain>` at the Vultr server before build step 5 |
 | iPhones | One, paired with the Apple Watch. A second (a teammate's, added as an internal TestFlight tester) would let the caregiver and the resident be separate phones |
 | Demo phone settings | Focus and Do Not Disturb off; notifications allowed |
-| Chrome or Edge on the camera laptop | To check |
-| Demo laptops listed: OS, chip, memory, and which one gets the webcam | To do |
+| Chrome or Edge on the camera laptop (the MacBook Air) | To check |
+| Demo laptops listed: OS, chip, memory, and which one gets the webcam | Partly done. The MacBook Air (24 GB) gets the webcam. The HP (Windows) is a worker with no sensors; its memory is still to confirm, since Layer 2 needs at least 16 GB on a worker. The coordinator laptop is still to choose |
 | Network test on venue Wi-Fi and the hotspot: phone to coordinator laptop, and laptop to laptop | To do, with Lucas |
+| Continuity Camera off on the team iPhone, so macOS doesn't offer the iPhone as the camera laptop's camera | To do |
+| The bridge started from Terminal.app on the camera laptop, the same way every time, because macOS gives the camera and mic permission to the app that started it | To do |
 
 With one iPhone, it pairs as a caregiver and turns on resident mode. Do the watch data step on home Wi-Fi first, then switch the phone to cellular for the alert, "hub offline" and live-view steps.
 
