@@ -49,6 +49,8 @@ export interface SetupServerOptions {
   readonly homeAlerts?: () => HomeAlerts | undefined;
   /** What a joining laptop is given besides the state folder and repository; tests shorten waits. */
   readonly laptop?: Omit<LaptopOptions, "stateDir" | "repoRoot">;
+  /** The words after "Remote access: " (step 5's relay link); "not set up" without it. */
+  readonly remoteAccess?: () => string;
 }
 
 /** A page route's answer: a page with its status, or a 303 to `redirect`. */
@@ -119,6 +121,7 @@ function homePage(
   status: CoordinatorStatus | undefined,
   sections: Html,
   laptops: Html,
+  remote = "not set up",
 ): string {
   const dashboard = `http://${settings.LOCAL_HOST}:${home.dashboardPort}/`;
   const stub = status?.program === "stub" ? "STUB (Layer 2's coordinator isn't built yet), " : "";
@@ -127,7 +130,7 @@ function homePage(
   return page(
     "Home created",
     html`<p>Home ID: <code>${home.homeId}</code></p>
-<p>Remote access: not set up</p>
+<p>Remote access: ${remote}</p>
 <p>Coordinator: ${stub}${(state ?? NOT_STARTED).replace("_", " ")}${why}</p>
 <p>Dashboard: <a href="${dashboard}">${dashboard}</a></p>
 ${sections}
@@ -180,6 +183,7 @@ export async function startSetupServer(options: SetupServerOptions) {
       launcher?.status(),
       homeSections(),
       laptopsSection(options.phoneAccess?.(), home.hubPublicKey),
+      options.remoteAccess?.(),
     );
 
   async function startCoordinator(home: Home): Promise<void> {

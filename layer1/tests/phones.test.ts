@@ -160,3 +160,30 @@ test("log lines name device IDs and roles, never a name, key or hash", async (t)
     `L1 phones: phone ${sam.deviceId} removed`,
   ]);
 });
+
+test("the relay's list has each paired phone's role and hash, then the removed; onChange hears each save", async (t) => {
+  const { dir } = await stateDir(t);
+  const registry = await PhoneRegistry.load(dir);
+  let changes = 0;
+  const stop = registry.onChange(() => {
+    changes += 1;
+  });
+  const [kept, gone] = [newPhone("Sam", "caregiver"), newPhone("Ana", "resident")];
+  await registry.add(kept);
+  await registry.add(gone);
+  await registry.remove(gone.deviceId);
+  await registry.remove(gone.deviceId); // removing it again changes nothing
+  assert.equal(changes, 3);
+  assert.deepEqual(registry.relayList(), [
+    {
+      deviceId: kept.deviceId,
+      removed: false,
+      role: "caregiver",
+      credentialSha256: kept.credentialSha256,
+    },
+    { deviceId: gone.deviceId, removed: true },
+  ]);
+  stop();
+  await registry.add(newPhone("Lee", "caregiver"));
+  assert.equal(changes, 3);
+});

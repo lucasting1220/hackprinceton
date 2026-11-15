@@ -198,3 +198,69 @@ test("ten appends at once get ten different seqs, and the file holds all ten", a
   const again = await opener(dir).open();
   assert.equal(again.page(null, 50, everyone).messages.length, 10);
 });
+
+test("pending lists unmarked messages oldest first, from a time and up to a limit", async (t) => {
+  const { clock, open } = opener(await folder(t));
+  const outbox = await open();
+  const sent = [alert("one"), alert("two"), alert("three")];
+  for (const wrapper of sent) {
+    await outbox.append(wrapper);
+    clock.ms += 60_000;
+  }
+  const pending = (limit: number, from?: string) =>
+    ids(outbox.pending(limit, from).map((entry) => entry.wrapper));
+  assert.deepEqual(pending(10), ids(sent));
+  assert.deepEqual(pending(2), ids(sent.slice(0, 2)));
+  assert.deepEqual(pending(10, "2026-11-14T15:11:00Z"), ids(sent.slice(1)));
+});
+
+test("relayed and refused marks are saved, kept for the LAN, and never pending again", async (t) => {
+  const dir = await folder(t);
+  const { open } = opener(dir);
+  const outbox = await open();
+  const [relayed, refused, waiting] = [alert(), alert(), alert()];
+  for (const wrapper of [relayed, refused, waiting]) await outbox.append(wrapper);
+  await outbox.markRelayed(relayed.msg_id);
+  await outbox.markRefused(refused.msg_id);
+  await outbox.markRelayed("not-in-the-outbox");
+  await outbox.markRelayed(refused.msg_id); // a refused message stays refused
+  for (const box of [outbox, await open()]) {
+    assert.deepEqual(ids(box.pending(10).map((entry) => entry.wrapper)), ids([waiting]));
+    assert.deepEqual(ids(box.page(null, 50, everyone).messages), ids([relayed, refused, waiting]));
+    assert.match(box.problems().join("\n"), /The relay refused 1 message\(s\)/);
+  }
+  const file = JSON.parse(await readFile(outbox.file, "utf8")) as {
+    messages: { relay?: string }[];
+  };
+  assert.deepEqual(
+    file.messages.map((entry) => entry.relay),
+    ["relayed", "refused", undefined],
+  );
+});
+
+test("an outbox written before relay states loads with every message pending; a bad state doesn't", async (t) => {
+  const dir = await folder(t);
+  const { open, lines } = opener(dir);
+  const first = await open();
+  const sent = alert();
+  await first.append(sent);
+  assert.deepEqual(ids((await open()).pending(10).map((entry) => entry.wrapper)), ids([sent]));
+  const file = JSON.parse(await readFile(first.file, "utf8")) as { messages: object[] };
+  const broken = { ...file, messages: file.messages.map((entry) => ({ ...entry, relay: "gone" })) };
+  await writeFile(first.file, JSON.stringify(broken), "utf8");
+  assert.deepEqual((await open()).pending(10), []);
+  assert.match(lines.join("\n"), /set aside/);
+});
+
+test("onAdded hears each saved append until it is stopped", async (t) => {
+  const { open } = opener(await folder(t));
+  const outbox = await open();
+  let heard = 0;
+  const stop = outbox.onAdded(() => {
+    heard += 1;
+  });
+  await outbox.append(alert());
+  stop();
+  await outbox.append(alert());
+  assert.equal(heard, 1);
+});

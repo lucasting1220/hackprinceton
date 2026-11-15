@@ -174,6 +174,45 @@ test("unpair removes the phone (202, then 403); later types 501; others 400", as
   refused(await f.gateway.commands(send("unpair")), 403, "device_removed");
 });
 
+test("through the relay, a command takes the same switch: handlers, the handoff, and lan_only", async () => {
+  const phones = new MemoryDirectory();
+  const handled: string[] = [];
+  const gateway = new LanGateway({
+    homeId: HOME_ID,
+    phones,
+    now: () => START_MS,
+    log: () => undefined,
+    handlers: {
+      laptop_approval: async (request) => {
+        handled.push(`${request.deviceId} ${request.type}`);
+        return { status: 202, body: { v: 1, accepted: true } };
+      },
+    },
+  });
+  const phoneKey = createSecretKey(randomBytes(32));
+  phones.paired.set("phone-r", { role: "caregiver", phoneKey });
+  const send = (type: string) =>
+    phoneWrapper(phoneKey, {
+      homeId: HOME_ID,
+      deviceId: "phone-r",
+      type,
+      sentAt: at(START_MS),
+      ...(type === "fetch" ? { fields: FETCH_FIELDS } : {}),
+    });
+  const approved = await gateway.commands(send("laptop_approval"), "relay");
+  assert.deepEqual(approved, { status: 202, body: { v: 1, accepted: true } });
+  assert.deepEqual(handled, ["phone-r laptop_approval"]);
+  for (const type of ["request", "watch_data"]) {
+    refused(await gateway.commands(send(type), "relay"), 503, "coordinator_down");
+  }
+  refused(await gateway.commands(send("live_view_setting"), "relay"), 501, "not_supported");
+  for (const type of ["heart_rate", "fetch"]) {
+    refused(await gateway.commands(send(type), "relay"), 400, "lan_only");
+  }
+  assert.deepEqual((await gateway.commands(send("unpair"), "relay")).status, 202);
+  assert.equal(phones.lookup("phone-r").state, "removed");
+});
+
 test("openPhoneRequest, with no HTTP, gives the plaintext or the same refusals", () => {
   const f = fixture();
   const send = f.pair("phone-a", "resident");

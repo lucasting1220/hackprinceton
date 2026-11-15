@@ -141,9 +141,6 @@ export const DEVICE_CREDENTIAL_BYTES = 32;
 /** The bundle's home_name, until the setup page asks for a name (§4.3). */
 export const HOME_NAME = "Home";
 
-/** The bundle's relay_url: empty until remote access is set up (step 5 replaces this constant). */
-export const RELAY_URL = "";
-
 /** A paired phone's plaintext sent_at may be this far from the hub's clock, either way (§2.5). */
 export const PHONE_CLOCK_SKEW_MS = 30_000;
 
@@ -334,3 +331,28 @@ export const REQUESTS_REMEMBERED = 1_000;
 export const HANDOFF_TITLE_MAX_CHARS = 200;
 export const REPLY_BODY_MAX_CHARS = 4_000;
 export const REPORT_BODY_MAX_CHARS = 8_000;
+
+/** The hub credential file in the state folder (relay-credential.ts reads and writes it). */
+export const RELAY_CREDENTIAL_FILE_NAME = "relay-credential.json";
+
+/** `relay-credential.ts import` reads at most this much from stdin, within this time. */
+export const RELAY_CREDENTIAL_IMPORT_MAX_BYTES = 4_096;
+export const RELAY_CREDENTIAL_IMPORT_TIMEOUT_MS = 30_000;
+
+/** How long the relay link waits for the relay to open its connection, or to answer a check. */
+export const RELAY_LINK_CONNECT_TIMEOUT_MS = 10_000;
+
+/** The relay link's waits before each reconnection; the last repeats. */
+export const RELAY_LINK_BACKOFF_MS: readonly number[] = [1_000, 2_000, 5_000, 10_000, 15_000];
+
+/** A connection that lasted this long starts the waits from the first again. */
+export const RELAY_LINK_BACKOFF_RESET_MS = 60_000;
+
+/** After the relay refuses the hub credential, the link tries again this often. */
+export const RELAY_LINK_REJECTED_RETRY_MS = 5 * 60_000;
+
+/** A heartbeat with no acknowledgment within this long means the connection is dead. */
+export const RELAY_LINK_ACK_TIMEOUT_MS = 10_000;
+
+/** The most outbox messages sent to the relay and not yet acknowledged. */
+export const RELAY_LINK_IN_FLIGHT_MAX = 20;

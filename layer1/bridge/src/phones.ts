@@ -50,9 +50,15 @@ const DEVICE_ID = /^[A-Za-z0-9._-]{1,64}$/;
 const UTC_SECONDS = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/;
 const SHA256_HEX = /^[0-9a-f]{64}$/;
 
+/** A phone as the relay's `phones` frame lists it: its role and credential hash, or removed. */
+export type RelayPhone =
+  | Readonly<{ deviceId: string; removed: true }>
+  | Readonly<{ deviceId: string; removed: false; role: PhoneRole; credentialSha256: string }>;
+
 export class PhoneRegistry {
   readonly #file: string;
   #phones: Phones;
+  readonly #listeners = new Set<() => void>();
 
   private constructor(file: string, phones: Phones) {
     this.#file = file;
@@ -80,6 +86,28 @@ export class PhoneRegistry {
       role,
       pairedAt,
     }));
+  }
+
+  /** Every phone for the relay (step 5): the paired with role and hash, then the removed. */
+  relayList(): RelayPhone[] {
+    const paired = this.#phones.paired.map(
+      ({ deviceId, role, credentialSha256 }): RelayPhone => ({
+        deviceId,
+        removed: false,
+        role,
+        credentialSha256,
+      }),
+    );
+    const removed = this.#phones.removed.map(
+      ({ deviceId }): RelayPhone => ({ deviceId, removed: true }),
+    );
+    return [...paired, ...removed];
+  }
+
+  /** Calls `listener` after each saved pairing or removal; the returned function stops it. */
+  onChange(listener: () => void): () => void {
+    this.#listeners.add(listener);
+    return () => this.#listeners.delete(listener);
   }
 
   lookup(deviceId: string): PhoneLookup {
@@ -119,6 +147,7 @@ export class PhoneRegistry {
       return content;
     });
     this.#phones = next;
+    for (const listener of this.#listeners) listener();
   }
 }
 
