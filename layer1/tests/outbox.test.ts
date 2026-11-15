@@ -4,7 +4,7 @@ import { mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from "node:fs/
 import os from "node:os";
 import path from "node:path";
 import { type TestContext, test } from "node:test";
-import { sealAlert } from "../bridge/src/home-messages.ts";
+import { sealAlert, sealMonitoring } from "../bridge/src/home-messages.ts";
 import { Outbox, OutboxError } from "../bridge/src/outbox.ts";
 import * as settings from "../bridge/src/settings.ts";
 import type { Wrapper } from "../bridge/src/wire.ts";
@@ -263,4 +263,17 @@ test("onAdded hears each saved append until it is stopped", async (t) => {
   stop();
   await outbox.append(alert());
   assert.equal(heard, 1);
+});
+
+test("the outbox keeps only the newest monitoring snapshot, and every alert", async (t) => {
+  const { open } = opener(await folder(t));
+  const outbox = await open();
+  const first = alert();
+  await outbox.append(first);
+  const snapshots = ["starting", "degraded", "ok"].map((state) => sealMonitoring({ state }, HOME));
+  for (const snapshot of snapshots) await outbox.append(snapshot);
+  const second = alert();
+  await outbox.append(second);
+  const kept = outbox.page(null, 50, everyone).messages;
+  assert.deepEqual(ids(kept), ids([first, snapshots[2] ?? first, second]));
 });

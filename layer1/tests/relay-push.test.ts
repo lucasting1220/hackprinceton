@@ -282,6 +282,32 @@ describe("pusher: targets and order", () => {
     assert.equal(sender.sent.length, 1);
   });
 
+  test("only alerts and the hub offline and back online pushes notify: never monitoring or status", async (t) => {
+    const store = storeWithHome(t);
+    const phone = new TestPhone();
+    store.syncDevices(HOME, [phone.entry()], T0);
+    store.setPushToken(phone.deviceId, "production", token(), T0);
+    const sender = new RecordingSender();
+    const pusher = new Pusher({ store, sender, now: () => T0, log: () => undefined });
+    for (const type of ["monitoring", "care_status", "report", "heartbeat"]) {
+      const parsed = parseWrapper(hubWrapper({ homeId: HOME, type, key: homeKey() }));
+      assert.ok(parsed.ok);
+      pusher.delivered(HOME, parsed.wrapper, store.storeMessage(HOME, parsed.wrapper, T0));
+    }
+    await pusher.settled();
+    assert.equal(sender.sent.length, 0);
+    const wrapper = alert();
+    pusher.delivered(HOME, wrapper, store.storeMessage(HOME, wrapper, T0));
+    pusher.hubStatus(HOME, "hub_offline", T0);
+    pusher.hubStatus(HOME, "back_online", T0);
+    await pusher.settled();
+    assert.deepEqual(sender.sent.map(({ notification }) => notification.label).sort(), [
+      `back_online of home ${HOME}`,
+      `hub_offline of home ${HOME}`,
+      `message ${wrapper.msg_id}`,
+    ]);
+  });
+
   test("delivered returns before Apple answers, and the alert is marked pushed only after (R13)", async (t) => {
     const store = storeWithHome(t);
     const phone = new TestPhone();

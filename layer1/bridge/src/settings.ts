@@ -170,8 +170,8 @@ export const PAIRING_PAGE_RELOAD_SECONDS = 2;
 /** How long a message is kept for phones to fetch: 7 days, in the hub's outbox and at the relay. */
 export const MESSAGE_RETENTION_MS = 7 * 24 * 60 * 60_000;
 
-/** Types of which only the newest message per home is kept (phone-hub.md §3): live status. */
-export const LATEST_ONLY_TYPES: readonly string[] = ["heartbeat", "care_status"];
+/** Types of which only the newest message per home is kept (phone-hub.md §3): live status and the monitoring snapshot. */
+export const LATEST_ONLY_TYPES: readonly string[] = ["heartbeat", "care_status", "monitoring"];
 
 /** How often the hub sends the relay a heartbeat: 20 seconds, the doc's demo value. */
 export const RELAY_HEARTBEAT_INTERVAL_MS = 20_000;
@@ -506,3 +506,21 @@ export const LIVE_SENDER_AUDIO_MAX_LEAD_S = 1.5;
 /** How long the sender page waits for a WebSocket to open, and before it opens a closed frame feed socket again. */
 export const LIVE_SENDER_CONNECT_TIMEOUT_MS = 5_000;
 export const LIVE_SENDER_FEED_RETRY_MS = 1_000;
+
+/** How often the hub reads Layer 2's /api/state for the monitoring snapshot (phone-hub.md §3). */
+export const MONITORING_POLL_MS = 5_000;
+
+/** How long the hub waits for Layer 2's /api/state, and for Ollama, when it builds the snapshot. */
+export const MONITORING_API_STATE_TIMEOUT_MS = 3_000;
+export const MONITORING_OLLAMA_TIMEOUT_MS = 1_500;
+
+/** The hub sends the snapshot when it changes, and at least this often, in seconds. */
+export const MONITORING_SNAPSHOT_MAX_S = 60;
+
+/** A laptop whose last status is older than this, in seconds, is not reporting (Layer 2 workers report every 2 s). */
+export const MONITORING_REPORTING_LIMIT_S = 15;
+
+/** The jobs the snapshot looks for in /api/state: Layer 3's capture (camera and mic), Layer 4's fall model and speech to text ("Debbie, help"). */
+export const MONITORING_CAPTURE_JOB = "capture";
+export const MONITORING_FALL_JOB = "fall_model";
+export const MONITORING_SOUND_JOB = "speech_to_text";
