@@ -102,7 +102,7 @@ def test_requests_reach_the_coordinators_event_log(tmp_path: Path) -> None:
     assert wrong == {"ok": False, "error": "wrong or missing token"}
     assert unknown == {
         "ok": False,
-        "error": "type must be log_append, log_read, state_read, phone_send or ask",
+        "error": "unknown request type",
     }
     assert len(list((folder / "events").glob("*.jsonl"))) == 1
     assert state["ok"]
