@@ -416,3 +416,19 @@ function relayLinkTo(t: TestContext, relay: Awaited<ReturnType<typeof fakeRelay>
   t.after(() => link.close());
   return { link, phone, homeId, logs };
 }
+
+test("until the hub's side of live view is built, the hub answers a live view request not_supported", async (t) => {
+  const { relay, link, phone, logs } = await linked(t);
+  await waitFor(() => connected(link) && relay.store.device(phone.deviceId) !== undefined);
+  const request = phoneCommand(phone, relay.homeId, "live_view_request");
+  const started = await call(relay, "/v1/live-view/sessions", phone, { body: request });
+  assert.equal(started.status, 202);
+  const { session_id: sessionId } = started.body as { session_id: string };
+  await waitFor(() => logs.some((line) => line.includes(`refused live view session ${sessionId}`)));
+  const deadline = Date.now() + 3_000;
+  let body = { state: "requested", reason: null as unknown };
+  while (body.state === "requested" && Date.now() < deadline) {
+    body = (await call(relay, `/v1/live-view/sessions/${sessionId}`, phone)).body as typeof body;
+  }
+  assert.deepEqual([body.state, body.reason], ["failed", "not_supported"]);
+});

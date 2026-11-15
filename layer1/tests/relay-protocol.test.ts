@@ -28,8 +28,8 @@ const example = await readJson("hub-relay-messages.json");
 const frames = get(example, "frames") as readonly Json[];
 const vectors = await readJson("vectors.json");
 
-const HUB_TYPES = ["phones", "deliver", "command_result"];
-const RELAY_TYPES = ["welcome", "ack", "nack", "command", "phone_unpaired"];
+const HUB_TYPES = ["phones", "deliver", "command_result", "live_view_answer", "live_view_end"];
+const RELAY_TYPES = ["welcome", "ack", "nack", "command", "phone_unpaired", "live_view_start"];
 
 /** The example frame of a type, changed by `change`, as text. */
 function frame(type: string, change: Json = {}): string {
@@ -71,6 +71,44 @@ describe("contracts/hub-relay-messages.json", () => {
     const label = { homeId: String(get(alert, "home_id")), type: command.wrapper.type };
     const plaintext = JSON.parse(open(command.wrapper.envelope, key, label).toString("utf8"));
     assert.equal(plaintext.type, "unpair");
+  });
+});
+
+describe("relay-protocol: live view frames (§7)", () => {
+  test("live_view_end travels both ways, with the same fields", () => {
+    const parsed = parseRelayFrame(frame("live_view_end"));
+    assert.ok(parsed.ok);
+    assert.deepEqual(JSON.parse(encodeFrame(parsed.frame)), JSON.parse(frame("live_view_end")));
+  });
+
+  test("an answer's reason is null when accepted and a code when refused", () => {
+    const refused = parseHubFrame(frame("live_view_answer", { accepted: false, reason: "off" }));
+    assert.ok(refused.ok);
+    for (const change of [
+      { reason: "off" },
+      { accepted: false, reason: null },
+      { accepted: false, reason: "Not Allowed" },
+      { accepted: "yes" },
+      { session_id: "" },
+    ]) {
+      assert.equal(
+        parseHubFrame(frame("live_view_answer", change)).ok,
+        false,
+        JSON.stringify(change),
+      );
+    }
+  });
+
+  test("a start needs its time, its token and the phone's wrapper", () => {
+    for (const [change, field] of [
+      [{ expires_at: "soon" }, "expires_at"],
+      [{ sender_token: "short" }, "sender_token"],
+      [{ from: "" }, "from"],
+      [{ wrapper: {} }, "wrapper.v"],
+    ] as const) {
+      assert.equal(refusal(parseRelayFrame(frame("live_view_start", change))).field, field);
+    }
+    assert.equal(refusal(parseRelayFrame(frame("live_view_end", { reason: "" }))).field, "reason");
   });
 });
 

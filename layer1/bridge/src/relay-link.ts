@@ -381,6 +381,20 @@ export class RelayLink {
           );
         });
         return;
+      case "live_view_start":
+        // The hub's side of live view is the next build step; until then it says so at once.
+        this.#log(`L1 relay link: refused live view session ${frame.session_id}: not built yet`);
+        this.#send(ws, {
+          type: "live_view_answer",
+          v: 1,
+          session_id: frame.session_id,
+          accepted: false,
+          reason: "not_supported",
+        });
+        return;
+      case "live_view_end":
+        this.#log(`L1 relay link: live view session ${frame.session_id} ended: ${frame.reason}`);
+        return;
     }
   }
 

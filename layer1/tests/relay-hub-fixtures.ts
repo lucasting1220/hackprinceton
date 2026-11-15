@@ -13,7 +13,8 @@ import { HUB_PATH } from "../bridge/src/relay-protocol.ts";
 import { HUB_CREDENTIAL_BYTES } from "../bridge/src/settings.ts";
 import { utcSeconds, type Wrapper } from "../bridge/src/wire.ts";
 import { createHubSocket, type HubSocket, type HubSocketOptions } from "../relay/src/hub-socket.ts";
-import { createPhoneApi } from "../relay/src/phone-api.ts";
+import { isSignalPath, LiveViewSessions, type LiveViewOptions } from "../relay/src/live-view.ts";
+import { createPhoneApi, signIn } from "../relay/src/phone-api.ts";
 import { RelayStore } from "../relay/src/store.ts";
 import { type TestPhone, type TestRelay, tempDir, testConfig } from "./relay-fixtures.ts";
 
@@ -29,6 +30,8 @@ export interface HubRelay extends TestRelay {
   readonly contacts: string[];
   /** Each onStored call: home and msg_id. */
   readonly stored: Array<readonly [string, string]>;
+  /** Live view's sessions now running; restart() replaces them. */
+  readonly liveView: LiveViewSessions;
   /** Stops the hub socket and the server, then serves again on the same port with the same store. */
   restart(): Promise<void>;
 }
@@ -38,6 +41,7 @@ export async function startHubRelay(
   t: TestContext,
   phones: readonly TestPhone[] = [],
   options: Partial<Omit<HubSocketOptions, "store" | "log">> = {},
+  liveViewOptions: Partial<Pick<LiveViewOptions, "turn" | "timing" | "now">> = {},
 ): Promise<HubRelay> {
   const store = RelayStore.open(":memory:");
   const config = testConfig(await tempDir(t));
@@ -54,32 +58,55 @@ export async function startHubRelay(
   const contacts: string[] = [];
   const stored: Array<readonly [string, string]> = [];
   const serve = async (port: number) => {
+    let liveView: LiveViewSessions | undefined;
     const hub = createHubSocket({
       onContact: (home, atMs) => {
         contacts.push(home);
         store.recordContact(home, atMs);
       },
       onStored: (home, wrapper) => stored.push([home, wrapper.msg_id]),
+      onLiveView: (home, frame) =>
+        frame.type === "live_view_answer"
+          ? liveView?.hubAnswered(home, frame)
+          : liveView?.hubEnded(home, frame),
+      onDisconnect: (home) => liveView?.hubDisconnected(home),
       ...options,
       store,
       log,
+    });
+    liveView = new LiveViewSessions({
+      ...liveViewOptions,
+      hub,
+      log,
+      publicUrl: config.public_url,
+      signIn: (headers) => {
+        const signed = signIn(store, headers);
+        return signed.ok ? { ok: true, deviceId: signed.device.deviceId } : { ok: false };
+      },
     });
     const server = createPhoneApi({
       store,
       config,
       log,
       commands: hub,
+      liveView,
       onUnpair: (home, deviceId) => hub.phoneUnpaired(home, deviceId),
     });
-    server.on("upgrade", (request, socket, head) => hub.handleUpgrade(request, socket, head));
+    server.on("upgrade", (request, socket, head) => {
+      const { pathname } = new URL(request.url ?? "/", "http://relay.invalid");
+      if (isSignalPath(pathname)) liveView?.handleUpgrade(request, socket, head);
+      else hub.handleUpgrade(request, socket, head);
+    });
     server.listen(port, "127.0.0.1");
     await once(server, "listening");
+    const sessions = liveView;
     const stop = async () => {
+      sessions.close();
       hub.close();
       server.closeAllConnections();
       await new Promise((resolve) => server.close(resolve));
     };
-    return { hub, stop, port: (server.address() as AddressInfo).port };
+    return { hub, liveView: sessions, stop, port: (server.address() as AddressInfo).port };
   };
   let running = await serve(0);
   const { port } = running;
@@ -96,6 +123,9 @@ export async function startHubRelay(
     homeId,
     get hub() {
       return running.hub;
+    },
+    get liveView() {
+      return running.liveView;
     },
     hubCredential,
     contacts,

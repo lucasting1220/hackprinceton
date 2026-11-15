@@ -12,6 +12,9 @@ import {
   encodeFrame,
   HUB_CLOSE,
   HUB_PATH,
+  type LiveViewAnswerFrame,
+  type LiveViewEndFrame,
+  type LiveViewStartFrame,
   type NackError,
   parseHubFrame,
   type RelayFrame,
@@ -44,6 +47,8 @@ export interface HubSocket extends CommandForwarder {
   /** Tells the home's hub, if connected, that a phone unpaired itself (phone API's onUnpair). */
   phoneUnpaired(homeId: string, deviceId: string): void;
   connected(homeId: string): boolean;
+  /** Sends live view's frames to the home's hub (§7); false when no hub is connected. */
+  send(homeId: string, frame: LiveViewStartFrame | LiveViewEndFrame): boolean;
   /** Ends every hub connection (code 1001) and answers their waiting commands as offline. */
   close(): void;
 }
@@ -60,6 +65,10 @@ export interface HubSocketOptions {
   readonly onContact?: (homeId: string, atMs: number) => void;
   /** A new message was stored and acknowledged (never a duplicate): pushes start here (R13). */
   readonly onStored?: (homeId: string, wrapper: Wrapper, seq: number) => void;
+  /** The hub's live view frames (§7): its answer to a start, or a session it ended. */
+  readonly onLiveView?: (homeId: string, frame: LiveViewAnswerFrame | LiveViewEndFrame) => void;
+  /** A home's hub connection closed and no newer one replaced it. */
+  readonly onDisconnect?: (homeId: string) => void;
   readonly pingIntervalMs?: number;
   readonly silentCloseMs?: number;
   readonly commandTimeoutMs?: number;
@@ -229,6 +238,10 @@ export function createHubSocket(options: HubSocketOptions): HubSocket {
         );
         return;
       }
+      case "live_view_answer":
+      case "live_view_end":
+        options.onLiveView?.(homeId, frame);
+        return;
     }
   };
 
@@ -238,6 +251,7 @@ export function createHubSocket(options: HubSocketOptions): HubSocket {
     connections.delete(connection.homeId);
     store.setHubConnected(connection.homeId, false);
     log(`L1 relay: the hub of home ${connection.homeId} disconnected (code ${code})`);
+    options.onDisconnect?.(connection.homeId);
   };
 
   const attach = (ws: WebSocket, homeId: string, credentialSha256: string): void => {
@@ -341,6 +355,13 @@ export function createHubSocket(options: HubSocketOptions): HubSocket {
 
     connected(homeId) {
       return connections.has(homeId);
+    },
+
+    send(homeId, frame) {
+      const connection = connections.get(homeId);
+      if (connection === undefined || connection.ws.readyState !== WebSocket.OPEN) return false;
+      send(connection, frame);
+      return true;
     },
 
     close() {

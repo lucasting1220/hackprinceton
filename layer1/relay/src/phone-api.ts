@@ -19,8 +19,10 @@ import {
   RELAY_SIGNIN_WINDOW_MS,
 } from "../../bridge/src/settings.ts";
 import { parseWrapper, utcSeconds } from "../../bridge/src/wire.ts";
+import { LIVE_VIEW_PATH } from "../../bridge/src/settings.ts";
 import { pushConfigured, type RelayConfig } from "./config.ts";
 import type { CommandForwarder, CommandOutcome } from "./hub-socket.ts";
+import type { LiveViewSessions } from "./live-view.ts";
 import {
   type DeviceRecord,
   ENVIRONMENTS,
@@ -40,6 +42,8 @@ export interface PhoneApiOptions {
   /** Where POST /v1/commands goes: the hub socket. Without one, every hub is offline. */
   readonly commands?: CommandForwarder;
   readonly limiter?: SignInLimiter;
+  /** Live view's sessions (§7). Without them, a live view request gets 503 hub_offline. */
+  readonly liveView?: LiveViewSessions;
 }
 
 interface Reply {
@@ -72,6 +76,9 @@ export const REFUSED = {
   hubOffline: errorReply(503, "hub_offline", "The home laptop isn't connected to the relay."),
   hubTimeout: errorReply(504, "hub_timeout", "The home laptop didn't answer in time."),
 } as const;
+
+/** The session path of live view's status and stop calls (§7.2, §7.3). */
+const SESSION_PATH = new RegExp(`^${LIVE_VIEW_PATH}/([0-9a-f-]{36})$`);
 
 /** Commands the relay never carries (§5.5): watch readings stay on the home network. */
 const LAN_ONLY_TYPES: readonly string[] = ["heart_rate", "fetch"];
@@ -190,10 +197,13 @@ interface Signed {
   readonly home: HomeRecord;
   readonly url: URL;
   readonly request: http.IncomingMessage;
+  /** The live view session ID in the path, for §7's session calls; "" for other paths. */
+  readonly sessionId: string;
 }
 
 interface Route {
-  readonly method: "GET" | "POST";
+  readonly method: "GET" | "POST" | "DELETE";
+  /** The path, or "session" for live view's per-session path (§7). */
   readonly path: string;
   /** Whether a resident device may call it (R14). */
   readonly resident: boolean;
@@ -288,6 +298,43 @@ export function createPhoneApi(options: PhoneApiOptions): http.Server {
     },
     {
       method: "POST",
+      path: LIVE_VIEW_PATH,
+      resident: false,
+      handle: async ({ device, home, request }) => {
+        const read = await readJsonBody(request);
+        if (!read.ok) return read.reply;
+        const parsed = parseWrapper(read.value);
+        if (!parsed.ok) {
+          return parsed.code === "unsupported_version" ? REFUSED.version : REFUSED.badRequest;
+        }
+        const { wrapper } = parsed;
+        if (wrapper.envelope.kid !== device.deviceId) return REFUSED.forbidden;
+        if (wrapper.type !== "live_view_request") return REFUSED.unsupportedType;
+        const started = options.liveView?.start(home.homeId, device.deviceId, wrapper);
+        return started === undefined ? REFUSED.hubOffline : { status: 202, body: started };
+      },
+    },
+    {
+      method: "GET",
+      path: "session",
+      resident: false,
+      handle: ({ device, sessionId }) => {
+        const status = options.liveView?.status(device.deviceId, sessionId);
+        return status === undefined ? REFUSED.notFound : { status: 200, body: status };
+      },
+    },
+    {
+      method: "DELETE",
+      path: "session",
+      resident: false,
+      handle: ({ device, request, sessionId }) => {
+        request.resume();
+        const stopped = options.liveView?.stop(device.deviceId, sessionId) ?? false;
+        return stopped ? { status: 204 } : REFUSED.notFound;
+      },
+    },
+    {
+      method: "POST",
       path: "/v1/push-tokens",
       resident: false,
       handle: async ({ device, request }) => {
@@ -353,9 +400,11 @@ export function createPhoneApi(options: PhoneApiOptions): http.Server {
       if (request.method === "GET") return { status: 200, body: { v: 1, ok: true } };
       return { ...REFUSED.method, headers: { Allow: "GET" } };
     }
-    const route = routes.find((row) => row.path === url.pathname && row.method === request.method);
+    const session = SESSION_PATH.exec(url.pathname);
+    const path = session === null ? url.pathname : "session";
+    const route = routes.find((row) => row.path === path && row.method === request.method);
     if (route === undefined) {
-      const allowed = routes.filter((row) => row.path === url.pathname).map((row) => row.method);
+      const allowed = routes.filter((row) => row.path === path).map((row) => row.method);
       if (allowed.length === 0) return REFUSED.notFound;
       return { ...REFUSED.method, headers: { Allow: allowed.join(", ") } };
     }
@@ -369,7 +418,8 @@ export function createPhoneApi(options: PhoneApiOptions): http.Server {
       return signed.reply;
     }
     if (signed.device.role === "resident" && !route.resident) return REFUSED.forbidden;
-    return route.handle({ device: signed.device, home: signed.home, url, request });
+    const sessionId = session?.[1] ?? "";
+    return route.handle({ device: signed.device, home: signed.home, url, request, sessionId });
   };
 
   const server = http.createServer(

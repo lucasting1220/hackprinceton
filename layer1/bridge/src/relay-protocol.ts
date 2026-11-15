@@ -5,7 +5,7 @@
  * Every refusal names a field, never a value, so a refusal is safe to log.
  */
 import type { Role } from "./phone-crypto.ts";
-import { parseWrapper, type Wrapper } from "./wire.ts";
+import { isUtcTime, parseWrapper, type Wrapper } from "./wire.ts";
 
 /** The path the hub opens its WebSocket on, at the relay's public URL. */
 export const HUB_PATH = "/v1/hub";
@@ -33,7 +33,34 @@ export type AckFrame = Readonly<{ type: "ack"; v: 1; msg_id: string }>;
 export type NackFrame = Readonly<{ type: "nack"; v: 1; msg_id: string; error: NackError }>;
 export type CommandFrame = Readonly<{ type: "command"; v: 1; from: string; wrapper: Wrapper }>;
 export type PhoneUnpairedFrame = Readonly<{ type: "phone_unpaired"; v: 1; device_id: string }>;
-export type RelayFrame = WelcomeFrame | AckFrame | NackFrame | CommandFrame | PhoneUnpairedFrame;
+/**
+ * A caregiver asked for live view (phone-hub.md §7): the session, the phone's sealed request
+ * unopened, when the session ends, and the token the sender page signs in to signaling with.
+ */
+export type LiveViewStartFrame = Readonly<{
+  type: "live_view_start";
+  v: 1;
+  session_id: string;
+  from: string;
+  wrapper: Wrapper;
+  expires_at: string;
+  sender_token: string;
+}>;
+/** A live view session ended, sent either way; `reason` is a lowercase code (§7). */
+export type LiveViewEndFrame = Readonly<{
+  type: "live_view_end";
+  v: 1;
+  session_id: string;
+  reason: string;
+}>;
+export type RelayFrame =
+  | WelcomeFrame
+  | AckFrame
+  | NackFrame
+  | CommandFrame
+  | PhoneUnpairedFrame
+  | LiveViewStartFrame
+  | LiveViewEndFrame;
 
 // Hub → relay.
 export type PhonesFrame = Readonly<{ type: "phones"; v: 1; phones: readonly PhoneEntry[] }>;
@@ -49,7 +76,20 @@ export type CommandResultFrame = Readonly<{
   status: number;
   code: string | null;
 }>;
-export type HubFrame = PhonesFrame | DeliverFrame | CommandResultFrame;
+/** The hub's answer to `live_view_start`: accepted, or refused with a lowercase reason (§7). */
+export type LiveViewAnswerFrame = Readonly<{
+  type: "live_view_answer";
+  v: 1;
+  session_id: string;
+  accepted: boolean;
+  reason: string | null;
+}>;
+export type HubFrame =
+  | PhonesFrame
+  | DeliverFrame
+  | CommandResultFrame
+  | LiveViewAnswerFrame
+  | LiveViewEndFrame;
 
 /**
  * A frame that can't be used. `known` is false for a type this side doesn't take or a newer `v`,
@@ -68,6 +108,8 @@ const ID = /^[A-Za-z0-9._-]{1,64}$/;
 const TYPE = /^[a-z][a-z0-9_]{0,31}$/;
 const CODE = /^[a-z][a-z0-9_]{0,63}$/;
 const SHA256_HEX = /^[0-9a-f]{64}$/;
+/** The sender's signaling token: 32 random bytes in base64url (§7). */
+const SENDER_TOKEN = /^[A-Za-z0-9_-]{43}$/;
 
 type Fields = Readonly<Record<string, unknown>>;
 
@@ -130,6 +172,26 @@ function commandResult(fields: Fields): CommandResultFrame {
   return { type: "command_result", v: 1, msg_id: msgId, status, code };
 }
 
+/** A reason or code: a lowercase word with digits and `_`. */
+export function isCode(value: unknown): value is string {
+  return typeof value === "string" && CODE.test(value);
+}
+
+function code(fields: Fields, name: string): string {
+  const { [name]: value } = fields;
+  if (!isCode(value)) throw new Refused(name);
+  return value;
+}
+
+function liveViewEnd(fields: Fields): LiveViewEndFrame {
+  return {
+    type: "live_view_end",
+    v: 1,
+    session_id: id(fields, "session_id"),
+    reason: code(fields, "reason"),
+  };
+}
+
 const HUB_PARSERS: Readonly<Record<HubFrame["type"], (fields: Fields) => HubFrame>> = {
   phones: (fields) => {
     const { phones } = fields;
@@ -138,6 +200,19 @@ const HUB_PARSERS: Readonly<Record<HubFrame["type"], (fields: Fields) => HubFram
   },
   deliver: (fields) => ({ type: "deliver", v: 1, wrapper: wrapper(fields, true) }),
   command_result: commandResult,
+  live_view_answer: (fields) => {
+    const { accepted, reason } = fields;
+    if (typeof accepted !== "boolean") throw new Refused("accepted");
+    if (accepted ? reason !== null : !isCode(reason)) throw new Refused("reason");
+    return {
+      type: "live_view_answer",
+      v: 1,
+      session_id: id(fields, "session_id"),
+      accepted,
+      reason: accepted ? null : String(reason),
+    };
+  },
+  live_view_end: liveViewEnd,
 };
 
 const RELAY_PARSERS: Readonly<Record<RelayFrame["type"], (fields: Fields) => RelayFrame>> = {
@@ -164,6 +239,21 @@ const RELAY_PARSERS: Readonly<Record<RelayFrame["type"], (fields: Fields) => Rel
     v: 1,
     device_id: id(fields, "device_id"),
   }),
+  live_view_start: (fields) => {
+    const { expires_at: expiresAt, sender_token: token } = fields;
+    if (!isUtcTime(expiresAt)) throw new Refused("expires_at");
+    if (typeof token !== "string" || !SENDER_TOKEN.test(token)) throw new Refused("sender_token");
+    return {
+      type: "live_view_start",
+      v: 1,
+      session_id: id(fields, "session_id"),
+      from: id(fields, "from"),
+      wrapper: wrapper(fields, false),
+      expires_at: expiresAt,
+      sender_token: token,
+    };
+  },
+  live_view_end: liveViewEnd,
 };
 
 function parseWith<T>(
