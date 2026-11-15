@@ -181,6 +181,17 @@ test("a laptop joins: Join a home, a caregiver's approval over the LAN gateway, 
   // The link: the home laptop's page shows what the worker laptop reports.
   await waitFor(() => state.link.linked().get(nodeId)?.state === "connected", 5_000);
   assert.ok((await hub.page.get("/")).page.includes(`Node <code>${nodeId}</code>: connected`));
+  const hubDevices = (await hub.page.get("/devices")).page;
+  const listed = `<span class="dot ok"></span><div class="device-text"><div>Kitchen laptop</div><div class="muted">node <code>${nodeId}</code>, connected`;
+  assert.ok(hubDevices.includes(listed), hubDevices);
+  const laptopDevices = (await laptop.page.get("/devices")).page;
+  assert.ok(
+    laptopDevices.includes(`<div>${address}</div><div class="muted">link: connected</div>`),
+  );
+  assert.ok(
+    !laptopDevices.includes("Dashboard</span>"),
+    "a joined laptop links a dashboard it lacks",
+  );
 
   // A restarted bridge starts the worker again with the same node ID and token.
   await laptop.stopThroughFile();

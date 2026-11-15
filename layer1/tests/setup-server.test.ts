@@ -87,6 +87,58 @@ test("answers on 127.0.0.1 only for its own Host, and a POST only from its page"
   await assert.rejects(again, { message });
 });
 
+test("every page loads the stylesheet the bridge serves under the page's own CSP", async (t) => {
+  const s = await serve(t);
+  const style = await s.send("GET", "/setup.css");
+  const csp = "default-src 'none'; style-src 'self'; form-action 'self'; frame-ancestors 'none'";
+  const sent = [
+    style.statusCode,
+    style.headers["content-type"],
+    style.headers["content-security-policy"],
+  ];
+  assert.deepEqual(sent, [200, "text/css; charset=utf-8", csp]);
+  assert.match(style.page, /^:root \{ --bg: #1c1c1e;/, "not the dashboard's colours");
+  assert.equal((await s.send("GET", "/setup.css", { host: "evil.example:80" })).statusCode, 403);
+  const link = '<link rel="stylesheet" href="/setup.css">';
+  const welcome = (await s.send("GET", "/")).page;
+  assert.ok(
+    welcome.includes(link) && !/<style|style="/.test(welcome),
+    "an inline style or no link",
+  );
+  assert.match(welcome, /<nav>.*<a href="\/" class="on">/s, "no sidebar");
+  assert.ok(!welcome.includes("Dashboard</span>"), "a dashboard link before there is a home");
+  const created = (await s.post(await s.token())).page;
+  const sidebar = `<a href="http://home.debbie.health:${s.dashboard}/">`;
+  assert.ok(
+    created.includes(link) && created.includes(sidebar),
+    "no sidebar link to the dashboard",
+  );
+  assert.ok(created.includes('<section class="panel"><h2>Phones</h2>'), "Phones isn't a panel");
+  assert.ok((await s.send("GET", "/no-such-page")).page.includes(link), "the 404 page is unstyled");
+  for (const target of ["/", "/pairing", "/devices", "/join", "/no-such-page"]) {
+    assert.ok(
+      (await s.send("GET", target)).page.includes(sidebar),
+      `no dashboard link on ${target}`,
+    );
+  }
+});
+
+test("the Devices tab says what is connected, before and after a home exists", async (t) => {
+  const s = await serve(t);
+  const before = await s.send("GET", "/devices");
+  assert.equal(before.statusCode, 200);
+  assert.match(
+    before.page,
+    /<a href="\/"><svg.*<a href="\/devices" class="on">/s,
+    "Devices isn't shown",
+  );
+  assert.match(before.page, /<h2>No devices<\/h2>/);
+  assert.match((await s.send("GET", "/")).page, /<a href="\/" class="on">/, "Set up isn't shown");
+  await s.post(await s.token()); // no network side in this server, so nothing can connect
+  const after = (await s.send("GET", "/devices")).page;
+  assert.match(after, /No device can connect: the network side isn&#39;t running\./);
+});
+
 test("a POST with the token of an earlier bridge run gets a page that says to reload", async (t) => {
   const earlier = await serve(t);
   const token = await earlier.token();

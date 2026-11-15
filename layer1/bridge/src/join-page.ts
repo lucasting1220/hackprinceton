@@ -168,7 +168,7 @@ export function joinBody(view: LaptopView, token: string): { body: Html; reload?
       };
     case "waiting": {
       const body = html`<p>Open the Debbie app on a caregiver's iPhone, tap Add a Laptop and scan this code. It expires at ${view.expiresAt}.</p>
-${trustedHtml(qrSvg(view.qr))}
+<div class="qr">${trustedHtml(qrSvg(view.qr))}</div>
 <p>Home code: <strong>${view.homeCode}</strong>. Check that the home laptop's page at ${view.address} shows the same code.</p>
 <details><summary>The code as text, for the app's Debug paste field</summary><pre>${view.qr}</pre></details>
 ${again("Cancel")}`;

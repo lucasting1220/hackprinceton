@@ -180,7 +180,10 @@ export function pairingBody(
     case "none":
       return { body: html`<p>No code is showing.</p>${again("Pair a phone")}` };
     case "showing": {
-      const svg = qr === undefined ? "" : trustedHtml(qrSvg(JSON.stringify(qr)));
+      const svg =
+        qr === undefined
+          ? ""
+          : html`<div class="qr">${trustedHtml(qrSvg(JSON.stringify(qr)))}</div>`;
       const body = html`<p>Scan this code with the Debbie app on the iPhone. It expires at ${view.expiresAt}.</p>
 ${svg}
 <p>Phones reach this laptop at ${view.addrs.join(", ")}. ${FIREWALL_HINT}</p>
@@ -191,7 +194,7 @@ ${form("/pairing/cancel", token, "Cancel")}`;
       const { name, role, code, pendingId } = view.phone;
       if (view.confirming) return { body: html`<p>Saving ${name}…</p>`, reload };
       const body = html`<p>${name} wants to pair as ${roleWords(role)}.</p>
-<h2>${code}</h2>
+<div class="code"><h2>${code}</h2></div>
 <p>Check that the iPhone shows the same 4 digits, then press Confirm.</p>
 ${form("/pairing/confirm", token, "Confirm", { pending_id: pendingId })}
 ${form("/pairing/cancel", token, "Cancel")}`;

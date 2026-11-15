@@ -9,7 +9,8 @@ import { AlertIntake, type HomeAlerts } from "./alert-intake.ts";
 import type { CreateHomeOptions, Home } from "./home.ts";
 import { createHome, HomeError, HomeExistsError, loadHome } from "./home.ts";
 import { HandoffIntake } from "./handoff-intake.ts";
-import { type Html, html, page } from "./html.ts";
+import { devicesPage } from "./devices-page.ts";
+import { type Html, html, page, STYLE_PATH, withDashboardLink } from "./html.ts";
 import { JoinPage, laptopsSection } from "./join-page.ts";
 import { errorMessage } from "./json-file.ts";
 import type { KeepAwakeStatus } from "./keep-awake.ts";
@@ -22,6 +23,7 @@ import { readJsonBody } from "./network-server.ts";
 import type { PhoneAccess } from "./phone-access.ts";
 import { PairingPage } from "./pairing-page.ts";
 import * as settings from "./settings.ts";
+import { SETUP_CSS } from "./setup-style.ts";
 import path from "node:path";
 
 /** Sent with every response: nothing is loaded from elsewhere, cached, framed or kept open. */
@@ -69,10 +71,11 @@ export interface KeepAwakeSwitch {
   turnOff(): Promise<void>;
 }
 
-/** A page route's answer: a page with its status, or a 303 to `redirect`. */
+/** A page route's answer: a page with its status, a 303 to `redirect`, or the stylesheet. */
 export type PageReply =
   | { readonly status: number; readonly body: string }
   | { readonly redirect: string }
+  | { readonly status: number; readonly css: string }
   | MachineReply;
 
 /** A machine route's answer: JSON, never a page. */
@@ -118,11 +121,16 @@ async function machineBody(request: IncomingMessage): Promise<MachineReply | { b
 const welcomePage = (token: string, laptopCheck: Html) =>
   page(
     "Welcome",
-    html`${laptopCheck}
-<h2>Create or join</h2>
+    html`${panel(laptopCheck)}
+<section class="panel"><h2>A new home</h2>
+<p class="muted">Make this laptop the home laptop, which the other laptops and the caregivers' phones join.</p>
 <form method="post" action="/home">
-<input type="hidden" name="token" value="${token}"><button>Create a home</button></form>
-<p><a href="/join">Join a home</a>: add this laptop to a home that another laptop created.</p>`,
+<input type="hidden" name="token" value="${token}"><button>Create a home</button></form></section>
+<section class="panel"><h2>An existing home</h2>
+<p class="muted">Add this laptop to a home that another laptop created.</p>
+<p class="action"><a href="/join">Join a home</a></p></section>`,
+    undefined,
+    { lead: html`<div class="sub">Set up Debbie on this laptop</div>`, grid: true },
   );
 
 /** The keep-awake notice at the top of the page: on, with Turn off; off for this run; or why not. */
@@ -142,8 +150,25 @@ const RELOAD_PAGE = page(
   html`<p>This page came from an earlier run of the bridge.
 <a href="/">Reload it</a>, then try again.</p>`,
 );
+const STYLE_REPLY = { status: 200, css: SETUP_CSS } as const;
 /** Only a home that the bridge found after it started (its files repaired, say) has none. */
 const NOT_STARTED = "not started; restart the bridge to start it";
+
+/** The dot beside the coordinator's state: green running, orange on its way, red stopped. */
+const COORDINATOR_DOT: Record<CoordinatorStatus["state"], string> = {
+  running: "ok",
+  starting: "wait",
+  restarting: "wait",
+  stopping: "wait",
+  stopped: "off",
+  bad_config: "off",
+  rejected: "off",
+  cannot_start: "off",
+};
+
+/** One of the home page's panels, or nothing for a section that has nothing to show. */
+const panel = (section: Html | "") =>
+  section === "" ? "" : html`<section class="panel">${section}</section>`;
 
 /** The home, its coordinator's state and latest failure (A2), its phones and alerts, and its laptops. */
 function homePage(
@@ -158,14 +183,19 @@ function homePage(
   const stub = status?.program === "stub" ? "STUB (Layer 2's coordinator isn't built yet), " : "";
   const state = status?.state === "restarting" ? "restarting after a crash" : status?.state;
   const why = status?.lastErrorLine ? `; last error: ${status.lastErrorLine}` : "";
+  const dot = status === undefined ? "off" : COORDINATOR_DOT[status.state];
+  const lead = html`<div class="sub">Home ID: <code>${home.homeId}</code></div>
+<div class="facts">
+<p>Remote access: ${remote}</p>
+<p><span class="dot ${dot}"></span>Coordinator: ${stub}${(state ?? NOT_STARTED).replace("_", " ")}${why}</p>
+<p>Dashboard: <a href="${dashboard}">${dashboard}</a> (or <a href="${fallback}">${fallback}</a>)</p>
+</div>`;
   return page(
     "Home created",
-    html`<p>Home ID: <code>${home.homeId}</code></p>
-<p>Remote access: ${remote}</p>
-<p>Coordinator: ${stub}${(state ?? NOT_STARTED).replace("_", " ")}${why}</p>
-<p>Dashboard: <a href="${dashboard}">${dashboard}</a> (or <a href="${fallback}">${fallback}</a>)</p>
-${sections}
-${laptops}`,
+    html`${sections}
+${panel(laptops)}`,
+    undefined,
+    { lead, grid: true },
   );
 }
 
@@ -197,7 +227,7 @@ export async function startSetupServer(options: SetupServerOptions) {
   const handoff = new HandoffIntake({ ready: options.homeAlerts ?? (() => undefined), log });
   const liveViewPage = new LiveViewPage(options.liveView ?? (() => undefined), token);
   const homeSections = () =>
-    html`${pairingPage.phonesSection()}${liveViewPage.section()}${alerts.section()}${handoff.section()}`;
+    html`${panel(pairingPage.phonesSection())}${panel(liveViewPage.section())}${panel(alerts.section())}${panel(handoff.section())}`;
   let launcher: CoordinatorLauncher | undefined;
   let closed = false;
   // Add a laptop (step 3). The role lock (A4): a laptop joining a home can't create one, and the
@@ -286,9 +316,43 @@ export async function startSetupServer(options: SetupServerOptions) {
   }
 
   const showPage = async (): Promise<PageReply> => ({ status: 200, body: await currentPage() });
+
+  /** The Devices tab: the home's phones and laptops, this laptop's link and sensors, or nothing. */
+  async function devicesReply(): Promise<PageReply> {
+    try {
+      const home = await loadHome(stateDir);
+      if (home !== undefined) {
+        return {
+          status: 200,
+          body: devicesPage({ kind: "home", access: options.phoneAccess?.() }),
+        };
+      }
+    } catch (error) {
+      if (!(error instanceof HomeError)) throw error;
+      return { status: 200, body: problemPage(error.message) };
+    }
+    const shown = laptop.busy()
+      ? { kind: "laptop" as const, view: laptop.view() }
+      : { kind: "none" as const };
+    return { status: 200, body: devicesPage(shown) };
+  }
+
+  /** `body` with the sidebar's Dashboard link once a home exists; unchanged if it can't be read. */
+  async function withSidebar(body: string): Promise<string> {
+    try {
+      const home = await loadHome(stateDir);
+      if (home === undefined) return body;
+      return withDashboardLink(body, `http://${settings.HOME_HOST_NAME}:${home.dashboardPort}/`);
+    } catch (error) {
+      if (!(error instanceof HomeError)) throw error;
+      return body;
+    }
+  }
   /** The route table: Create a home leaves the browser at /home, so GET shows the page there too. */
   const routes: PageRoute[] = [
     { method: "GET", path: "/", guard: "view", handle: showPage },
+    { method: "GET", path: STYLE_PATH, guard: "view", handle: async () => STYLE_REPLY },
+    { method: "GET", path: "/devices", guard: "view", handle: devicesReply },
     { method: "GET", path: "/home", guard: "view", handle: showPage },
     { method: "POST", path: "/home", guard: "form", handle: createHomeReply },
     { method: "POST", path: "/keep-awake/off", guard: "form", handle: turnOffKeepAwake },
@@ -332,12 +396,16 @@ export async function startSetupServer(options: SetupServerOptions) {
     let reply: PageReply;
     try {
       reply = await respond(request);
+      if ("body" in reply) reply = { status: reply.status, body: await withSidebar(reply.body) };
     } catch (error) {
       log(`L1 setup: could not answer a request: ${errorMessage(error)}`);
       reply = { status: 500, body: problemPage("The bridge could not answer; its log says why.") };
     }
     if ("redirect" in reply) {
       response.writeHead(303, { ...HEADERS, location: reply.redirect }).end();
+    } else if ("css" in reply) {
+      const css = { ...HEADERS, "content-type": "text/css; charset=utf-8" };
+      response.writeHead(reply.status, css).end(reply.css);
     } else if ("json" in reply) {
       const json = { ...HEADERS, "content-type": "application/json" };
       response.writeHead(reply.status, json).end(JSON.stringify(reply.json));
