@@ -278,3 +278,14 @@ class Reply(Strict):
     events: list[LoggedEvent] | None = None
     truncated: StrictBool = False
     state: ApiState | None = None
+
+
+class JobDescription(Strict):
+    """contracts/job.json: written by Layers 3 and 4, one per job folder."""
+
+    schema_version: Literal[1]
+    name: JobName
+    start_command: Annotated[list[Annotated[str, Field(min_length=1)]], Field(min_length=1)]
+    kind: Literal["always-on", "per-item"]
+    memory_gb: Annotated[float, Field(ge=0, allow_inf_nan=False)]
+    sensor: Literal["camera", "mic"] | None

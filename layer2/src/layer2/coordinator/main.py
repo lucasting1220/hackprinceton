@@ -23,6 +23,7 @@ from layer2.coordinator.plan import JobNeed, LaptopView, Placement, Plan
 from layer2.coordinator.registry import Registry
 from layer2.coordinator.server import create_control_app, create_dashboard_app
 from layer2.files import ConfigError, load_config, wait_for_stop_file
+from layer2.job_files import job_needs
 from layer2.stopping import consume_stop_file, stop_requested, stop_signals
 
 log = logging.getLogger(__name__)
@@ -82,9 +83,8 @@ async def _log_when_ready(servers: list[_Server], config: CoordinatorConfig) -> 
 
 
 def _job_needs() -> list[JobNeed]:
-    """Every job Layers 3 and 4 ask for. Empty until the job description contract exists and
-    the job folders are read."""
-    return []
+    """Every always-on job Layers 3 and 4 provide, read again at each re-plan."""
+    return job_needs()
 
 
 async def _serve(config: CoordinatorConfig) -> int:
