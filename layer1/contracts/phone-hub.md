@@ -375,16 +375,20 @@ The app sends `laptop_approval` to `POST /v1/lan/commands` (or through the relay
 
 ### 6.6 Bridge link
 
-A joined laptop's bridge sends `POST /v1/link` to the hub every 5 seconds with a §3 wrapper of type `link_report`, sealed with the link key under `kid` = its node ID and the associated data `debbie/v1/{home_id}/{node_id}/link_report`:
+A joined laptop's bridge sends `POST /v1/link` to the hub every 5 seconds (every second when its `worker.json` names a camera, so a live view start reaches it within about a second) with a §3 wrapper of type `link_report`, sealed with the link key under `kid` = its node ID and the associated data `debbie/v1/{home_id}/{node_id}/link_report`:
 
 ```text
 link_key = HKDF-SHA256(ikm = SHA-256(join_token) as 32 raw bytes, salt = UTF-8 node_id, info = "debbie/v1/link-key", L = 32)
 ```
 
 - The hub derives the key from the node's `token_sha256` in `accepted-workers.json`, so it treats that hash as a secret: never logged and never shown. A node not in that file gets `403 unknown_node`, and the laptop's page says it is no longer part of the home.
-- The report's plaintext is `{"msg_id","sent_at","type":"link_report","state":"connected","missing":[{"id","reason","required"}]}`: the laptop's setup state (lowercase letters and `_`, at most 32) and what it is missing, as `contracts/check-output.json` lists it.
+- The report's plaintext is `{"msg_id","sent_at","type":"link_report","state":"connected","missing":[{"id","reason","required"}]}`: the laptop's setup state (lowercase letters and `_`, at most 32) and what it is missing, as `contracts/check-output.json` lists it. The camera laptop adds `"live_view_lost":"<session_id>"` (an ID) once, when its sender window for that session couldn't start (no Chrome or Edge) or closed by itself; the hub then ends the session with `lost` (§7.5).
 - The hub checks the wrapper's shape (`400 bad_request`), the type (`400 unsupported_type`), the node, the envelope and the plaintext's `type`, `msg_id` and `sent_at` (`400 bad_envelope`), the 30-second clock rule (`400 stale`), a repeated `msg_id` (`409 duplicate`, in the same memory as phones' IDs) and the report's fields (`400 bad_request`).
-- It answers `200` with a `link_reply` wrapper sealed the same way (associated data `.../link_reply`), whose plaintext is `{"msg_id","sent_at","type":"link_reply","in_reply_to":"<the report's msg_id>","commands":[]}`. `commands` stays empty until step 7 carries live view over it; the hub may then hold the request open.
+- It answers `200` with a `link_reply` wrapper sealed the same way (associated data `.../link_reply`), whose plaintext is `{"msg_id","sent_at","type":"link_reply","in_reply_to":"<the report's msg_id>","commands":[…]}`. `commands` holds what the hub queued for this laptop since its last report, oldest first, each sent once (at most 16); usually it is empty. The laptop runs each command it can parse, in order, and ignores any other.
+- Live view's commands (§7), with exactly these fields:
+  - `{"type":"live_view_open","session_id":"<id>","sender_token":"<43 base64url characters>","signaling_url":"wss://<relay host>/v1/live-view/sessions/<session_id>/signal","expires_at":"2026-11-14T15:25:00Z"}`: serve the sender page at `GET /live-sender` on `127.0.0.1:7470` and open it in Chrome (or Edge on Windows) until `expires_at`. `signaling_url` is on the origin of `relay-credential.json`'s `relay_url` (`ws:` for an `http:` relay). The token is a secret: only this command and the sender page hold it, and nothing logs it.
+  - `{"type":"live_view_close","session_id":"<id>","reason":"stopped"}`: stop serving the page and close the window; `reason` is the session's end reason (§7.2). A close for a session whose open is still queued removes that open instead.
+- Example plaintext: `{"msg_id":"…","sent_at":"2026-11-14T15:20:01Z","type":"link_reply","in_reply_to":"…","commands":[{"type":"live_view_open","session_id":"6f1c2b9e-0c1d-4a55-9a36-9f2b6a4d7e10","sender_token":"q3V0dGVyLXRva2VuLWV4YW1wbGUtMzItYnl0ZXMtLS0","signaling_url":"wss://relay.example.com/v1/live-view/sessions/6f1c2b9e-0c1d-4a55-9a36-9f2b6a4d7e10/signal","expires_at":"2026-11-14T15:25:00Z"}]}`.
 
 ### 6.7 Statuses and error codes
 
@@ -405,12 +409,12 @@ link_key = HKDF-SHA256(ikm = SHA-256(join_token) as 32 raw bytes, salt = UTF-8 n
 | `type`        | Direction           | `kid`   | Plaintext fields besides `msg_id`, `sent_at` and `type`           |
 | ------------- | ------------------- | ------- | ----------------------------------------------------------------- |
 | `join_ticket` | hub → new laptop    | `join`  | `v, home_id, node_id, display_name, join_token, coordinator_port` |
-| `link_report` | worker laptop → hub | node ID | `state, missing`                                                  |
+| `link_report` | worker laptop → hub | node ID | `state, missing`, and `live_view_lost` when a sender window ended |
 | `link_reply`  | hub → worker laptop | node ID | `in_reply_to, commands`                                           |
 
 ## 7. Live view
 
-A caregiver watches the camera laptop's video for up to 5 minutes at a time, when the resident has turned live view on (§4.4's `live_view_setting`). The relay makes a session for each request; the hub checks the request and the resident's consent; the camera laptop's bridge opens the sender page, which streams over WebRTC. The relay passes the WebRTC connection details between the phone and the sender page on one signaling WebSocket per session, and never sees the video. Sessions live in the relay's memory, so a relay restart ends them. Video only: no audio and no talk-back. The paths, states and the session's fields follow the app's CONTRACTS.md §7.
+A caregiver watches the camera laptop's video, and hears the room, for up to 5 minutes at a time, when the resident has turned live view on (§4.4's `live_view_setting`). The relay makes a session for each request; the hub checks the request and the resident's consent; the camera laptop's bridge opens the sender page, which streams over WebRTC. The relay passes the WebRTC connection details between the phone and the sender page on one signaling WebSocket per session, and never sees the video. Sessions live in the relay's memory, so a relay restart ends them. Video plus one-way audio: the sender page sends the capture job's `/mic` feed (`contracts/frame-feed.json`, #142) as the WebRTC audio track, so the caregiver hears the room, and there is no talk-back. The paths, states and the session's fields follow the app's CONTRACTS.md §7.
 
 ### 7.1 Starting a session
 
@@ -460,7 +464,7 @@ The relay and the hub carry live view on the hub's WebSocket (§5), in `layer1/c
 | `live_view_answer` | hub → relay | `session_id, accepted, reason` (`null` when accepted, else a code) |
 | `live_view_end`    | either way  | `session_id, reason`                                               |
 
-The hub opens `wrapper` with the phone `from`'s own key and checks it as §4.4's checks 2 to 6 do (a paired caregiver's phone, its key, its `type`, `msg_id` and `sent_at`, under 30 seconds old, not seen before), then the resident's consent: off is `live_view_off`, which the phone shows as denied. It answers `live_view_answer` within 30 seconds, and sends `live_view_end` with `resident_turned_off` when the resident turns live view off during a session. The sender token is a secret: the hub passes it only to the camera laptop's bridge, over the bridge link, and nothing logs it.
+The hub opens `wrapper` with the phone `from`'s own key and checks it as §4.4's checks 2 to 6 do (a paired caregiver's phone, its key, its `type`, `msg_id` and `sent_at`, under 30 seconds old, not seen before), then the resident's consent: off is `live_view_off`, which the phone shows as denied. It then finds the camera laptop: a laptop whose `sensors` include `camera` in Layer 2's `GET /api/state` (`contracts/api-state.json`) and whose bridge link reported in the last 15 seconds, else `no_camera`. It queues `live_view_open` for that laptop (§6.6) and answers accepted. It queues `live_view_close` when the session ends, sends `live_view_end` with `lost` when that laptop's link goes quiet for 15 seconds or reports `live_view_lost`, and turns the resident's consent off when the relay ends a session with `resident_turned_off`. It answers `live_view_answer` within 30 seconds, and sends `live_view_end` with `resident_turned_off` when the resident turns live view off during a session. The sender token is a secret: the hub passes it only to the camera laptop's bridge, over the bridge link, and nothing logs it.
 
 ### 7.6 Statuses and error codes
 

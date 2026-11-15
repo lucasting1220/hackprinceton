@@ -49,7 +49,7 @@ Layer 1 builds no scheduler, cluster heartbeat, care engine or second dashboard,
 | Caregiver identity | For the demo, the device credential a phone receives when it pairs. The hub vouches for each phone to the relay. Caregiver accounts with a sign-in come after the hackathon |
 | Encryption | Messages between the hub and phones are end-to-end encrypted with keys exchanged during pairing (see "Phone ↔ hub messages"). The relay sees only routing data: IDs, roles, times, sizes, which phones belong to a home, and when a live view starts |
 | Push | The relay sends pushes straight to Apple's push service (APNs) with the team's APNs key. The push carries the encrypted alert, and the app's notification extension decrypts it on the phone, so the notification says what happened |
-| Live video | In the demo. Layer 1 builds the sender: a browser window on the camera laptop that uses the browser's own WebRTC and gets its frames from Layer 3's capture job (ask T5). Video only, no audio. Each session lasts up to 5 minutes, and the caregiver can start another at once |
+| Live video | In the demo. Layer 1 builds the sender: a browser window on the camera laptop that uses the browser's own WebRTC and gets its frames from Layer 3's capture job (ask T5). Video plus one-way audio: the caregiver hears the room through the capture job's `/mic` feed (#142), and there is no talk-back. Each session lasts up to 5 minutes, and the caregiver can start another at once |
 | Live-view consent | The resident consents once during setup; after that a caregiver can open a live view at any time. The resident can still turn it off: on the coordinator's setup page, on the camera laptop's live notice, or in resident mode. The camera laptop shows a full-screen notice while someone is watching |
 | iPhone app | Layer 1 owns the Xcode project, `debbie-ios`, developed in its own repository; a copy for the team is in `layer1/debbie-ios/`. Layer 1 builds every screen; Layer 4 supplies the data for the care screens (ask F4). One app, with a caregiver role and a resident mode |
 | Watch data | In the demo. Resident mode reads heart rate, last night's sleep (total, bedtime, wake time and interruptions) and steps so far today from HealthKit (synced from the Watch) and sends them to Layer 3 over home Wi-Fi. HealthKit can't be read while the phone is locked, so readings arrive in bursts after an unlock. The app sends everything since its last check, and the resident screen has a "Sync now" button |
@@ -57,6 +57,7 @@ Layer 1 builds no scheduler, cluster heartbeat, care engine or second dashboard,
 | Component list | Layer 1 keeps one list of what each laptop role needs, including Python, Ollama and its models, and llama.cpp. For the demo, laptops are set up by hand from it |
 | Languages | Node/TypeScript for the laptop bridge and the relay, Swift for the app |
 | Accounts | The team has a paid Apple Developer account, a Vultr account, one iPhone and an Apple Watch |
+| Live-view audio | One-way audio, decided by the owner on 2026-11-15: the sender page sends the capture job's `/mic` sound as the WebRTC audio track, so the caregiver hears the room, and the notice says so (**Your caregiver can see and hear this room**). There is no talk-back: the laptop never plays the caregiver's sound |
 
 ## Asks
 
@@ -340,12 +341,12 @@ Not built yet.
 1. The caregiver taps **Live view**. The app sends a live-view request encrypted with its own key (a request ID, the time and a fresh viewer client ID) and gets a session ID back at once.
 2. The relay checks that this phone is a caregiver for the home. It creates the session, makes TURN credentials that last 5 minutes, and sends "start live view" to the hub with the session ID, the TURN and STUN addresses with those credentials, and the phone's encrypted request, unopened.
 3. The hub connector opens the request, which must decrypt with a paired caregiver's key, be under 30 seconds old and not have been seen before. Then it checks the resident's consent. If the resident has not consented, or has turned live view off, it replies "denied" and the app says so. If it's on, it tells the camera laptop's bridge, over the bridge link, to open the sender and which viewer client ID it may answer.
-4. The sender is one Chrome or Edge window that the bridge starts with its own profile, in kiosk mode (Edge on Windows, where every laptop has it). The window is the full-screen **Live: your caregiver is watching** notice, with a **Turn off live view** button, and it holds the canvas being streamed, shown as a preview. It reads frames from Layer 3's frame feed at `ws://127.0.0.1:7460/live`, as `contracts/frame-feed.json` gives (ask T5), draws them on the canvas, and streams the canvas with the browser's own WebRTC, exchanging connection details with the phone through the relay's signaling WebSocket for that session. Nothing may cover this window, because Chrome stops streaming a hidden canvas.
+4. The sender is one Chrome or Edge window that the bridge starts with its own profile, in kiosk mode (Edge on Windows, where every laptop has it). The window is the full-screen **Live: your caregiver is watching** notice, with the line **Your caregiver can see and hear this room**, the time left and a **Turn off live view** button, and it holds the canvas being streamed, shown as a preview. It reads frames from Layer 3's frame feed at `ws://127.0.0.1:7460/live`, as `contracts/frame-feed.json` gives (ask T5), draws them on the canvas, plays the room sound from the capture job's `ws://127.0.0.1:7460/mic` (16 kHz mono, #142) into a WebRTC audio track, and streams the canvas and that track with the browser's own WebRTC, exchanging connection details with the phone through the relay's signaling WebSocket for that session. Nothing may cover this window, because Chrome stops streaming a hidden canvas.
 5. When the sender is connected to signaling, the hub replies "ready", and the phone joins the same session's signaling with its session ID and receives the TURN and STUN addresses. Video goes straight from laptop to phone when the networks allow, and otherwise through the TURN server, encrypted either way.
 6. The session ends after 5 minutes, when the caregiver taps **Stop**, or when the resident turns live view off. The bridge closes the sender window's process at once. **Keep watching** starts a new session.
 
 Notes:
-- Video only: no room audio and no talk-back.
+- Video plus one-way audio: the caregiver hears the room through the capture job's `/mic` feed (#142), and there is no talk-back.
 - The coordinator laptop never encodes video.
 - The sender is a browser window because browsers have WebRTC built in on both Mac and Windows, with nothing to install. The frame feed is a WebSocket rather than an image URL so the browser can stream the canvas without cross-origin errors.
 - The app's viewer uses Google's WebRTC library built for iOS. Google no longer publishes iOS builds, so the app uses a maintained community build. It talks to the relay's signaling WebSocket, so phones hold no server keys.
@@ -448,7 +449,7 @@ Kept from the first draft, but not built tonight:
 - Starting before login, running with the lid closed, battery health, temperature (Lucas would add it to status), and control of OS updates.
 - A one-laptop home, where the coordinator also runs a worker, and an 8 GB profile with no language model (the concept's Tier A). Both need Lucas's agreement.
 - Watch live mode (a short workout session for readings every few seconds) and Apple's fall-detection entitlement.
-- Live-view audio or talk-back, with the audio-consent notice the concept calls for.
+- Live-view talk-back.
 
 ## Questions for Lucas (answered Nov 14)
 

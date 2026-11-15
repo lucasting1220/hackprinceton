@@ -11,6 +11,7 @@ import { errorMessage } from "./json-file.ts";
 import { LanGateway, type OpenedRequest } from "./lan-gateway.ts";
 import { LinkHub } from "./link.ts";
 import type { LiveViewConsent } from "./live-view-consent.ts";
+import { cameraLaptopsFrom, LiveViewHub } from "./live-view-hub.ts";
 import { lanAddresses, type NetworkSide, startNetworkSide } from "./network-server.ts";
 import type { MessageSource } from "./outbox.ts";
 import { Pairing } from "./pairing.ts";
@@ -32,6 +33,8 @@ export interface PhoneAccessOptions {
   readonly relayUrl?: string;
   /** The resident's live view consent, which the phone's `live_view_setting` changes (step 7). */
   readonly liveView?: LiveViewConsent;
+  /** Sends the relay live_view_end when the hub ends a session: the relay link's liveViewEnd. */
+  readonly endLiveView?: (sessionId: string, reason: string) => void;
 }
 
 /** What the pairing page reads: the parts while the network side runs, or why it doesn't. */
@@ -48,7 +51,12 @@ export type PhoneAccessState =
   | Readonly<{ on: false; reason: string; retryable: boolean }>;
 
 /** What the relay link uses: the phone list, and the gateway that answers relayed commands. */
-export type RelayParts = Readonly<{ phones: PhoneRegistry; gateway: LanGateway }>;
+export type RelayParts = Readonly<{
+  phones: PhoneRegistry;
+  gateway: LanGateway;
+  /** The hub's side of live view, when the home has its consent setting (step 7). */
+  liveView: LiveViewHub | undefined;
+}>;
 
 /** The setup page's words for a port in use (the plan's "Failures and what the person sees"). */
 const portInUse = (port: number) =>
@@ -141,6 +149,7 @@ export class PhoneAccess {
     this.#closed = true;
     const side = this.#side;
     this.#side = undefined;
+    this.#forRelay?.liveView?.close();
     if (side !== undefined) await side.close();
   }
 
@@ -161,8 +170,21 @@ export class PhoneAccess {
       ...(outbox === undefined ? {} : { outbox }),
       ...(handoff === undefined ? {} : { handoff }),
     });
-    this.#forRelay = { phones, gateway };
     const link = new LinkHub({ home: this.#home, seen: gateway, log: this.#log });
+    this.#forRelay?.liveView?.close();
+    const hub =
+      liveView === undefined
+        ? undefined
+        : new LiveViewHub({
+            open: (wrapper) => gateway.openPhoneRequest(wrapper),
+            consent: liveView,
+            link,
+            cameraLaptops: () => cameraLaptopsFrom(this.#home.dashboardPort),
+            relayUrl: this.#options.relayUrl ?? "",
+            endToRelay: (sessionId, reason) => this.#options.endLiveView?.(sessionId, reason),
+            log: this.#log,
+          });
+    this.#forRelay = { phones, gateway, liveView: hub };
     const pair = {
       method: "POST",
       path: "/v1/pair",
