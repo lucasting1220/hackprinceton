@@ -344,9 +344,11 @@ def test_the_sidebar_links_back_to_layer_1s_setup_page(registry: Registry[WebSoc
         return text
 
     linked = page(contract("coordinator.json")["bridge_url"])
-    assert '<a href="http://127.0.0.1:7470/" id="nav-setup">Set up</a>' in linked
-    assert "__SETUP_LINK__" not in linked
+    assert '<a href="http://127.0.0.1:7470/" id="nav-setup" data-page="setup">' in linked
+    assert '<a href="http://127.0.0.1:7470/devices" id="nav-devices" data-page="setup">' in linked
+    assert "__SIDEBAR_HOME__" not in linked
     assert '<a href="http://localhost:7470/"' in page("http://user:pw@localhost:7470/x?y#z")
     for refused in [None, "javascript:alert(1)", "http://evil.example:7470", "http://127.0.0.1:x"]:
         shown = page(refused)
-        assert 'id="nav-setup"' not in shown and "__SETUP_LINK__" not in shown
+        assert 'id="nav-setup"' not in shown and 'id="nav-devices"' not in shown
+        assert 'id="nav-overview"' in shown and "__SIDEBAR_HOME__" not in shown
