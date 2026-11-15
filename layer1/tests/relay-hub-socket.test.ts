@@ -156,6 +156,20 @@ describe("relay hub socket: frames", () => {
     assert.deepEqual((page.body as { messages: unknown[] }).messages, [wrapper]);
   });
 
+  test("frames sent successfully are not logged as failures", async (t) => {
+    const relay = await startHubRelay(t, [new TestPhone()]);
+    const hub = await signedIn(relay);
+    const wrapper = alertFor(relay);
+    hub.send({ type: "deliver", v: 1, wrapper });
+    assert.deepEqual(await hub.next(), { type: "ack", v: 1, msg_id: wrapper.msg_id });
+    await delay(50);
+    assert.deepEqual(
+      relay.logs.filter((line) => line.includes("failed")),
+      [],
+      "a send whose callback reports no error is a success",
+    );
+  });
+
   test("a bad wrapper, a kid that breaks the rule and an oversized one are refused", async (t) => {
     const phone = new TestPhone();
     const relay = await startHubRelay(t, [phone]);

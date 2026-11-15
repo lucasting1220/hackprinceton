@@ -116,8 +116,9 @@ export function createHubSocket(options: HubSocketOptions): HubSocket {
 
   const send = (connection: Connection, frame: RelayFrame): void => {
     if (connection.ws.readyState !== WebSocket.OPEN) return;
-    connection.ws.send(encodeFrame(frame), (error) => {
-      if (error !== undefined) {
+    // ws calls back with null, not undefined, when the frame was sent.
+    connection.ws.send(encodeFrame(frame), (error?: Error | null) => {
+      if (error !== undefined && error !== null) {
         log(
           `L1 relay: a ${frame.type} frame to home ${connection.homeId} failed: ${errorClass(error)}`,
         );
