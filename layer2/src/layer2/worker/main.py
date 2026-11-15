@@ -37,7 +37,7 @@ async def _work(config_path: Path, config: WorkerConfig, token: str) -> int:
     stop = asyncio.Event()
     report = status_writer(Path(config.status_file), config.node_id)
     relay = Relay()
-    gateway = Gateway(relay)
+    gateway = Gateway(relay, config.ollama_url)
     await gateway.start()
     env = {"LAYER2_NODE_ID": config.node_id, **gateway.env()}
     runner = JobRunner(Path(config.state_dir) / "jobs", env)

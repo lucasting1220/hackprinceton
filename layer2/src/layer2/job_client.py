@@ -7,17 +7,28 @@ started. Plain blocking Python with no dependencies beyond the standard library.
     layer2.log_event({"kind": "fall", "confidence": 0.93})
     recent = layer2.read_log(since=datetime.now(UTC) - timedelta(minutes=10))
 
-So far: the event log. ask(), fan_out(), feed(), to_phone(), on_request() and status() come
+    answer = layer2.ask("Rewrite this alert: ...", quality="quick")
+
+So far: the event log and ask(). fan_out(), feed(), to_phone(), on_request() and status() come
 with later build steps.
 """
 
 import json
 import os
 import socket
+from dataclasses import dataclass
 from datetime import date, datetime
-from typing import Any
+from typing import Any, Literal
 
 _TIMEOUT_S = 15.0
+_ASK_TIMEOUT_S = 135.0  # longer than the worker's own limit on a model answer
+
+
+@dataclass(frozen=True)
+class Answer:
+    text: str
+    quality: Literal["quick", "deep"]
+    """The quality that actually answered: `deep` may be answered by `quick`."""
 
 
 class Layer2Error(Exception):
@@ -61,10 +72,16 @@ class Layer2:
         events: list[dict[str, Any]] = self._call(request).get("events", [])
         return events
 
-    def _call(self, request: dict[str, Any]) -> dict[str, Any]:
+    def ask(self, prompt: str, quality: Literal["quick", "deep"] = "quick") -> Answer:
+        """One language model request. Can take many seconds: never call it before sending
+        an alert."""
+        reply = self._call({"type": "ask", "prompt": prompt, "quality": quality}, _ASK_TIMEOUT_S)
+        return Answer(text=str(reply["text"]), quality=reply["quality"])
+
+    def _call(self, request: dict[str, Any], timeout: float = _TIMEOUT_S) -> dict[str, Any]:
         line = json.dumps({**request, "token": self._token}).encode("utf-8") + b"\n"
         try:
-            with socket.create_connection(self._address, timeout=_TIMEOUT_S) as connection:
+            with socket.create_connection(self._address, timeout=timeout) as connection:
                 connection.sendall(line)
                 with connection.makefile("rb") as replies:
                     answer = replies.readline()
