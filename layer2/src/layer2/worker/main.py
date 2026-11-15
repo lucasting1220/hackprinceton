@@ -12,10 +12,8 @@ import logging
 import sys
 from pathlib import Path
 
-from layer2 import settings
 from layer2.contracts import WorkerConfig
 from layer2.files import ConfigError, load_config, wait_for_stop_file
-from layer2.gemini import take_access
 from layer2.job_files import JobCatalog
 from layer2.stopping import consume_stop_file, stop_requested, stop_signals
 from layer2.tokens import TokenError, read_token_file
@@ -50,12 +48,7 @@ async def _work(config_path: Path, config: WorkerConfig, token: str) -> int:
     stop = asyncio.Event()
     report = status_writer(Path(config.status_file), config.node_id)
     relay = Relay()
-    access = take_access()
-    if access is None:
-        log.info("L2 worker: no %s set; model requests go to Ollama", settings.GEMINI_KEY_VARIABLE)
-    else:
-        log.info("L2 worker: model requests go to Gemini, with Ollama behind it")
-    gateway = Gateway(relay, config.ollama_url, access)
+    gateway = Gateway(relay, config.ollama_url)
     await gateway.start()
     env = job_env(config_path, config, gateway.env())
     runner = JobRunner(Path(config.state_dir) / "jobs", env)

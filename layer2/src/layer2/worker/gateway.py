@@ -16,8 +16,6 @@ LAYER2_GATEWAY_TOKEN. Requests:
     {"token": "...", "type": "pass_on", "kind": "watch-readings", "body": {...}}
         (to the job that takes the kind; fails when no job takes it)
     {"token": "...", "type": "ask", "prompt": "...", "quality": "quick" | "deep"}
-        (answered by Gemini at that quality when the worker has a Gemini API key; otherwise,
-        or when Gemini fails, by Ollama's quick model, and the answer's quality says quick)
 
 Answers: {"ok": true, "truncated": false}, with "events": [...] for a read (truncated is true
 when the oldest were left out), or {"ok": false, "error": "..."}. The relay forwards each
@@ -39,7 +37,7 @@ from pydantic import ValidationError
 from websockets.asyncio.client import ClientConnection
 from websockets.exceptions import ConnectionClosed
 
-from layer2 import gemini, settings
+from layer2 import settings
 from layer2.contracts import (
     Deliver,
     InboundKind,
@@ -51,7 +49,6 @@ from layer2.contracts import (
     StateRead,
     Subscribe,
 )
-from layer2.gemini import GeminiAccess
 from layer2.ollama import ModelError, generate
 
 log = logging.getLogger(__name__)
@@ -157,12 +154,9 @@ _REQUESTS: dict[
 
 
 class Gateway:
-    def __init__(
-        self, relay: Relay, ollama_url: str | None = None, gemini: GeminiAccess | None = None
-    ) -> None:
+    def __init__(self, relay: Relay, ollama_url: str | None = None) -> None:
         self._relay = relay
         self._ollama_url = ollama_url
-        self._gemini = gemini
         self.token = secrets.token_hex(32)
         self._server: asyncio.Server | None = None
         self.port = 0
@@ -240,18 +234,6 @@ class Gateway:
                 "ok": False,
                 "error": f"a prompt may be at most {settings.ASK_MAX_PROMPT_CHARS} characters",
             }
-        if self._gemini is not None:
-            model = (
-                settings.GEMINI_QUICK_MODEL if quality == "quick" else settings.GEMINI_DEEP_MODEL
-            )
-            try:
-                text = await asyncio.to_thread(gemini.generate, self._gemini, model, prompt)
-            except ModelError as error:
-                if self._ollama_url is None:
-                    return {"ok": False, "error": str(error)}
-                log.warning("L2 worker: %s; asking Ollama instead", error)
-            else:
-                return {"ok": True, "text": text, "quality": quality}
         if self._ollama_url is None:
             return {"ok": False, "error": "this worker has no model service"}
         try:

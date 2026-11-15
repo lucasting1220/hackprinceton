@@ -41,12 +41,6 @@ GATEWAY_REPLY_TIMEOUT_S: Final = 10.0
 QUICK_MODEL: Final = "qwen2.5:7b"  # the team chose it, Nov 15
 ASK_TIMEOUT_S: Final = 120.0
 ASK_MAX_PROMPT_CHARS: Final = 32_000
-# A worker started with this environment variable answers ask() through Gemini, with Ollama
-# behind it when Gemini fails; without it, Ollama alone, as before.
-GEMINI_KEY_VARIABLE: Final = "GEMINI_API_KEY"
-GEMINI_URL: Final = "https://generativelanguage.googleapis.com/v1beta"
-GEMINI_QUICK_MODEL: Final = "gemini-3.5-flash-lite"
-GEMINI_DEEP_MODEL: Final = "gemini-4-hydrogen"
 PLANNER_MODEL: Final = "qwen2.5:7b"  # the team chose it, Nov 15
 PLANNER_TIMEOUT_S: Final = 20.0
 PLAN_MEMORY_HEADROOM_GB: Final = 1.0
