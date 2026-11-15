@@ -139,7 +139,18 @@ describe("the bridge's ports", () => {
   });
 });
 
-describe("the alert Layer 4 sends (no shared contracts/alert.json; the intake's ALERT_FIELDS)", () => {
+describe("contracts/alert.json, the alert Layer 4 sends", () => {
+  test("has exactly the intake's fields, and the intake accepts it as it is", async () => {
+    const contract: unknown = JSON.parse(
+      await readFile(path.join(contractsDir, "alert.json"), "utf8"),
+    );
+    assert.ok(typeof contract === "object" && contract !== null);
+    assert.deepEqual(Object.keys(contract).sort(), [...ALERT_FIELDS].sort());
+    const parsed = parseAlert(contract);
+    assert.ok(parsed.ok, parsed.ok ? "" : parsed.reason);
+    assert.deepEqual(parsed.unknownFields, []);
+  });
+
   test("the stub sends exactly ALERT_FIELDS, with the types the intake accepts", async (t) => {
     const received: unknown[] = [];
     const server = createServer((request, response) => {
