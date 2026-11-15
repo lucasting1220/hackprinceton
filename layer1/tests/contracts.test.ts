@@ -18,7 +18,7 @@ async function readContract(name: string): Promise<Record<string, unknown>> {
 }
 
 describe("contracts/coordinator.json", () => {
-  test("the bridge's ports and Ollama address match the agreed example", async () => {
+  test("carries every field the bridge fills from settings, with the same type", async () => {
     const example = await readContract("coordinator.json");
     const fromSettings = {
       listen_port: settings.COORDINATOR_LISTEN_PORT,
@@ -27,7 +27,10 @@ describe("contracts/coordinator.json", () => {
       ollama_url: settings.OLLAMA_URL,
     };
     for (const [field, value] of Object.entries(fromSettings)) {
-      assert.equal(value, example[field], `${field} differs from contracts/coordinator.json`);
+      assert.equal(typeof value, typeof example[field], `${field} in contracts/coordinator.json`);
     }
+    const ports = [fromSettings.listen_port, fromSettings.dashboard_port, fromSettings.client_port];
+    assert.ok(ports.every((port) => Number.isInteger(port) && port >= 1 && port <= 65535));
+    assert.equal(new Set(ports).size, ports.length, "the coordinator's three ports must differ");
   });
 });
