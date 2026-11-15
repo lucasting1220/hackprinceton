@@ -7,6 +7,7 @@ LAYER2_GATEWAY_TOKEN. Requests:
 
     {"token": "...", "type": "log_append", "event": {...}}
     {"token": "...", "type": "log_read", "since": "<ISO time>"}   or   "day": "YYYY-MM-DD"
+    {"token": "...", "type": "ask", "prompt": "...", "quality": "quick" | "deep"}
 
 Answers: {"ok": true, "truncated": false}, with "events": [...] for a read (truncated is true
 when the oldest were left out), or {"ok": false, "error": "..."}. The relay forwards each
@@ -30,6 +31,7 @@ from websockets.exceptions import ConnectionClosed
 
 from layer2 import settings
 from layer2.contracts import LogAppend, LogRead, Reply
+from layer2.worker.models import ModelError, generate
 
 log = logging.getLogger(__name__)
 
@@ -89,8 +91,9 @@ _REQUESTS: dict[str, type[LogAppend] | type[LogRead]] = {
 
 
 class Gateway:
-    def __init__(self, relay: Relay) -> None:
+    def __init__(self, relay: Relay, ollama_url: str | None = None) -> None:
         self._relay = relay
+        self._ollama_url = ollama_url
         self.token = secrets.token_hex(32)
         self._server: asyncio.Server | None = None
         self.port = 0
@@ -131,8 +134,10 @@ class Gateway:
         token = request.pop("token", None)
         if not isinstance(token, str) or not hmac.compare_digest(token, self.token):
             return {"ok": False, "error": "wrong or missing token"}
+        if request.get("type") == "ask":
+            return await self._ask(request)
         if request.get("type") not in _REQUESTS:
-            return {"ok": False, "error": "type must be log_append or log_read"}
+            return {"ok": False, "error": "type must be log_append, log_read or ask"}
         try:
             reply = await self._relay.ask(request)
         except ValidationError:
@@ -144,3 +149,20 @@ class Gateway:
         return reply.model_dump(
             mode="json", exclude={"type", "schema_version", "id"}, exclude_none=True
         )
+
+    async def _ask(self, request: dict[str, Any]) -> dict[str, Any]:
+        prompt, quality = request.get("prompt"), request.get("quality")
+        if not isinstance(prompt, str) or quality not in ("quick", "deep"):
+            return {"ok": False, "error": "ask needs a prompt and a quality of quick or deep"}
+        if len(prompt) > settings.ASK_MAX_PROMPT_CHARS:
+            return {
+                "ok": False,
+                "error": f"a prompt may be at most {settings.ASK_MAX_PROMPT_CHARS} characters",
+            }
+        if self._ollama_url is None:
+            return {"ok": False, "error": "this worker has no model service"}
+        try:
+            text = await asyncio.to_thread(generate, self._ollama_url, settings.QUICK_MODEL, prompt)
+        except ModelError as error:
+            return {"ok": False, "error": str(error)}
+        return {"ok": True, "text": text, "quality": "quick"}
