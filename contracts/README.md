@@ -72,7 +72,7 @@ Proposed Nov 15 (Layer 2 build step 7's `feed()`; Layer 1's ask T5). How camera 
 - **Same laptop, version 1:** readers run on the laptop holding the camera and mic. Layer 2's plan puts the capture job, the fall model and speech-to-text there. Forwarding to another laptop comes later, inside `layer2.feed()`, without changing Layer 3 or Layer 4.
 - **`/live`:** one binary message per frame, the JPEG only (Layer 1's ask T5, unchanged apart from the path).
 - **`/camera`:** one binary message per frame: 8 bytes, a big-endian signed integer, `captured_at` in microseconds since 1970-01-01 UTC; then the JPEG, 640 by 480, quality 80.
-- **`/mic`:** one binary message per chunk: the same 8-byte `captured_at`, then 0.5 seconds of 16 kHz, one-channel, 16-bit little-endian PCM (16,000 bytes).
+- **`/mic`:** one binary message per chunk: the same 8-byte `captured_at`, then 0.5 seconds of 16 kHz, one-channel, 16-bit little-endian PCM (16,000 bytes). Layer 1's live-view sender page also reads it, for live view's one-way audio; like every path, it serves all its clients.
 - **Timestamps** use the capturing laptop's clock, in UTC (settles CLAUDE.md's undecided item on timestamps for frames and audio). **Audio chunks** are 0.5 seconds (settles the chunk-length item).
 - **Never slow capture down:** frames and chunks are encoded only while a client is connected to that path. A client that falls behind skips to the newest frame or chunk; nothing queues.
 - **Layer 4 reads only through `layer2.feed("camera")` or `layer2.feed("mic")`,** which yields items with `data` (the JPEG or PCM bytes) and `captured_at` (UTC), reconnecting if the capture job restarts. Layer 4 decodes the JPEG.
