@@ -1,6 +1,6 @@
 # Layer 4: Care layer
 
-**Status: draft for team review. Nothing is built.** This replaces the earlier "care agent" draft. Items under "Decided" come from the design interviews of Nov 13 and 14. Items under "Proposed" and "Open questions" are not yet agreed.
+**Status: draft for team review. Being built; `layer4/HANDOFF.md` lists what is on `main`.** This replaces the earlier "care agent" draft. Items under "Decided" come from the design interviews of Nov 13 and 14. Items under "Proposed" and "Open questions" are not yet agreed.
 
 ## Summary
 
@@ -36,6 +36,9 @@ Data moves one way: every piece of fetched data goes to Layer 3, Layer 3 passes 
 | Reaching Layer 1 | Messages between Layer 4 and Layer 1's bridge are carried by Layer 2's coordinator |
 | The iPhone app | Layer 1 builds all of it. Layer 4 only supplies the data for each screen |
 | Language | Python |
+| Fall model | MediaPipe Pose Landmarker (full model, `pose_landmarker_full.task`) finds the body points in each frame; fixed rules in Layer 4 read them for the current activity and for falls. The lite model read a person lying on the floor as upright in webcam tests. The model file is not in the repository; the job's configuration gives its path. Decided Nov 14 |
+| Speech-to-text model | faster-whisper, `base.en`, int8 on the CPU, with its built-in voice detector. Decided Nov 14 |
+| Jobs | One job per sensor, each running its own detector and the rules together, because the rules keep no state and Layer 2 carries no messages between jobs. `fall_model` (`layer4/jobs/fall_model/`, sensor camera) reads `feed("camera")`, runs fall detection, the rules, the alert and the event log; only windows with a fall score are logged. It downloads the pose model on first start and checks its SHA-256. `speech_to_text` (`layer4/jobs/speech_to_text/`, sensor mic) reads `feed("mic")`, joins speech into utterances with faster-whisper's voice detector (an utterance ends after 1 second of silence or at 10 seconds), transcribes each with `base.en` on a second thread so reading never waits, and hands the transcript to the help check, then the rules. Transcripts are never logged or stored. Decided Nov 15 |
 
 ## How data flows
 
@@ -87,6 +90,10 @@ Each rule looks at one signal. The numbers are proposed defaults in a settings f
 | Heart rate | above 130 or below 40 beats per minute | Urgent: "Heart rate of {bpm} recorded at {time} on {date}" |
 | Monitoring check | a camera, mic or detector stopped for more than 30 seconds | Urgent: "Monitoring is degraded: {what stopped}" |
 | Anything else | below its threshold | Event log only |
+
+**Reading the pose** (proposed values, in `settings.py`). A shoulder or hip seen with visibility under 0.5, or a torso shorter than 2% of the frame height, means not in view. Lying down: the torso tilts 60° or more from upright, or looks shorter than half its last upright length (lying toward or away from the camera). Sitting: the hips are within 0.35 torso lengths of the knees, vertically. Otherwise walking; standing counts as walking.
+
+**Falls from the pose** (proposed values, in `settings.py`). A fall is scored once the resident has been lying for 0.5 seconds without a break. The score is the smaller of two marks: how far the hips dropped from standing height, the highest they were while upright in the 3 seconds before lying (full marks at one upright torso length), and how fast they got there, timed from the last upright moment with the hips still within 0.15 torso lengths of standing height (full marks at 1.2 seconds or less, none at 3 seconds or more). Measuring from standing matters because in a real fall the knees often buckle before the torso tips. One fall gives one score; the next needs the resident upright again, because the rules keep no state and would otherwise alert every second. Known limits: a fall that ends slumped sitting on the floor, or out of view behind furniture, is not scored; the help check is the second line.
 
 **Alert lifecycle**
 1. A rule fires. The upper tier writes the event to the log and sends the template alert immediately. This step never waits on a language model.
@@ -169,6 +176,6 @@ Not used: acknowledgments and false-alarm marks. Watch readings go from the app 
 ## Open questions
 
 1. The threshold values, and who signs them off.
-2. Which fall model and which speech-to-text model to use.
+2. Which fall model and which speech-to-text model to use: decided Nov 14, see "Decided".
 3. How the daily report reaches the app; Layer 1 needs to add a call.
 4. Sign-off on the contracts by the Layer 1, 2 and 3 owners.

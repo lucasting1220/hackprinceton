@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "server": "ws://127.0.0.1:7460",
+  "paths": {
+    "/live": {
+      "reader": "Layer 1 live-view sender",
+      "message": "jpeg",
+      "width": 640,
+      "height": 480,
+      "max_per_second": 15
+    },
+    "/camera": {
+      "reader": "Layer 4, through layer2.feed(\"camera\")",
+      "message": "captured_at_us + jpeg",
+      "width": 640,
+      "height": 480,
+      "jpeg_quality": 80,
+      "max_per_second": 15
+    },
+    "/mic": {
+      "reader": "Layer 4, through layer2.feed(\"mic\")",
+      "message": "captured_at_us + pcm_s16le",
+      "sample_rate": 16000,
+      "channels": 1,
+      "chunk_seconds": 0.5
+    }
+  }
+}

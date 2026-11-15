@@ -67,7 +67,7 @@ These are decided (the full list is in `docs/coherence-review.md`). Do not build
 
 **Still undecided: do not build these.** If your next step needs one, stop and tell your human.
 
-1. The items under "Proposed, not yet confirmed" in the Layer 3 doc (timestamps, audio chunk length, retry interval, recognising a repeated reading).
+1. Settled Nov 15, no longer undecided: the items under "Proposed, not yet confirmed" in the Layer 3 doc (timestamps, audio chunk length, retry interval, recognising a repeated reading) are decided as proposed. Build with them.
 2. The rule threshold values in the Layer 4 doc (use the proposed values only as named settings, never hardcoded).
 3. Sound detection: a stretch goal. Build it last and let nothing depend on it.
 
@@ -97,10 +97,8 @@ These are required, not optional. If a skill fails or is unavailable, stop and t
 |---|---|---|
 | Start of every session | `/guard`, giving it your layer's directory (for example `layer2/`) | Blocks edits outside your directory and warns before destructive commands |
 | Resuming earlier work | `/context-restore` | Brings back what the last session saved |
-| Before a build step that adds a new module, a new program, or a use of a contract | The engineering plan review: write your plan to a file, then tell Claude "follow `~/.claude/skills/gstack/plan-eng-review/SKILL.md` on this plan" | Reviews architecture, failure modes and tests before code exists. Do not use `/autoplan`: its four phases take over an hour per step |
 | Any bug, failing test, error or crash | Describe the failure to Claude; gstack's router handles it | Finds the root cause first, then writes a failing test, then fixes. Never patch the symptom |
 | Before every commit | `/verify` | Runs your layer's checks (section 5) until they pass |
-| Before opening a pull request | `/review` | Reviews your branch's diff. Fix every finding, or say in the pull request why not |
 | Before a pull request that touches tokens, keys, pairing, encryption, credentials or the relay server | `/cso` | Security review. Layer 1 needs this on most pull requests |
 | Testing a page or local API you built (the setup page, the dashboard, `/api/state`) | `/qa`, or `/qa-only` to report without fixing | Drives the real page and finds bugs |
 | Any web browsing | `/browse` | |
@@ -119,10 +117,9 @@ A build step is done only when **every** item below is true. "Mostly done" is no
    - **Python layers**, from the layer's directory: `uv run ruff format --check .`, `uv run ruff check .`, `uv run mypy .`, `uv run pytest`
    - **Layer 1**: the format, lint, type-check (`tsc --noEmit` with `"strict": true`) and test commands listed in `layer1/README.md`
 4. `/verify` passed after your last change.
-5. `/review` was run on the final diff and its findings are fixed or answered.
-6. `/cso` was run, if section 4 requires it.
-7. You merged the latest `main` into your branch and the checks still pass after that merge.
-8. The pull request description is complete (section 6).
+5. `/cso` was run, if section 4 requires it.
+6. You merged the latest `main` into your branch once, before opening the pull request, and the checks still pass after that merge. CI catches anything `main` changes later.
+7. The pull request description is complete (section 6).
 
 **Never make checks pass by weakening them.** None of these may appear in a pull request unless it is listed on its own line in the description, with the reason, and Lucas approves it: deleting or skipping a test, `pytest.mark.skip` or `xfail`, `# noqa`, `# type: ignore`, `@ts-ignore`, `@ts-expect-error`, `eslint-disable`, the type `any` in TypeScript, `Any` in Python, loosening `ruff.toml`, a `mypy` setting or `tsconfig.json`, raising a timeout or threshold, or catching a broad exception to hide a failure.
 
@@ -152,13 +149,13 @@ A build step is done only when **every** item below is true. "Mostly done" is no
 - commit merge-conflict markers (`<<<<<<<`, `=======`, `>>>>>>>`)
 
 **Pull requests**
-- One pull request per branch, one build step per pull request, under 400 changed lines. If it grows past that, split it.
+- One pull request per branch. Related build steps may share one pull request, with no size limit.
 - Title: the same format as a commit, for example `L2: route quick requests to Ollama`.
 - Description, in this order:
   1. **What changed**, in two or three sentences.
   2. **Contract changes:** "none", or exactly which shared file and field.
   3. **How it was tested:** each command, the machine and operating system, and the actual result as PASS, FAIL, BLOCKED or NOT RUN. A test that was not run is NOT RUN, never PASS.
-  4. **Skills run:** `/verify`, `/review`, and `/cso` or `/qa` where required, with a one-line result each.
+  4. **Skills run:** `/verify`, and `/cso` or `/qa` where required, with a one-line result each.
   5. **Weakened checks:** "none", or each one on its own line with the reason (section 5).
   6. **Stubs:** anything standing in for another layer.
 - **Merging:** no human approval is needed. As soon as the definition of done (section 5) is met and the pull request is open, Claude merges it with a merge commit (`gh pr merge <number> --merge --delete-branch`) without asking. This includes pull requests that change shared files.
@@ -166,8 +163,8 @@ A build step is done only when **every** item below is true. "Mostly done" is no
 ## 7. Preventing merge conflicts
 
 1. **Stay in your directory.** Only your layer's directory and your layer doc. `/guard` enforces this; do not unfreeze it to touch anything else.
-2. **Keep branches short.** One build step per branch, merged within a few hours. Open and merge the pull request as soon as the step is done; do not keep adding to an open pull request.
-3. **Sync before you open a pull request.** Merge `origin/main` into your branch, rerun the checks, then open it. If `main` moves while it waits, merge again.
+2. **Keep branches short.** Merge within a few hours. Open and merge the pull request as soon as the work is done; do not keep adding to an open pull request.
+3. **Sync once before you open a pull request.** Merge `origin/main` into your branch, rerun the checks, then open it. Do not merge `main` again while it waits; CI runs on the merge.
 4. **Shared files go in their own pull request, first.** A change to `contracts/`, `CLAUDE.md`, `ruff.toml`, `.gitignore`, `.gitattributes`, `.github/` or `.claude/` is never mixed into a layer pull request. It merges first; then each layer merges `main` and adapts.
 5. **No drive-by edits.** Do not reformat, re-sort imports, rename, move or re-wrap anything your step does not need to change. Run the formatter only on your own directory (`uv run ruff format .` from your layer's directory, never the repo root).
 6. **Lockfiles belong to one layer each.** `pyproject.toml` and `uv.lock` live in your layer's directory, never at the repo root. Never edit a lockfile by hand. If one conflicts, take `main`'s version and regenerate it with `uv lock`.
@@ -184,7 +181,7 @@ A build step is done only when **every** item below is true. "Mostly done" is no
 |---|---|---|
 | `layer1/`, `layer2/`, `layer3/`, `layer4/` | that layer | that layer only |
 | `docs/layerN-*.md` | that layer | that layer only |
-| `contracts/` | all layers jointly | only through a pull request that every affected layer's owner approves |
+| `contracts/` | all layers jointly | any layer, through its own `ALL:` pull request; no other owner's approval is needed |
 | `CLAUDE.md`, `docs/coherence-review.md`, `ruff.toml`, `.gitignore`, `.gitattributes`, `.github/`, `.claude/` | Lucas | Lucas, by pull request |
 
 Never create, edit or delete a file in another layer's directory, even to fix an obvious bug. Tell your human, who tells that layer's owner.
@@ -194,7 +191,7 @@ Never create, edit or delete a file in another layer's directory, even to fix an
 A contract is anything two layers both depend on: a config file format, a message, an HTTP call, a port, a job name.
 
 - Every cross-layer contract has one example file in `contracts/`, with a `schema_version`. That file is the truth; code follows it.
-- Do not invent a field, rename one, or change its meaning in code. If a contract looks wrong or incomplete, stop, and write the problem and your proposed change in the pull request description or tell your human. Change the code only after the contract file has changed on `main`.
+- Do not invent a field, rename one, or change its meaning in code. If a contract looks wrong or incomplete, fix the contract file in its own `ALL:` pull request and merge it, then change the code. No other owner's approval is needed; tell your human which layers the change affects so their owners hear about it.
 - When another layer's code does not exist yet, write a stub inside your own directory under `stubs/`, named for what it replaces (for example `layer4/stubs/fake_layer2_client.py`). A stub must follow the contract file exactly, must say it is a stub in its first line and in its log output, and never counts as an integration test.
 - Every layer has a test that loads each contract example file it uses and checks its code reads and writes exactly those fields.
 - Contracts internal to Layer 1 (phone to hub) stay in `layer1/contracts/`.
@@ -267,9 +264,9 @@ Layer 4 has no port of its own: it talks to the coordinator through the worker p
 
 1. Read this file, then your layer's doc. Build only your layer, in the build order your doc gives, and nothing your doc lists as out of scope.
 2. Run `/guard` on your layer's directory, then start a new branch from `main` (section 6).
-3. Before writing code, say in a few lines what you are about to build and which contract files it touches. Run the engineering plan review first if section 4 requires it.
+3. Before writing code, say in a few lines what you are about to build and which contract files it touches.
 4. If the doc is unclear or two docs disagree, ask your human. Do not guess and do not pick a side.
-5. Build one step. Meet every item in the definition of done (section 5). Open the pull request.
+5. Build the step, or a few related steps. Meet every item in the definition of done (section 5). Open the pull request.
 6. At the end of a session, tell your human: what was built, what was tested and the result, what is stubbed, what is waiting for review, and anything another layer's owner needs to know. Run `/context-save` if work is unfinished.
 
 ## 12. Repository setup still to do

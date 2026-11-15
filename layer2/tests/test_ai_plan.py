@@ -122,8 +122,10 @@ def test_the_ai_plan_is_used_when_it_passes(
 ) -> None:
     url, handler = planner
     handler.reply = answer(GOOD).encode()
-    plan, made_by = choose_plan(url, NEEDS, [A, B], {"a", "b"}, Plan(), tmp_path / "planner.log")
-    assert (plan.jobs, made_by) == (GOOD, "ai")
+    plan, made_by, why = choose_plan(
+        url, NEEDS, [A, B], {"a", "b"}, Plan(), tmp_path / "planner.log"
+    )
+    assert (plan.jobs, made_by, why) == (GOOD, "ai", "camera jobs on a")
     [request] = handler.seen
     assert (request["model"], request["format"], request["stream"]) == (
         settings.PLANNER_MODEL,
@@ -138,18 +140,26 @@ def test_a_bad_or_late_ai_plan_falls_back_to_the_rules(
 ) -> None:
     url, handler = planner
     handler.reply = answer({**GOOD, "fall_model": "b"}).encode()
-    plan, made_by = choose_plan(url, NEEDS, [A, B], {"a", "b"}, Plan(), tmp_path / "planner.log")
+    plan, made_by, why = choose_plan(
+        url, NEEDS, [A, B], {"a", "b"}, Plan(), tmp_path / "planner.log"
+    )
     assert made_by == "rules" and plan.jobs["fall_model"] == "a"
+    assert "needs the camera" in why
     assert "needs the camera" in (tmp_path / "planner.log").read_text("utf-8")
     monkeypatch.setattr(settings, "PLANNER_TIMEOUT_S", 0.2)
     handler.reply = answer(GOOD).encode()
     handler.delay = 1.0
     started = time.monotonic()
-    _, made_by = choose_plan(url, NEEDS, [A, B], {"a", "b"}, Plan())
+    _, made_by, why = choose_plan(url, NEEDS, [A, B], {"a", "b"}, Plan())
     assert made_by == "rules" and time.monotonic() - started < 1.0
+    assert "did not answer" in why
 
 
 def test_no_ollama_or_nothing_to_plan_uses_the_rules_without_asking() -> None:
     down = f"http://127.0.0.1:{closed_port()}"
     assert choose_plan(down, NEEDS, [A, B], {"a", "b"}, Plan())[1] == "rules"
-    assert choose_plan(down, [], [A, B], {"a", "b"}, Plan()) == (Plan(), "rules")
+    assert choose_plan(down, [], [A, B], {"a", "b"}, Plan()) == (
+        Plan(),
+        "rules",
+        "nothing to place yet",
+    )

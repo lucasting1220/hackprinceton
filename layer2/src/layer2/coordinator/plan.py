@@ -19,6 +19,7 @@ import asyncio
 import time
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from typing import Literal
 
 from layer2 import settings
@@ -92,8 +93,19 @@ def _can_hold(laptop: LaptopView | None, need: JobNeed) -> bool:
     return laptop is None or need.sensor is None or need.sensor in laptop.sensors
 
 
-Planner = Callable[[list[JobNeed], list[LaptopView], set[str], Plan], Plan]
-"""Makes a plan; may block for a long time (the AI planner), so it runs in a thread."""
+@dataclass(frozen=True)
+class Decision:
+    """The latest re-plan, for the dashboard: who made it, why, when, and what moved."""
+
+    made_by: Literal["ai", "rules"]
+    why: str
+    decided_at: datetime
+    moved: tuple[str, ...]
+
+
+Planner = Callable[[list[JobNeed], list[LaptopView], set[str], Plan], tuple[Plan, str, str]]
+"""Makes a plan and says who made it and why; may block for a long time (the AI planner), so
+it runs in a thread."""
 Snapshot = Callable[[], tuple[list[LaptopView], set[str]]]
 """The connected laptops and every known laptop, read when a plan starts."""
 
@@ -116,12 +128,25 @@ class Placement:
         self._monotonic = monotonic
         self._planner = planner
         self.plan = Plan()
+        self.decision: Decision | None = None
         self._sent: dict[tuple[str, str, str], float] = {}
         self._planning = asyncio.Lock()
         self._tasks: set[asyncio.Task[None]] = set()
 
     def replan(self, connected: list[LaptopView], known: set[str]) -> None:
-        self.plan = rule_plan(self._needs(), connected, known, self.plan)
+        self._use(rule_plan(self._needs(), connected, known, self.plan), "rules", "rule-based plan")
+
+    def _use(self, plan: Plan, made_by: str, why: str) -> None:
+        moved = tuple(
+            sorted(job for job, node in plan.jobs.items() if self.plan.jobs.get(job, node) != node)
+        )
+        self.decision = Decision(
+            made_by="ai" if made_by == "ai" else "rules",
+            why=why,
+            decided_at=datetime.now(UTC),
+            moved=moved,
+        )
+        self.plan = plan
 
     def request_replan(self, snapshot: Snapshot) -> None:
         """Re-plan now (rules) or in the background (a planner). Call from the event loop."""
@@ -136,7 +161,10 @@ class Placement:
         async with self._planning:
             connected, known = snapshot()
             needs = self._needs()
-            self.plan = await asyncio.to_thread(planner, needs, connected, known, self.plan)
+            plan, made_by, why = await asyncio.to_thread(
+                planner, needs, connected, known, self.plan
+            )
+            self._use(plan, made_by, why)
 
     def orders(self, node_id: str, reports: dict[str, list[JobStatus]]) -> list[Order]:
         """The orders for `node_id`, given the latest job reports of every connected laptop.

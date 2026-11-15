@@ -1,5 +1,5 @@
-"""`layer2-coordinator --config <coordinator.json>`: runs the control and dashboard servers
-until the stop file appears.
+"""`layer2-coordinator --config <coordinator.json>`: runs the control server (workers), the
+dashboard server and the bridge's server (client_port) until the stop file appears.
 
 Exit codes (contracts/README.md): 0 stopped normally, 2 bad config, 1 anything else.
 """
@@ -19,6 +19,7 @@ from layer2 import settings
 from layer2.contracts import CoordinatorConfig
 from layer2.coordinator.ai_plan import choose_plan
 from layer2.coordinator.event_log import EventLog
+from layer2.coordinator.inbox import Subscriptions, create_client_app
 from layer2.coordinator.plan import JobNeed, LaptopView, Placement, Plan
 from layer2.coordinator.registry import Registry
 from layer2.coordinator.server import create_control_app, create_dashboard_app
@@ -34,8 +35,8 @@ EXIT_BAD_CONFIG = 2
 
 
 class _Server(uvicorn.Server):
-    """Two servers share one process, so neither may take over the signal handlers;
-    stop_signals handles them for both."""
+    """Three servers share one process, so none may take over the signal handlers;
+    stop_signals handles them for all."""
 
     @contextlib.contextmanager
     def capture_signals(self) -> Generator[None]:
@@ -75,9 +76,11 @@ async def _log_when_ready(servers: list[_Server], config: CoordinatorConfig) -> 
     while not all(server.started for server in servers):
         await asyncio.sleep(settings.STOP_POLL_S)
     log.info(
-        "L2 coordinator: ready; workers join on port %s, dashboard on 127.0.0.1:%s, stop file %s",
+        "L2 coordinator: ready; workers join on port %s, dashboard on 127.0.0.1:%s, "
+        "bridge on 127.0.0.1:%s, stop file %s",
         config.listen_port,
         config.dashboard_port,
+        config.client_port,
         config.stop_file,
     )
 
@@ -93,16 +96,19 @@ async def _serve(config: CoordinatorConfig) -> int:
 
     def planner(
         needs: list[JobNeed], connected: list[LaptopView], known: set[str], previous: Plan
-    ) -> Plan:
-        plan, _ = choose_plan(config.ollama_url, needs, connected, known, previous, planner_log)
-        return plan
+    ) -> tuple[Plan, str, str]:
+        return choose_plan(config.ollama_url, needs, connected, known, previous, planner_log)
 
     placement = Placement(_job_needs, planner=planner)
     events = EventLog(Path(config.state_dir) / "events")
-    control = create_control_app(config, registry, placement, events)
+    subscriptions = Subscriptions()
+    control = create_control_app(config, registry, placement, events, subscriptions)
     servers = [
         _server(control, "0.0.0.0", config.listen_port),
-        _server(create_dashboard_app(registry, placement), "127.0.0.1", config.dashboard_port),
+        _server(
+            create_dashboard_app(registry, placement, events), "127.0.0.1", config.dashboard_port
+        ),
+        _server(create_client_app(subscriptions), "127.0.0.1", config.client_port),
     ]
     stop_file = Path(config.stop_file)
     stopping = asyncio.Event()

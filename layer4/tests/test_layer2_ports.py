@@ -1,13 +1,16 @@
+import json
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta, timezone
+from pathlib import Path
 from typing import Literal
 
 import pytest
 
 from layer2.job_client import Layer2Error
+from layer4.alerts import Alert, AlertKind, Severity
 from layer4.events import new_event
-from layer4.layer2_ports import Layer2EventLog, Layer2Model
+from layer4.layer2_ports import Layer2EventLog, Layer2Model, Layer2Phone, alert_message
 from layer4.ports import PortError, Quality
 from layer4.records import to_record
 from layer4.signals import FallSignal
@@ -25,6 +28,8 @@ class FakeClient:
         self.logged: list[dict[str, object]] = []
         self.rows: list[Mapping[str, object]] = []
         self.asked: list[tuple[str, str]] = []
+        self.sent: list[tuple[str, dict[str, object]]] = []
+        self.failures_left = 0
         self.fail = fail
 
     def _check(self) -> None:
@@ -43,6 +48,15 @@ class FakeClient:
         self._check()
         self.asked.append((prompt, quality))
         return Answer(text="YES")
+
+    def to_phone(
+        self, kind: Literal["alerts", "replies", "status", "reports"], message: dict[str, object]
+    ) -> None:
+        self._check()
+        if self.failures_left:
+            self.failures_left -= 1
+            raise Layer2Error("the bridge did not answer")
+        self.sent.append((kind, message))
 
 
 def test_append_writes_the_record() -> None:
@@ -89,3 +103,52 @@ def test_outside_a_layer2_job_the_ports_cannot_be_built(monkeypatch: pytest.Monk
     monkeypatch.delenv("LAYER2_GATEWAY", raising=False)
     with pytest.raises(PortError, match="LAYER2_GATEWAY"):
         from_environment()
+
+
+CONTRACTS = Path(__file__).resolve().parents[2] / "contracts"
+
+
+def contract_alert(update: bool = False) -> Alert:
+    """The alert in contracts/alert.json, with its time in another zone and with microseconds."""
+    eastern = timezone(timedelta(hours=-5))
+    return Alert(
+        alert_id="6f1c2a8e-3b7d-4f0a-9c55-2e8d1a4b7f90",
+        kind=AlertKind.FALL,
+        severity=Severity.URGENT,
+        detected_at=datetime(2026, 11, 13, 22, 12, 0, 734512, tzinfo=eastern),
+        title="Possible fall",
+        body="A possible fall was seen at 10:12 PM",
+        update=update,
+    )
+
+
+def test_an_alert_is_sent_exactly_as_contracts_alert_json_shapes_it() -> None:
+    example = json.loads((CONTRACTS / "alert.json").read_text(encoding="utf-8"))
+    assert alert_message(contract_alert()) == example
+
+
+def test_a_rewrite_is_sent_as_an_update() -> None:
+    assert alert_message(contract_alert(update=True))["update"] is True
+
+
+def test_the_phone_retries_with_the_same_alert_until_it_is_delivered() -> None:
+    client = FakeClient()
+    client.failures_left = 2
+    waits: list[float] = []
+    Layer2Phone(client, attempts=3, retry_wait_s=0.5, sleep=waits.append).send_alert(
+        contract_alert()
+    )
+    assert client.sent == [("alerts", alert_message(contract_alert()))]
+    assert waits == [0.5, 0.5]
+
+
+def test_the_phone_gives_up_after_its_attempts_with_a_port_error() -> None:
+    client = FakeClient()
+    client.failures_left = 5
+    waits: list[float] = []
+    with pytest.raises(PortError, match="alert not delivered"):
+        Layer2Phone(client, attempts=3, retry_wait_s=0.5, sleep=waits.append).send_alert(
+            contract_alert()
+        )
+    assert client.sent == []
+    assert waits == [0.5, 0.5]

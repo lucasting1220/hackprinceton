@@ -59,6 +59,16 @@ AUDIO_HOST_INTERFACES: dict[str, str] = {
 # The host interface that converts a mic's own rate only when it is asked to.
 AUDIO_INTERFACE_NEEDING_CONVERT_REQUEST: str = "Windows WASAPI"
 
+# The capture job (contracts/frame-feed.json).
+JPEG_QUALITY: int = 80
+# Proposed in docs/layer3-raw-data.md, not yet confirmed: how long to wait before reopening a
+# camera or mic that failed.
+DEVICE_RETRY_SECONDS: float = 3.0
+# Origins of Layer 1's live-view sender page, the only page /live accepts (Layer 1's ask T5).
+LIVE_VIEW_ORIGINS: tuple[str, ...] = ("http://127.0.0.1:7470", "http://localhost:7470")
+# How long a feed client waits for a new item before checking whether it should stop.
+FEED_WAIT_SECONDS: float = 1.0
+
 # How many measured times of each kind of watch reading the receiver remembers, to recognise a
 # reading that is sent again. Once it has had to forget some, a reading measured at or before
 # the newest time it forgot counts as a repeat.

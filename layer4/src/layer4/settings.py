@@ -26,6 +26,34 @@ FALL_SIGNAL_WINDOW = timedelta(seconds=1)
 FALL_FRAME_MAX_AGE = timedelta(seconds=2)
 FALL_DETECTION_GAP = timedelta(seconds=5)
 
+# Reading body pose. Lengths are in fractions of the frame height. The torso is the line from
+# mid-hip to mid-shoulder; its angle is measured from straight up. Lying down means the torso
+# tilts at least the lying angle, or looks shorter than the foreshortened ratio of its last
+# upright length (lying toward or away from the camera). Sitting means the hips are within the
+# sitting ratio of a torso length of the knees, vertically.
+POSE_MIN_VISIBILITY = 0.5
+POSE_MIN_TORSO = 0.02
+POSE_UPRIGHT_ANGLE_DEG = 30.0
+POSE_LYING_ANGLE_DEG = 60.0
+POSE_FORESHORTENED_RATIO = 0.5
+POSE_SITTING_HIP_KNEE_RATIO = 0.35
+
+# Falls from body pose. A fall is scored once the resident has been lying for the settle time.
+# Standing height is the highest the hips were while upright within the slow descent before
+# lying. The score is the smaller of two marks: how far the hips dropped from standing height,
+# in upright torso lengths (full marks at the full drop), and how long the descent took (full
+# marks at or under the fast descent, none at or over the slow one), timed from the last upright
+# moment with the hips within the standing tolerance (torso lengths) of standing height. One fall
+# gives one score; the next needs the resident upright.
+FALL_SETTLE = timedelta(seconds=0.5)
+FALL_HIP_DROP_FULL = 1.0
+FALL_DESCENT_FAST = timedelta(seconds=1.2)
+FALL_DESCENT_SLOW = timedelta(seconds=3)
+FALL_STANDING_TOLERANCE = 0.15
+
+# MediaPipe follows this many people per frame: one, the resident.
+POSE_MODEL_PEOPLE = 1
+
 # Alert rewrite: how much of the event log the quick model sees (proposed in the Layer 4 doc),
 # and the longest rewrite the phone is sent; a longer one is dropped and the template stands.
 REWRITE_CONTEXT = timedelta(minutes=10)
@@ -70,3 +98,41 @@ class RuleThresholds:
                 f"monitoring_stopped_after must be a positive timedelta, "
                 f"got {self.monitoring_stopped_after!r}"
             )
+
+
+# Sending alerts: how many times to try one alert, and the wait between tries. Every try carries
+# the same alert_id, which the bridge treats as the same alert (contracts/README.md, alerts).
+ALERT_SEND_ATTEMPTS = 3
+ALERT_RETRY_WAIT_S = 1.0
+
+# The fall_model job. It downloads the pose model once and checks its SHA-256: the hash is the
+# "latest" file that passed the webcam tests, so if Google replaces it the download is refused
+# and reported instead of running an untested model. It checks every
+# FALL_HEALTH_CHECK_S whether fall detection has stopped, and retries a model it cannot open
+# every FALL_MODEL_RETRY_S.
+POSE_MODEL_URL = (
+    "https://storage.googleapis.com/mediapipe-models/pose_landmarker/"
+    "pose_landmarker_full/float16/latest/pose_landmarker_full.task"
+)
+POSE_MODEL_SHA256 = "4eaa5eb7a98365221087693fcc286334cf0858e2eb6e15b506aa4a7ecdcec4ad"
+POSE_MODEL_DOWNLOAD_TIMEOUT_S = 60.0
+FALL_HEALTH_CHECK_S = 10.0
+FALL_MODEL_RETRY_S = 30.0
+
+# Speech-to-text (the speech_to_text job). Mic chunks are 16 kHz mono (contracts/frame-feed.json).
+# A chunk is speech when the voice detector's score reaches the threshold. An utterance ends after
+# the silence end or at the longest utterance. The transcriber waits on at most the queue size of
+# utterances; when it falls behind, the oldest is dropped. No mic chunk for the detection gap means
+# speech-to-text has stopped; that is checked every STT_HEALTH_CHECK_S, and a model that cannot
+# open is retried every STT_MODEL_RETRY_S.
+MIC_SAMPLE_RATE = 16000
+STT_MODEL = "base.en"
+STT_COMPUTE_TYPE = "int8"
+STT_BEAM_SIZE = 1
+STT_VAD_THRESHOLD = 0.5
+STT_SILENCE_END = timedelta(seconds=1)
+STT_LONGEST_UTTERANCE = timedelta(seconds=10)
+STT_QUEUE_SIZE = 4
+STT_DETECTION_GAP = timedelta(seconds=5)
+STT_HEALTH_CHECK_S = 10.0
+STT_MODEL_RETRY_S = 30.0

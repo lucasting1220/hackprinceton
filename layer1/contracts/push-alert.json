@@ -1,0 +1,26 @@
+{
+  "aps": {
+    "alert": { "title": "Debbie", "body": "New alert from Debbie" },
+    "mutable-content": 1,
+    "interruption-level": "time-sensitive",
+    "sound": "default",
+    "thread-id": "alerts"
+  },
+  "debbie": {
+    "v": 1,
+    "home_id": "7a8e0c4e-5f1d-4c39-9d7e-1b2a3c4d5e6f",
+    "w": {
+      "v": 1,
+      "msg_id": "m1",
+      "type": "alert",
+      "sent_at": "2026-11-14T15:12:04Z",
+      "envelope": {
+        "v": 1,
+        "kid": "home",
+        "n": "AQEBAQEBAQEBAQEB",
+        "c": "0BzeC95SqoVDc7iksPSwudzZkdzDT36QUS4umN5FkEPfYD4T39eR454rofkWmpylF7-XOiA_K_5pz5U64g0IPchN2ltxik4euQINJsN_S6dmS9AWfhY_J3EpmiWUI83PurwF06sLNmH-mNHKkjdwRjoGnVacIohTpIvJt9kd6PZAzSWSX4M_KXSpInJo4rC8EAoPCSbNKhJFBBQw4Ac2HNYG8UwJTQDP09dkA076VOp4xpsj9I7KlvWGBlBnxOpB5VPYXC9zwE6lacW38xAIDO_nrMGPZJf19VeSJvjHTh0uDiiHGBzkXZ-hLJmi1oLVciwSL8t9sy-hVnylBCfoLZ90kZumDS1_O6c"
+      },
+      "collapse_id": "a1"
+    }
+  }
+}
