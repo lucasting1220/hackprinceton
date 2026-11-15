@@ -1,24 +1,29 @@
 /**
  * The bridge link (phone-hub.md §6.6): a worker laptop's bridge posts a sealed link_report to the
- * home laptop's bridge every LINK_REPORT_MS, and gets a sealed link_reply whose commands list is
- * empty until step 7. Both sides derive the link key from the join token's SHA-256 and the node ID,
+ * home laptop's bridge every LINK_REPORT_MS (LINK_CAMERA_REPORT_MS for the camera laptop), and gets
+ * a sealed link_reply carrying the commands queued for it, such as live view's. Both sides derive the link key from the join token's SHA-256 and the node ID,
  * so a node no longer in accepted-workers.json gets 403 unknown_node. Freshness and repeats follow
  * §2.5, kept in the LAN gateway's one memory of message IDs. Log lines name node IDs only, never a
- * token, a hash, a key or a report.
+ * token, a hash, a key, a report or a command (a live_view_open holds the sender token).
  */
 import { randomUUID } from "node:crypto";
 import type { AcceptedWorker, Home } from "./home.ts";
 import { AcceptedWorkersError, acceptedWorkers } from "./home.ts";
 import { errorMessage } from "./json-file.ts";
+import { type LinkCommand, parseLinkCommand } from "./live-view-commands.ts";
 import { errorReply, type Reply, type Route } from "./network-server.ts";
 import { linkKey, open, PhoneCryptoRefusal, seal } from "./phone-crypto.ts";
 import * as settings from "./settings.ts";
 import { isUtcTime, parseWrapper, utcSeconds, type Wrapper } from "./wire.ts";
 
-/** What a worker laptop reports: its setup state and what it is missing. */
+/**
+ * What a worker laptop reports: its setup state, what it is missing and, after its live view sender
+ * couldn't start or stopped by itself, that session's ID. The keys are the plaintext's (§6.6).
+ */
 export type LinkReport = Readonly<{
   state: string;
   missing: readonly Readonly<{ id: string; reason: string; required: boolean }>[];
+  live_view_lost?: string;
 }>;
 
 /** A linked laptop as the home laptop's page lists it. */
@@ -47,6 +52,7 @@ const REFUSED = {
 
 /** A report's state and missing items are shown on a page, so each is short plain text. */
 const STATE = /^[a-z_]{1,32}$/;
+const ID = /^[A-Za-z0-9._-]{1,64}$/;
 const MISSING_MAX = 32;
 const TEXT_MAX = 2000;
 const utf8 = new TextDecoder("utf-8", { fatal: true });
@@ -57,8 +63,9 @@ function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
 
 /** The report's fields, or undefined if they break §6.6's shape. */
 function parseReport(plaintext: Readonly<Record<string, unknown>>): LinkReport | undefined {
-  const { state, missing } = plaintext;
+  const { state, missing, live_view_lost: lost } = plaintext;
   if (typeof state !== "string" || !STATE.test(state) || !Array.isArray(missing)) return undefined;
+  if (lost !== undefined && (typeof lost !== "string" || !ID.test(lost))) return undefined;
   if (missing.length > MISSING_MAX) return undefined;
   const items = missing.map((item: unknown) => {
     if (!isRecord(item)) return undefined;
@@ -68,7 +75,8 @@ function parseReport(plaintext: Readonly<Record<string, unknown>>): LinkReport |
     return { id: String(id), reason: String(reason), required };
   });
   if (items.some((item) => item === undefined)) return undefined;
-  return { state, missing: items.filter((item) => item !== undefined) };
+  const report = { state, missing: items.filter((item) => item !== undefined) };
+  return lost === undefined ? report : { ...report, live_view_lost: lost };
 }
 
 /** A sealed message's plaintext as a JSON object, or undefined if it doesn't open or parse. */
@@ -122,6 +130,9 @@ export class LinkHub {
   readonly #log: (line: string) => void;
   readonly #workers: () => Promise<AcceptedWorker[]>;
   readonly #linked = new Map<string, LinkedLaptop>();
+  /** Commands waiting for each laptop's next report, oldest first. */
+  readonly #queued = new Map<string, LinkCommand[]>();
+  readonly #listeners = new Set<(nodeId: string, report: LinkReport) => void>();
 
   constructor(options: LinkHubOptions) {
     this.#home = options.home;
@@ -133,6 +144,32 @@ export class LinkHub {
 
   routes(): Route[] {
     return [{ method: "POST", path: "/v1/link", handle: (body) => this.report(body) }];
+  }
+
+  /**
+   * Queues `command` for laptop `nodeId`'s next report. A close for a session whose open is still
+   * waiting removes that open instead, so the laptop never starts a window that already ended.
+   */
+  queue(nodeId: string, command: LinkCommand): void {
+    const queued = this.#queued.get(nodeId) ?? [];
+    if (command.type === "live_view_close") {
+      const open = queued.findIndex(
+        (item) => item.type === "live_view_open" && item.session_id === command.session_id,
+      );
+      if (open !== -1) {
+        queued.splice(open, 1);
+        return;
+      }
+    }
+    queued.push(command);
+    while (queued.length > settings.LINK_COMMANDS_MAX) queued.shift();
+    this.#queued.set(nodeId, queued);
+  }
+
+  /** Calls `listener` with each accepted report; returns what stops it. */
+  onReport(listener: (nodeId: string, report: LinkReport) => void): () => void {
+    this.#listeners.add(listener);
+    return () => this.#listeners.delete(listener);
   }
 
   /** Each laptop's latest report, by node ID. */
@@ -162,6 +199,7 @@ export class LinkHub {
     const worker = workers.find((entry) => entry.node_id === nodeId);
     if (worker === undefined) {
       this.#linked.delete(nodeId);
+      this.#queued.delete(nodeId);
       return REFUSED.unknownNode;
     }
     const key = linkKey(worker.token_sha256, nodeId);
@@ -176,15 +214,22 @@ export class LinkHub {
     if (report === undefined) return REFUSED.badRequest;
     if (!this.#linked.has(nodeId)) this.#log(`L1 link: node ${nodeId} linked`);
     this.#linked.set(nodeId, { nodeId, reportedAt: utcSeconds(new Date(now)), ...report });
+    for (const listener of this.#listeners) listener(nodeId, report);
+    const commands = this.#queued.get(nodeId) ?? [];
+    this.#queued.delete(nodeId);
     const label = { homeId: this.#home.homeId, nodeId, type: "link_reply" };
-    const reply = sealLinkMessage(key, label, { in_reply_to: wrapper.msg_id, commands: [] }, now);
+    const reply = sealLinkMessage(key, label, { in_reply_to: wrapper.msg_id, commands }, now);
+    if (commands.length > 0) {
+      const types = commands.map((command) => command.type).join(", ");
+      this.#log(`L1 link: sent node ${nodeId} ${types}`);
+    }
     return { status: 200, body: reply };
   }
 }
 
 /** What one report over the link came to, for the worker laptop's page. */
 export type LinkOutcome =
-  | Readonly<{ ok: true }>
+  | Readonly<{ ok: true; commands: readonly LinkCommand[]; ignored: number }>
   | Readonly<{ ok: false; removed: boolean; reason: string }>;
 
 export interface LinkTarget {
@@ -231,9 +276,12 @@ export async function sendLinkReport(
     reply?.type === "link_reply" && reply.envelope.kid === nodeId
       ? openPlaintext(reply, key, homeId)
       : undefined;
-  const { in_reply_to: inReplyTo } = opened?.fields ?? {};
-  const ok = inReplyTo === sent.msg_id;
-  if (ok) return { ok: true };
+  const { in_reply_to: inReplyTo, commands } = opened?.fields ?? {};
+  if (inReplyTo === sent.msg_id && Array.isArray(commands)) {
+    const parsed = commands.map(parseLinkCommand);
+    const valid = parsed.filter((command) => command !== undefined);
+    return { ok: true, commands: valid, ignored: parsed.length - valid.length };
+  }
   return { ok: false, removed: false, reason: `the home laptop answered ${response.status}` };
 }
 

@@ -25,6 +25,7 @@ import {
   HUB_CLOSE,
   HUB_PATH,
   type HubFrame,
+  type LiveViewStartFrame,
   type PhoneEntry,
   parseRelayFrame,
 } from "./relay-protocol.ts";
@@ -49,6 +50,14 @@ export interface RelayLinkOutbox {
 /** Answers a relayed command as the LAN gateway does: lan-gateway.ts's commands(…, "relay"). */
 export type RelayCommands = (wrapper: Wrapper) => Promise<Reply>;
 
+/** The hub's side of live view: live-view-hub.ts's LiveViewHub. */
+export interface RelayLiveView {
+  /** Answers live_view_start: null when accepted, else the refusal's code. */
+  start(frame: LiveViewStartFrame): Promise<string | null>;
+  /** The relay ended a session. */
+  ended(sessionId: string, reason: string): void;
+}
+
 /** The link's times and limits; settings.ts's by default, tests pass shorter ones. */
 export interface RelayLinkTiming {
   readonly backoffMs: readonly number[];
@@ -67,6 +76,8 @@ export interface RelayLinkOptions {
   readonly phones: RelayLinkPhones;
   readonly outbox: RelayLinkOutbox;
   readonly commands: RelayCommands;
+  /** The hub's side of live view; without it every live_view_start is answered not_supported. */
+  readonly liveView?: RelayLiveView;
   readonly log?: (line: string) => void;
   /** The clock, in milliseconds since the Unix epoch; tests pass their own. */
   readonly now?: () => number;
@@ -186,6 +197,7 @@ export class RelayLink {
   readonly #phones: RelayLinkPhones;
   readonly #outbox: RelayLinkOutbox;
   readonly #commands: RelayCommands;
+  readonly #liveView: RelayLiveView | undefined;
   readonly #log: (line: string) => void;
   readonly #now: () => number;
   readonly #timing: RelayLinkTiming;
@@ -215,6 +227,7 @@ export class RelayLink {
     this.#phones = options.phones;
     this.#outbox = options.outbox;
     this.#commands = options.commands;
+    this.#liveView = options.liveView;
     this.#log = options.log ?? ((line: string) => console.log(line));
     this.#now = options.now ?? Date.now;
     this.#timing = { ...DEFAULT_TIMING, ...options.timing };
@@ -234,6 +247,16 @@ export class RelayLink {
 
   status(): RelayLinkStatus {
     return this.#status;
+  }
+
+  /** Tells the relay the hub ended live view session `sessionId`, if the link is up (§7.5). */
+  liveViewEnd(sessionId: string, reason: string): void {
+    const ws = this.#ws;
+    if (ws === undefined || !this.#welcomed) {
+      this.#log(`L1 relay link: couldn't tell the relay session ${sessionId} ended: not connected`);
+      return;
+    }
+    this.#send(ws, { type: "live_view_end", v: 1, session_id: sessionId, reason });
   }
 
   /** Ends the link and its connection; resolves once the connection closed, or after a wait. */
@@ -382,20 +405,40 @@ export class RelayLink {
         });
         return;
       case "live_view_start":
-        // The hub's side of live view is the next build step; until then it says so at once.
-        this.#log(`L1 relay link: refused live view session ${frame.session_id}: not built yet`);
-        this.#send(ws, {
-          type: "live_view_answer",
-          v: 1,
-          session_id: frame.session_id,
-          accepted: false,
-          reason: "not_supported",
+        this.#liveViewStart(ws, frame).catch((error: unknown) => {
+          this.#log(
+            `L1 relay link: live view session ${frame.session_id} failed: ${errorMessage(error)}`,
+          );
         });
         return;
       case "live_view_end":
-        this.#log(`L1 relay link: live view session ${frame.session_id} ended: ${frame.reason}`);
+        if (this.#liveView === undefined) {
+          this.#log(`L1 relay link: live view session ${frame.session_id} ended: ${frame.reason}`);
+        } else this.#liveView.ended(frame.session_id, frame.reason);
         return;
     }
+  }
+
+  /** Answers live_view_start through the hub's side of live view, or not_supported without one. */
+  async #liveViewStart(ws: WebSocket, frame: LiveViewStartFrame): Promise<void> {
+    let reason: string | null = "not_supported";
+    if (this.#liveView === undefined) {
+      this.#log(`L1 relay link: refused live view session ${frame.session_id}: no live view here`);
+    } else {
+      reason = await this.#liveView.start(frame).catch((error: unknown) => {
+        this.#log(
+          `L1 relay link: live view session ${frame.session_id} failed: ${errorMessage(error)}`,
+        );
+        return "internal";
+      });
+    }
+    this.#send(ws, {
+      type: "live_view_answer",
+      v: 1,
+      session_id: frame.session_id,
+      accepted: reason === null,
+      reason,
+    });
   }
 
   /** Marks the revoked phones removed, then sends the phone list, the outbox and heartbeats. */

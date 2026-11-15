@@ -31,7 +31,7 @@ const STOP_SIGNALS = ["SIGINT", "SIGTERM", "SIGHUP"] as const;
 export interface BridgeOptions
   extends Pick<
     SetupServerOptions,
-    "stateDir" | "repoRoot" | "port" | "log" | "homeOptions" | "laptop"
+    "stateDir" | "repoRoot" | "port" | "log" | "homeOptions" | "laptop" | "liveSender"
   > {
   /** Opens the setup page; the default browser by default (D4). */
   readonly open?: (url: string) => Promise<void>;
@@ -95,6 +95,7 @@ export async function startBridge(options: BridgeOptions) {
       log,
       relayUrl,
       liveView,
+      endLiveView: (sessionId: string, reason: string) => relayLink?.liveViewEnd(sessionId, reason),
       ...(outbox === undefined ? {} : { outbox }),
       ...(handoff === undefined ? {} : { handoff }),
     };
@@ -128,13 +129,14 @@ export async function startBridge(options: BridgeOptions) {
       log("L1 bridge: remote access is off: the phone list or the alerts couldn't start");
       return;
     }
-    const { gateway, phones: registry } = parts;
+    const { gateway, phones: registry, liveView: liveViewHub } = parts;
     relayLink = RelayLink.start({
       credential: credential.credential,
       homeKey: homeAlerts.homeKey,
       phones: registry,
       outbox: homeAlerts.outbox,
       commands: (wrapper) => gateway.commands(wrapper, "relay"),
+      ...(liveViewHub === undefined ? {} : { liveView: liveViewHub }),
       log,
       ...(options.relayTiming === undefined ? {} : { timing: options.relayTiming }),
     });
