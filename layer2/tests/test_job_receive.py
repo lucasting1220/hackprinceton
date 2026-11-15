@@ -1,9 +1,11 @@
-"""receive() and on_request(): the bridge's messages, bridge -> coordinator -> worker -> job."""
+"""receive(), on_request() and pass_on(): bridge or job -> coordinator -> worker -> job."""
 
 import asyncio
+import contextlib
 import json
 import urllib.error
 import urllib.request
+from collections.abc import AsyncIterator, Iterator
 from pathlib import Path
 from typing import Any, cast
 
@@ -13,12 +15,13 @@ from websockets.asyncio.client import ClientConnection
 
 from layer2 import settings
 from layer2.contracts import Deliver, MissingItem
-from layer2.job_client import Layer2
+from layer2.job_client import Layer2, Layer2Error
 from layer2.worker.client import WorkerState, run_worker
 from layer2.worker.gateway import Gateway, Relay
 
 TOKEN: str = contract("hello.json")["token"]
 REQUEST = {"request_id": "r-1", "device_id": "phone-1", "kind": "check_now", "text": ""}
+READING: dict[str, Any] = contract("watch-reading.json")
 
 
 def bridge_post(port: int, path: str, body: dict[str, Any]) -> int:
@@ -40,9 +43,9 @@ async def no_report(state: WorkerState, missing: list[MissingItem]) -> None:
     return
 
 
-def test_a_phone_request_reaches_the_job_that_takes_requests(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+@pytest.fixture
+def home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[tuple[int, Path]]:
+    """A real coordinator, and a worker config for it: (client_port, worker config path)."""
     monkeypatch.setattr(settings, "STATUS_INTERVAL_S", 0.1)
     monkeypatch.setattr(settings, "RETRY_DELAY_S", 0.1)
     monkeypatch.setattr(settings, "STOP_POLL_S", 0.05)
@@ -53,7 +56,6 @@ def test_a_phone_request_reaches_the_job_that_takes_requests(
     coordinator = json.loads(coordinator_config.read_text(encoding="utf-8"))
     running = Running(coordinator_config)
     wait_until_serving(coordinator["dashboard_port"])
-    client_port = coordinator["client_port"]
     (tmp_path / "worker-token").write_text(TOKEN, encoding="utf-8")
     worker = {
         **contract("worker.json"),
@@ -67,17 +69,41 @@ def test_a_phone_request_reaches_the_job_that_takes_requests(
     }
     config = tmp_path / "worker.json"
     config.write_text(json.dumps(worker), encoding="utf-8")
+    try:
+        yield coordinator["client_port"], config
+    finally:
+        Path(coordinator["stop_file"]).touch()
+        assert running.wait(settings.STOP_DEADLINE_S) == 0
+
+
+@contextlib.asynccontextmanager
+async def worker(config: Path) -> AsyncIterator[Gateway]:
+    """The worker's connection and its job gateway, running until the block ends."""
+    relay = Relay()
+    gateway = Gateway(relay)
+    await gateway.start()
+    stop = asyncio.Event()
+    task = asyncio.create_task(run_worker(config, TOKEN, no_report, stop, None, relay))
+    try:
+        yield gateway
+    finally:
+        stop.set()
+        await asyncio.wait_for(task, settings.STOP_DEADLINE_S)
+        await gateway.close()
+
+
+def job(gateway: Gateway) -> Layer2:
+    return Layer2(f"127.0.0.1:{gateway.port}", gateway.token)
+
+
+def test_a_phone_request_reaches_the_job_that_takes_requests(home: tuple[int, Path]) -> None:
+    client_port, config = home
 
     async def scenario() -> tuple[int, int, dict[str, Any] | None]:
-        relay = Relay()
-        gateway = Gateway(relay)
-        await gateway.start()
-        job = Layer2(f"127.0.0.1:{gateway.port}", gateway.token)
-        stop = asyncio.Event()
-        task = asyncio.create_task(run_worker(config, TOKEN, no_report, stop, None, relay))
-        try:
+        async with worker(config) as gateway:
+            taker = job(gateway)
             before = await asyncio.to_thread(bridge_post, client_port, "/v1/requests", REQUEST)
-            assert await asyncio.to_thread(job.receive, "requests", 0) is None  # subscribes
+            assert await asyncio.to_thread(taker.receive, "requests", 0) is None  # subscribes
             accepted = 0
             for _ in range(200):  # until the worker has joined and its subscription arrived
                 accepted = await asyncio.to_thread(
@@ -86,21 +112,59 @@ def test_a_phone_request_reaches_the_job_that_takes_requests(
                 if accepted == 202:
                     break
                 await asyncio.sleep(0.05)
-            received = await asyncio.to_thread(job.receive, "requests", 5)
-        finally:
-            stop.set()
-            await asyncio.wait_for(task, settings.STOP_DEADLINE_S)
-            await gateway.close()
+            received = await asyncio.to_thread(taker.receive, "requests", 5)
         return before, accepted, received
 
-    try:
-        before, accepted, received = asyncio.run(scenario())
-    finally:
-        Path(coordinator["stop_file"]).touch()
-        assert running.wait(settings.STOP_DEADLINE_S) == 0
+    before, accepted, received = asyncio.run(scenario())
     assert before == 503  # nobody took requests yet: the bridge retries
     assert accepted == 202
     assert received == REQUEST
+
+
+def test_one_job_passes_a_watch_reading_on_to_another(home: tuple[int, Path]) -> None:
+    _, config = home
+
+    async def scenario() -> tuple[str, dict[str, Any] | None]:
+        async with worker(config) as gateway:
+            sender, taker = job(gateway), job(gateway)
+            refused = ""
+            for _ in range(200):  # until the worker has joined
+                try:
+                    await asyncio.to_thread(sender.pass_on, "watch-readings", READING)
+                except Layer2Error as error:
+                    refused = str(error)
+                    if "no job is taking" in refused:
+                        break
+                await asyncio.sleep(0.05)
+            assert await asyncio.to_thread(taker.receive, "watch-readings", 0) is None
+            for _ in range(200):  # until its subscription arrived
+                try:
+                    await asyncio.to_thread(sender.pass_on, "watch-readings", READING)
+                    break
+                except Layer2Error:
+                    await asyncio.sleep(0.05)
+            received = await asyncio.to_thread(taker.receive, "watch-readings", 5)
+        return refused, received
+
+    refused, received = asyncio.run(scenario())
+    assert refused == "no job is taking watch-readings right now"
+    assert received == READING  # unchanged
+
+
+def test_a_job_cannot_pass_on_a_kind_only_the_bridge_sends() -> None:
+    async def scenario() -> str:
+        gateway = Gateway(Relay())
+        await gateway.start()
+        try:
+            with pytest.raises(Layer2Error) as error:
+                await asyncio.to_thread(
+                    job(gateway)._call, {"type": "pass_on", "kind": "requests", "body": REQUEST}
+                )
+        finally:
+            await gateway.close()
+        return str(error.value)
+
+    assert asyncio.run(scenario()) == "the request's fields are not valid"
 
 
 class FakeConnection:
