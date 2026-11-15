@@ -112,21 +112,33 @@ class Layer2Phone:
         self._sleep = sleep
 
     def send_alert(self, alert: Alert) -> None:
-        message = alert_message(alert)
+        self._send("alerts", alert_message(alert), f"alert {alert.alert_id}")
+
+    def send_status(self, status: dict[str, object]) -> None:
+        """A live status (contracts/live-status.json)."""
+        self._send("status", status, "live status")
+
+    def send_reply(self, reply: dict[str, object]) -> None:
+        """A reply to one question (contracts/reply.json)."""
+        self._send("replies", reply, f"reply to {reply.get('request_id')}")
+
+    def _send(
+        self, kind: Literal["alerts", "status", "replies"], message: dict[str, object], what: str
+    ) -> None:
         for attempt in range(1, self._attempts + 1):
             try:
-                self._client.to_phone("alerts", message)
+                self._client.to_phone(kind, message)
                 return
             except Layer2Error as err:
                 logger.warning(
-                    "L4 phone: alert %s not delivered (try %d of %d): %s",
-                    alert.alert_id,
+                    "L4 phone: %s not delivered (try %d of %d): %s",
+                    what,
                     attempt,
                     self._attempts,
                     err,
                 )
                 if attempt == self._attempts:
-                    raise PortError(f"alert not delivered: {err}") from err
+                    raise PortError(f"{what} not delivered: {err}") from err
                 self._sleep(self._retry_wait_s)
 
 

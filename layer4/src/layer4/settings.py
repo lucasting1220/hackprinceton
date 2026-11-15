@@ -141,3 +141,13 @@ STT_MODEL_RETRY_S = 30.0
 # 30 s), and how long to wait before asking again when Layer 2 cannot be reached.
 WATCH_WAIT_S = 25.0
 WATCH_RETRY_S = 5.0
+
+# Live status (contracts/live-status.json): a heart-rate change within HEART_TREND_STEADY_BPM of
+# the reading before is "steady"; no heart-rate reading for NO_HEART_DATA_AFTER sets no_heart_data.
+HEART_TREND_STEADY_BPM = 5
+NO_HEART_DATA_AFTER = timedelta(minutes=30)
+
+# Caregiver questions: the deep model's answer is cut to REPLY_BODY_MAX_CHARS (the bridge's limit,
+# contracts/README.md); a reply's title is REPLY_TITLE.
+REPLY_BODY_MAX_CHARS = 4000
+REPLY_TITLE = "Answer"
