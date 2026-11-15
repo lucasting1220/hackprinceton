@@ -44,7 +44,7 @@ def choose_plan(
     fallback = rule_plan(needs, connected, known, previous)
     if not needs or not connected:
         return fallback, "rules"
-    prompt = _prompt(needs, connected, previous)
+    prompt = planner_prompt(needs, connected, previous)
     try:
         text = generate(
             ollama_url,
@@ -62,7 +62,7 @@ def choose_plan(
     return plan, "ai"
 
 
-def _prompt(needs: list[JobNeed], connected: list[LaptopView], previous: Plan) -> str:
+def planner_prompt(needs: list[JobNeed], connected: list[LaptopView], previous: Plan) -> str:
     facts = {
         "laptops": [
             {
