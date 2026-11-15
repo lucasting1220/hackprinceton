@@ -9,7 +9,9 @@ started. Plain blocking Python with no dependencies beyond the standard library.
 
     answer = layer2.ask("Rewrite this alert: ...", quality="quick")
 
-So far: the event log and ask(). fan_out(), feed(), to_phone(), on_request() and status() come
+    home = layer2.status()     # the same data as the coordinator's /api/state
+
+So far: the event log, ask() and status(). fan_out(), feed(), to_phone() and on_request() come
 with later build steps.
 """
 
@@ -71,6 +73,13 @@ class Layer2:
             request["day"] = day.isoformat()
         events: list[dict[str, Any]] = self._call(request).get("events", [])
         return events
+
+    def status(self) -> dict[str, Any]:
+        """Which laptops the coordinator knows (with `last_status_at`, so a quiet one can be
+        spotted), the jobs each runs, and the work the plan dropped: the /api/state data
+        (contracts/api-state.json)."""
+        state: dict[str, Any] = self._call({"type": "state_read"})["state"]
+        return state
 
     def ask(self, prompt: str, quality: Literal["quick", "deep"] = "quick") -> Answer:
         """One language model request. Can take many seconds: never call it before sending
