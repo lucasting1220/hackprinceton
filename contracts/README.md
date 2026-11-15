@@ -95,3 +95,23 @@ Added Nov 15 from the field list that the Layer 1, Layer 4 and phone-hub documen
 - **`title` and `body`:** plain text written by Layer 4, shown on the phone as received. A clock time in `body` uses the local time zone of the laptop that runs Layer 4; every laptop in a home is in the same place, so version 1 adds no time zone field.
 - **`update`:** `false` for the template alert, sent at once without waiting on a model. A model's rewrite follows as a second message with the same `alert_id` and `update: true`; only `title` and `body` may differ, and the phone replaces the earlier text.
 - **Privacy:** an alert never holds video, audio or a transcript.
+
+## Layer 1 to Layer 3: watch data
+
+Added Nov 15 from the field list that the Layer 1 doc ("Handoff to Layer 4"), `layer1/contracts/phone-hub.md` §3 and the Layer 3 doc already agree on. One batch of watch readings from the resident's phone, on its way to Layer 3's watch data receiver.
+
+| File | Written by | Read by | What it is |
+|---|---|---|---|
+| `watch-data.json` | Layer 1 bridge | Layer 3's watch data receiver, carried unchanged by Layer 2's coordinator | One batch of heart-rate, sleep and steps readings |
+
+### Rules that go with this file
+
+- **Path:** the bridge posts the object to the coordinator at `POST /v1/watch-data` on `client_port`. The coordinator answers 202 once the worker whose job takes `watch-data` has it, or 503 when no job takes it. Layer 3 gets the same object from `layer2.receive("watch-data")`.
+- **On the wire:** `device_id` and the three lists `heart_rate`, `sleep` and `steps`, each of which may be empty, with only the fields in the example on each row. `schema_version` and `type` are optional in version 1: the bridge does not send them today, and Layer 3 takes a batch with or without them.
+- **Times:** `measured_at`, `bedtime_at` and `wake_at` are in UTC and carry their time zone, between 1970-01-02 and 2999-12-31, the range Layer 4 accepts. `night_of` is a `YYYY-MM-DD` date in the same range.
+- **Counts:** `bpm` and `asleep_minutes` are numbers and may be decimals; `interruptions` and `steps_today` are whole numbers; none is below 0. Layer 3 passes every count on as a whole number, rounding a decimal to the nearest, halves up, and refuses a `bpm` below 1, because Layer 4 takes a whole number above 0.
+- **`measured_at` for steps** is the moment the count was read, so a later count on the same day is a new reading.
+- **Repeats:** Layer 3 passes a reading on once. The same kind with the same measured time is a repeat; a sleep record's measured time is its `wake_at`.
+- **What Layer 3 refuses:** a reading that breaks a rule above is refused and counted, and the rest of the batch is still read. The bridge already answers the phone 400 for a batch that is malformed as a whole.
+- **Names Layer 3 does not read:** it reads only the three lists. `device_id`, `type`, `schema_version`, `msg_id` and `sent_at` are expected and not read; any other top-level name is logged as a warning.
+- **What Layer 3 passes on** has no contract file yet: Layer 2 has no call that takes a job's watch readings.
