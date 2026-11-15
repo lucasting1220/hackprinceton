@@ -1,0 +1,8 @@
+{
+  "schema_version": 1,
+  "name": "capture",
+  "start_command": ["uv", "run", "--project", "../..", "python", "-m", "layer3.capture_job"],
+  "kind": "always-on",
+  "memory_gb": 0.5,
+  "sensor": "camera"
+}
