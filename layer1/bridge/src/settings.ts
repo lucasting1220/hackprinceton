@@ -432,3 +432,77 @@ export const WORKER_MIN_MEMORY_GB = 16;
 
 /** Check this laptop: below this much free disk, in GiB, the page warns. */
 export const LAPTOP_LOW_DISK_GB = 10;
+
+/** The longest signaling URL a live_view_open command may carry, in characters. */
+export const LIVE_VIEW_COMMAND_URL_MAX_CHARS = 2_048;
+
+/** The most commands the hub keeps waiting for one laptop, and sends in one link_reply. */
+export const LINK_COMMANDS_MAX = 16;
+
+/** How often a laptop with a camera reports over the link, so a live view start reaches it within about a second. */
+export const LINK_CAMERA_REPORT_MS = 1_000;
+
+/** A camera laptop whose link has been quiet this long can't take a live view session; one running ends as lost. */
+export const LIVE_VIEW_LINK_QUIET_MS = 15_000;
+
+/** How often the hub checks the camera laptop's link during a live view session. */
+export const LIVE_VIEW_LINK_CHECK_MS = 1_000;
+
+/** How long the hub waits for Layer 2's GET /api/state when it looks for the camera laptop. */
+export const LIVE_VIEW_API_STATE_TIMEOUT_MS = 3_000;
+
+/** The camera laptop's local path for the live view sender page, served only during a session. */
+export const LIVE_SENDER_PATH = "/live-sender";
+
+/** The sender browser's own profile folder, inside the state folder. */
+export const LIVE_SENDER_BROWSER_DIR = "live-sender-browser";
+
+/** Chrome's standard place on macOS. */
+export const LIVE_SENDER_MACOS_BROWSER =
+  "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
+
+/** On Windows: the program folders' environment variables, their usual values, and Chrome then Edge inside them. */
+export const LIVE_SENDER_WINDOWS_PROGRAM_DIRS = [
+  ["ProgramFiles", "C:\\Program Files"],
+  ["ProgramFiles(x86)", "C:\\Program Files (x86)"],
+] as const;
+export const LIVE_SENDER_WINDOWS_BROWSERS = [
+  ["Google", "Chrome", "Application", "chrome.exe"],
+  ["Microsoft", "Edge", "Application", "msedge.exe"],
+] as const;
+
+/** The sender browser's switches besides --app and --user-data-dir: one window, no prompts, never throttled in the background. */
+export const LIVE_SENDER_BROWSER_FLAGS = [
+  "--kiosk",
+  "--no-first-run",
+  "--no-default-browser-check",
+  "--autoplay-policy=no-user-gesture-required",
+  "--disable-background-timer-throttling",
+  "--disable-renderer-backgrounding",
+  "--disable-backgrounding-occluded-windows",
+] as const;
+
+/** How long the bridge waits for the previous sender browser to exit before it starts the next. */
+export const LIVE_SENDER_BROWSER_EXIT_WAIT_MS = 3_000;
+
+/** The live-view sender page: where Layer 3's frame feed listens on the camera laptop (contracts/frame-feed.json), and its two paths the page reads. */
+export const LIVE_SENDER_FEED_HOST = "127.0.0.1";
+export const LIVE_SENDER_VIDEO_PATH = "/live";
+export const LIVE_SENDER_AUDIO_PATH = "/mic";
+
+/** The sender page's canvas, the size of the frame feed's /live frames, and the most frames a second it draws and streams. */
+export const LIVE_SENDER_WIDTH = 640;
+export const LIVE_SENDER_HEIGHT = 480;
+export const LIVE_SENDER_MAX_FPS = 15;
+
+/** The frame feed's /mic messages: 8 bytes of captured_at, then 16 kHz mono s16le PCM. */
+export const LIVE_SENDER_MIC_HEADER_BYTES = 8;
+export const LIVE_SENDER_MIC_SAMPLE_RATE = 16_000;
+
+/** The sender page's jitter buffer: room audio is played this far behind, in seconds, and caught up when it falls further behind than the most. */
+export const LIVE_SENDER_AUDIO_LEAD_S = 0.3;
+export const LIVE_SENDER_AUDIO_MAX_LEAD_S = 1.5;
+
+/** How long the sender page waits for a WebSocket to open, and before it opens a closed frame feed socket again. */
+export const LIVE_SENDER_CONNECT_TIMEOUT_MS = 5_000;
+export const LIVE_SENDER_FEED_RETRY_MS = 1_000;

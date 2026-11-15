@@ -15,7 +15,8 @@ import { JoinPage, laptopsSection } from "./join-page.ts";
 import { errorMessage } from "./json-file.ts";
 import type { KeepAwakeStatus } from "./keep-awake.ts";
 import { type LaptopFacts, laptopCheckSection, readLaptopFacts } from "./laptop-check.ts";
-import { Laptop, type LaptopOptions } from "./laptop.ts";
+import { Laptop, type LaptopOptions, workerFiles } from "./laptop.ts";
+import { LiveSender, type LiveSenderOptions } from "./live-sender.ts";
 import type { LiveViewConsent } from "./live-view-consent.ts";
 import { LiveViewPage } from "./live-view-page.ts";
 import { CoordinatorLauncher, type CoordinatorStatus } from "./launcher.ts";
@@ -63,6 +64,8 @@ export interface SetupServerOptions {
   readonly laptopFacts?: () => Promise<LaptopFacts>;
   /** The resident's live view consent once the home is ready, for the Live view switch (step 7). */
   readonly liveView?: () => LiveViewConsent | undefined;
+  /** The camera laptop's sender window; tests pass a fake spawner and browser finder. */
+  readonly liveSender?: Pick<LiveSenderOptions, "spawn" | "findBrowser" | "now">;
 }
 
 /** What the setup page needs of keep-awake. */
@@ -76,6 +79,7 @@ export type PageReply =
   | { readonly status: number; readonly body: string }
   | { readonly redirect: string }
   | { readonly status: number; readonly css: string }
+  | { readonly status: number; readonly senderPage: string; readonly csp: string }
   | MachineReply;
 
 /** A machine route's answer: JSON, never a page. */
@@ -232,7 +236,21 @@ export async function startSetupServer(options: SetupServerOptions) {
   let closed = false;
   // Add a laptop (step 3). The role lock (A4): a laptop joining a home can't create one, and the
   // home laptop, or one creating its home, can't join one.
-  const laptop = new Laptop({ log, ...options.laptop, stateDir, repoRoot });
+  const liveSender = new LiveSender({
+    ...options.liveSender,
+    stateDir,
+    pageUrl: `${bridgeUrl}${settings.LIVE_SENDER_PATH}`,
+    workerConfigFile: workerFiles(stateDir).config,
+    onLost: (sessionId) => laptop.liveViewLost(sessionId),
+    log,
+  });
+  const laptop = new Laptop({
+    log,
+    ...options.laptop,
+    stateDir,
+    repoRoot,
+    linkCommands: liveSender,
+  });
   let creating = false;
   const roleTaken = () =>
     creating || existsSync(path.join(stateDir, settings.STATE_NAMES.home))
@@ -348,6 +366,13 @@ export async function startSetupServer(options: SetupServerOptions) {
       return body;
     }
   }
+  /** The camera laptop's sender page, only while a live view session is open. */
+  async function senderReply(): Promise<PageReply> {
+    const sender = liveSender.reply();
+    if (sender === undefined) return { status: 404, body: problemPage("No live view is open.") };
+    return { status: 200, senderPage: sender.page, csp: sender.csp };
+  }
+
   /** The route table: Create a home leaves the browser at /home, so GET shows the page there too. */
   const routes: PageRoute[] = [
     { method: "GET", path: "/", guard: "view", handle: showPage },
@@ -356,6 +381,7 @@ export async function startSetupServer(options: SetupServerOptions) {
     { method: "GET", path: "/home", guard: "view", handle: showPage },
     { method: "POST", path: "/home", guard: "form", handle: createHomeReply },
     { method: "POST", path: "/keep-awake/off", guard: "form", handle: turnOffKeepAwake },
+    { method: "GET", path: settings.LIVE_SENDER_PATH, guard: "view", handle: senderReply },
     ...pairingPage.routes(),
     alerts.route(),
     ...joinPage.routes(),
@@ -406,6 +432,9 @@ export async function startSetupServer(options: SetupServerOptions) {
     } else if ("css" in reply) {
       const css = { ...HEADERS, "content-type": "text/css; charset=utf-8" };
       response.writeHead(reply.status, css).end(reply.css);
+    } else if ("senderPage" in reply) {
+      const sender = { ...HEADERS, "content-security-policy": reply.csp };
+      response.writeHead(reply.status, sender).end(reply.senderPage);
     } else if ("json" in reply) {
       const json = { ...HEADERS, "content-type": "application/json" };
       response.writeHead(reply.status, json).end(JSON.stringify(reply.json));
@@ -425,6 +454,8 @@ export async function startSetupServer(options: SetupServerOptions) {
     homeReady,
     /** On a laptop that joined a home: starts its worker again, with its node ID and token. */
     resumeLaptop: () => laptop.resume(),
+    /** The camera laptop's sender window control, for tests. */
+    liveSender,
     /** Stops answering, then stops the coordinator, or this laptop's worker. */
     async close(): Promise<void> {
       closed = true;

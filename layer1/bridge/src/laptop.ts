@@ -29,6 +29,7 @@ import {
   workerCheckCommand,
 } from "./launcher.ts";
 import { errorKind, type LinkOutcome, type LinkReport, sendLinkReport } from "./link.ts";
+import type { LinkCommand } from "./live-view-commands.ts";
 import {
   checkedName,
   fromBase64url,
@@ -119,6 +120,19 @@ export interface LaptopOptions {
   readonly launcher?: Partial<Omit<WorkerLauncherOptions, "repoRoot" | "configFile" | "stopFile">>;
   /** Runs Layer 3's device list and check; tests pass a fake. */
   readonly runProgram?: ProgramRunner;
+  /** Takes the commands the home laptop's bridge sends over the link: live-sender.ts's LiveSender. */
+  readonly linkCommands?: LinkCommandHandler;
+}
+
+/** What runs the link's commands on this laptop, and stops with it. */
+export interface LinkCommandHandler {
+  handle(command: LinkCommand): Promise<void>;
+  close(): Promise<void>;
+}
+
+/** How often this laptop reports over the link: about every second with a camera, for live view. */
+export function linkReportInterval(sensors: Sensors): number {
+  return sensors.camera === null ? settings.LINK_REPORT_MS : settings.LINK_CAMERA_REPORT_MS;
 }
 
 /** laptop.json: what this laptop joined (Layer 1 only). */
@@ -501,6 +515,8 @@ export class Laptop {
   #link: LinkOutcome | undefined;
   #missing: readonly MissingItem[] = [];
   #sensors: Sensors = NO_SENSORS;
+  /** A live view session whose sender window couldn't start or closed, until a report says so. */
+  #liveViewLost: string | undefined;
   readonly #timers = new Set<NodeJS.Timeout>();
   /** The generation whose link reports run, so Check again starts no second loop. */
   #linking = -1;
@@ -655,11 +671,17 @@ export class Laptop {
     await this.#setUp(this.#generation);
   }
 
-  /** Stops the worker and every timer. */
+  /** Tells the home laptop, in the next link report, that live view session `sessionId` is lost. */
+  liveViewLost(sessionId: string): void {
+    this.#liveViewLost = sessionId;
+  }
+
+  /** Stops the worker, the sender window and every timer. */
   async close(): Promise<void> {
     this.#closed = true;
     this.#generation += 1;
     this.#stopTimers();
+    await this.#options.linkCommands?.close();
     await this.#launcher?.stop();
   }
 
@@ -868,10 +890,38 @@ export class Laptop {
         nodeId: joined.nodeId,
         tokenSha256: joined.tokenSha256,
       };
-      this.#link = await sendLinkReport(target, this.#report(), this.#now);
-      this.#later(this.#options.linkReportMs ?? settings.LINK_REPORT_MS, report);
+      const lost = this.#liveViewLost;
+      const sent = this.#report();
+      const outcome = await sendLinkReport(
+        target,
+        lost === undefined ? sent : { ...sent, live_view_lost: lost },
+        this.#now,
+      );
+      this.#link = outcome;
+      if (outcome.ok) {
+        if (this.#liveViewLost === lost) this.#liveViewLost = undefined;
+        this.#runCommands(outcome);
+      }
+      this.#later(this.#options.linkReportMs ?? linkReportInterval(this.#sensors), report);
     };
     this.#run(report());
+  }
+
+  /** Hands each command from the home laptop to its handler, in order; none without one. */
+  #runCommands(outcome: Extract<LinkOutcome, { ok: true }>): void {
+    if (outcome.ignored > 0) {
+      this.#log(`L1 laptop: ignored ${outcome.ignored} malformed command(s) from the home laptop`);
+    }
+    const handler = this.#options.linkCommands;
+    for (const command of outcome.commands) {
+      if (handler === undefined) {
+        this.#log(`L1 laptop: no handler here for ${command.type}; ignored`);
+        continue;
+      }
+      handler.handle(command).catch((error: unknown) => {
+        this.#log(`L1 laptop: ${command.type} failed: ${errorMessage(error)}`);
+      });
+    }
   }
 
   /** The link report: this laptop's setup state and what it is missing. */
