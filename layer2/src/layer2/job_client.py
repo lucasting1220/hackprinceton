@@ -1,5 +1,5 @@
 """The calls a job (Layer 3 or Layer 4) makes to Layer 2, from inside a job that Layer 2's worker
-started. Plain blocking Python with no dependencies beyond the standard library.
+started. Plain blocking Python.
 
     from layer2.job_client import Layer2
 
@@ -14,18 +14,24 @@ started. Plain blocking Python with no dependencies beyond the standard library.
     layer2.on_request(handle)          # each request from a phone, forever (Layer 4)
     reading = layer2.receive("watch-data")   # the next watch reading or None (Layer 3)
 
-So far: the event log, ask(), status(), to_phone(), receive() and on_request(). fan_out() and
-feed() come with later build steps.
+    for frame in layer2.feed("camera"):   # frame.data (JPEG), frame.captured_at (UTC)
+
+So far: the event log, ask(), status(), to_phone(), receive(), on_request() and feed().
+fan_out() comes with a later build step. feed() uses the websockets package, installed with
+layer2; everything else is the standard library.
 """
 
 import json
 import os
 import socket
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import UTC, date, datetime, timedelta
 from typing import Any, Literal
+
+from websockets.exceptions import WebSocketException
+from websockets.sync.client import connect as ws_connect
 
 _TIMEOUT_S = 15.0
 _ASK_TIMEOUT_S = 135.0  # longer than the worker's own limit on a model answer
@@ -38,23 +44,82 @@ class Answer:
     """The quality that actually answered: `deep` may be answered by `quick`."""
 
 
+@dataclass(frozen=True)
+class FeedItem:
+    """One camera frame or mic chunk from Layer 3's capture job."""
+
+    data: bytes
+    captured_at: datetime
+
+
+_EPOCH = datetime(1970, 1, 1, tzinfo=UTC)
+_FEED_OPEN_TIMEOUT_S = 5.0
+_FEED_MAX_MESSAGE_BYTES = 4 * 1024 * 1024
+_FEED_RETRY_S = 1.0
+
+
+def _feed_item(message: str | bytes) -> FeedItem | None:
+    """8 bytes of big-endian capture time in microseconds since 1970 UTC, then the data.
+    Anything else (text, or too short) is skipped."""
+    if isinstance(message, str) or len(message) <= 8:
+        return None
+    micros = int.from_bytes(message[:8], "big", signed=True)
+    try:
+        captured_at = _EPOCH + timedelta(microseconds=micros)
+    except OverflowError:
+        return None
+    return FeedItem(data=bytes(message[8:]), captured_at=captured_at)
+
+
 class Layer2Error(Exception):
     """Layer 2 refused or could not carry out the call; the message says why."""
 
 
 class Layer2:
-    def __init__(self, address: str, token: str) -> None:
+    def __init__(self, address: str, token: str, frame_feed: str | None = None) -> None:
         host, _, port = address.rpartition(":")
         self._address = (host, int(port))
         self._token = token
+        self._frame_feed = frame_feed
 
     @classmethod
     def from_env(cls) -> "Layer2":
         """Read the gateway address and secret that Layer 2's worker gave this job."""
         try:
-            return cls(os.environ["LAYER2_GATEWAY"], os.environ["LAYER2_GATEWAY_TOKEN"])
+            return cls(
+                os.environ["LAYER2_GATEWAY"],
+                os.environ["LAYER2_GATEWAY_TOKEN"],
+                os.environ.get("LAYER2_FRAME_FEED"),
+            )
         except KeyError:
             raise Layer2Error("not started by Layer 2's worker (LAYER2_GATEWAY not set)") from None
+
+    def feed(self, name: Literal["camera", "mic"]) -> Iterator[FeedItem]:
+        """Camera frames (`data` is a 640x480 JPEG) or mic chunks (`data` is 0.5 s of 16 kHz
+        mono 16-bit little-endian PCM) from Layer 3's capture job on this laptop, as they come
+        (contracts/frame-feed.json). Runs forever: if the capture job is not there yet or
+        restarts, it reconnects. A reader that falls behind gets the newest, never a backlog.
+        Stop by leaving the loop."""
+        if name not in ("camera", "mic"):
+            raise ValueError("name must be camera or mic")
+        if not self._frame_feed:
+            raise Layer2Error("no frame feed on this laptop (LAYER2_FRAME_FEED not set)")
+        url = f"ws://{self._frame_feed}/{name}"
+        while True:
+            try:
+                with ws_connect(
+                    url,
+                    open_timeout=_FEED_OPEN_TIMEOUT_S,
+                    max_size=_FEED_MAX_MESSAGE_BYTES,
+                    proxy=None,
+                ) as connection:
+                    for message in connection:
+                        item = _feed_item(message)
+                        if item is not None:
+                            yield item
+            except (OSError, TimeoutError, WebSocketException):
+                pass
+            time.sleep(_FEED_RETRY_S)
 
     def log_event(self, event: dict[str, Any]) -> None:
         """Store one event in the home's event log, on the coordinator."""

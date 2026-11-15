@@ -33,6 +33,15 @@ EXIT_REJECTED = 3
 _PROGRAM = "worker"
 
 
+def job_env(config: WorkerConfig, gateway: dict[str, str]) -> dict[str, str]:
+    """What every job on this worker gets in its environment (contracts/README.md, jobs)."""
+    return {
+        "LAYER2_NODE_ID": config.node_id,
+        "LAYER2_FRAME_FEED": f"127.0.0.1:{config.frame_feed_port}",
+        **gateway,
+    }
+
+
 async def _work(config_path: Path, config: WorkerConfig, token: str) -> int:
     stop_file = Path(config.stop_file)
     stop = asyncio.Event()
@@ -40,7 +49,7 @@ async def _work(config_path: Path, config: WorkerConfig, token: str) -> int:
     relay = Relay()
     gateway = Gateway(relay, config.ollama_url)
     await gateway.start()
-    env = {"LAYER2_NODE_ID": config.node_id, **gateway.env()}
+    env = job_env(config, gateway.env())
     runner = JobRunner(Path(config.state_dir) / "jobs", env)
     jobs = JobControl(runner, JobCatalog())
     with stop_signals(asyncio.get_running_loop(), stop):
